@@ -1,0 +1,88 @@
+2025-08-09 19:42:41,468 - INFO - 成功从CSV加载 1 个用户。
+2025-08-09 19:42:41,494 - INFO - 应用程序启动。
+2025-08-09 19:42:42,526 - INFO - 正在初始化摄像头...
+2025-08-09 19:42:43,159 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_1_80x80.png
+2025-08-09 19:42:43,165 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_1_80x80_transparent.png
+2025-08-09 19:42:43,194 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_2_80x80.png
+2025-08-09 19:42:43,203 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_2_80x80_transparent.png
+2025-08-09 19:42:43,233 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_3_80x80.png
+2025-08-09 19:42:43,237 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_3_80x80_transparent.png
+2025-08-09 19:42:43,267 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_4_80x80.png
+2025-08-09 19:42:43,274 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_4_80x80_transparent.png
+2025-08-09 19:42:43,299 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_5_80x80.png
+2025-08-09 19:42:43,305 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_5_80x80_transparent.png
+2025-08-09 19:42:43,319 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_6_80x80.png
+2025-08-09 19:42:43,320 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_6_80x80_transparent.png
+2025-08-09 19:42:43,347 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_7_80x80.png
+2025-08-09 19:42:43,352 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_7_80x80_transparent.png
+2025-08-09 19:42:43,372 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_8_80x80.png
+2025-08-09 19:42:43,377 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_8_80x80_transparent.png
+2025-08-09 19:42:43,403 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_9_80x80.png
+2025-08-09 19:42:43,410 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_9_80x80_transparent.png
+2025-08-09 19:42:43,428 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_10_80x80.png
+2025-08-09 19:42:43,437 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_10_80x80_transparent.png
+2025-08-09 19:42:43,452 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_11_80x80.png
+2025-08-09 19:42:43,459 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_11_80x80_transparent.png
+2025-08-09 19:42:43,474 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_12_80x80.png
+2025-08-09 19:42:43,481 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_12_80x80_transparent.png
+2025-08-09 19:42:43,513 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_13_80x80.png
+2025-08-09 19:42:43,520 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_13_80x80_transparent.png
+2025-08-09 19:42:43,541 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_14_80x80.png
+2025-08-09 19:42:43,547 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_14_80x80_transparent.png
+2025-08-09 19:42:43,562 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_15_80x80.png
+2025-08-09 19:42:43,572 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_15_80x80_transparent.png
+2025-08-09 19:42:43,583 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_16_80x80.png
+2025-08-09 19:42:43,589 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_16_80x80_transparent.png
+2025-08-09 19:42:43,604 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_17_80x80.png
+2025-08-09 19:42:43,609 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_17_80x80_transparent.png
+2025-08-09 19:42:43,616 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_18_80x80.png
+2025-08-09 19:42:43,619 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_18_80x80_transparent.png
+2025-08-09 19:42:43,632 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_19_80x80.png
+2025-08-09 19:42:43,635 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_19_80x80_transparent.png
+2025-08-09 19:42:43,647 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_20_80x80.png
+2025-08-09 19:42:43,649 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_20_80x80_transparent.png
+2025-08-09 19:42:43,657 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_21_80x80.png
+2025-08-09 19:42:43,659 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_21_80x80_transparent.png
+2025-08-09 19:42:43,677 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_22_80x80.png
+2025-08-09 19:42:43,681 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_22_80x80_transparent.png
+2025-08-09 19:42:43,694 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_23_80x80.png
+2025-08-09 19:42:43,696 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_23_80x80_transparent.png
+2025-08-09 19:42:43,720 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_24_80x80.png
+2025-08-09 19:42:43,720 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_24_80x80_transparent.png
+2025-08-09 19:42:43,741 - INFO - 成功创建缩放图片: temp_scaled_images/schulte_25_80x80.png
+2025-08-09 19:42:43,745 - INFO - 成功创建半透明图片: temp_scaled_images/schulte_25_80x80_transparent.png
+2025-08-09 19:42:43,869 - INFO - TestPage 初始化完成。
+2025-08-09 19:42:43,910 - INFO - 应用程序主窗口初始化完成。
+2025-08-09 19:42:46,663 - INFO - 用户 'admin' 登录成功。
+2025-08-09 19:42:46,664 - INFO - 正在切换到校准页面...
+2025-08-09 19:42:46,665 - INFO - 进入校准页面。
+2025-08-09 19:42:46,666 - INFO - 摄像头初始化线程已启动。
+2025-08-09 19:42:46,794 - INFO - 摄像头初始化成功。
+2025-08-09 19:42:50,969 - INFO - 用户完成设备校准。
+2025-08-09 19:42:50,970 - INFO - 正在切换到测试页面...
+2025-08-09 19:42:50,971 - INFO - TestPage.start_test() 已被调用。
+2025-08-09 19:42:51,387 - INFO - 离开校准页面。
+2025-08-09 19:42:54,388 - INFO - 开始录音...
+2025-08-09 19:42:54,805 - INFO - 录音结束。
+2025-08-09 19:42:54,814 - INFO - 录音已保存至: recordings/q_1_20250809_194254.wav
+2025-08-09 19:42:56,224 - INFO - 开始录音...
+2025-08-09 19:42:56,553 - INFO - 录音结束。
+2025-08-09 19:42:56,554 - INFO - 录音已保存至: recordings/q_2_20250809_194256.wav
+2025-08-09 19:42:57,904 - INFO - 开始录音...
+2025-08-09 19:42:58,215 - INFO - 录音结束。
+2025-08-09 19:42:58,216 - INFO - 录音已保存至: recordings/q_3_20250809_194258.wav
+2025-08-09 19:42:59,345 - INFO - 开始录音...
+2025-08-09 19:42:59,720 - INFO - 录音结束。
+2025-08-09 19:42:59,722 - INFO - 录音已保存至: recordings/q_4_20250809_194259.wav
+2025-08-09 19:43:00,756 - INFO - 开始录音...
+2025-08-09 19:43:01,159 - INFO - 录音结束。
+2025-08-09 19:43:01,161 - INFO - 录音已保存至: recordings/q_5_20250809_194301.wav
+2025-08-09 19:43:04,611 - INFO - 舒特格测试开始
+2025-08-09 19:43:04,613 - INFO - 测试数字范围: 13-37
+2025-08-09 19:43:04,613 - INFO - 正确点击序列: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+2025-08-09 19:43:50,432 - INFO - 舒特格测试结果已保存到 schulte_scores.csv
+2025-08-09 19:43:50,434 - INFO - 舒特格测试完成 - 用时: 45.71s, 准确率: 100.0%, 总点击: 25
+2025-08-09 19:43:58,530 - INFO - 舒特格测试完成，自动进入分数展示页面
+2025-08-09 19:44:32,802 - INFO - 应用程序正在关闭...
+2025-08-09 19:44:32,819 - INFO - 已清理临时图片文件
+2025-08-09 19:44:32,853 - INFO - 正在释放摄像头资源。

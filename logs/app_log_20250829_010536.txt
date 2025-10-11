@@ -1,0 +1,42 @@
+2025-08-29 01:05:36,714 - INFO - 成功从CSV加载 1 个用户。
+2025-08-29 01:05:36,728 - INFO - 应用程序启动。
+2025-08-29 01:05:37,169 - INFO - 正在初始化摄像头...
+2025-08-29 01:05:37,336 - ERROR - 无法打开摄像头！
+2025-08-29 01:05:37,447 - INFO - Could not import comtypes.gen, trying to create it.
+2025-08-29 01:05:37,447 - INFO - Created comtypes.gen directory: 'D:\Anaconda\anaconda3\envs\QT\lib\site-packages\comtypes\gen'
+2025-08-29 01:05:37,447 - INFO - Writing __init__.py file: 'D:\Anaconda\anaconda3\envs\QT\lib\site-packages\comtypes\gen\__init__.py'
+2025-08-29 01:05:37,459 - INFO - Using writeable comtypes cache directory: 'D:\Anaconda\anaconda3\envs\QT\lib\site-packages\comtypes\gen'
+2025-08-29 01:05:37,470 - INFO - Could not import comtypes.gen._C866CA3A_32F7_11D2_9602_00C04F8EE628_0_5_4: No module named 'comtypes.gen._C866CA3A_32F7_11D2_9602_00C04F8EE628_0_5_4'
+2025-08-29 01:05:37,472 - INFO - # Generating comtypes.gen._C866CA3A_32F7_11D2_9602_00C04F8EE628_0_5_4
+2025-08-29 01:05:37,517 - INFO - # Generating comtypes.gen.SpeechLib
+2025-08-29 01:05:37,522 - INFO - Could not import comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0: No module named 'comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0'
+2025-08-29 01:05:37,523 - INFO - # Generating comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0
+2025-08-29 01:05:37,526 - INFO - # Generating comtypes.gen.stdole
+2025-08-29 01:05:37,821 - INFO - TestPage 初始化完成。
+2025-08-29 01:05:37,832 - INFO - 应用程序主窗口初始化完成。
+2025-08-29 01:05:43,264 - INFO - 用户 'admin' 登录成功。
+2025-08-29 01:05:43,264 - INFO - 正在切换到校准页面...
+2025-08-29 01:05:43,264 - INFO - 进入校准页面。
+2025-08-29 01:05:43,264 - INFO - 摄像头初始化线程已启动。
+2025-08-29 01:05:43,765 - INFO - 模拟摄像头初始化成功。
+2025-08-29 01:05:45,514 - INFO - 用户完成设备校准。
+2025-08-29 01:05:45,515 - INFO - 正在切换到测试页面...
+2025-08-29 01:05:45,515 - INFO - TestPage.start_test() 已被调用。
+2025-08-29 01:05:45,519 - INFO - TestPage.start_test() 已被调用。
+2025-08-29 01:05:45,914 - INFO - 离开校准页面。
+2025-08-29 01:05:48,314 - INFO - 开始录音...
+2025-08-29 01:05:49,702 - INFO - 录音结束。
+2025-08-29 01:05:49,704 - INFO - 录音已保存至: recordings/q_1_20250829_010549.wav
+2025-08-29 01:05:54,074 - INFO - 开始录音...
+2025-08-29 01:05:54,589 - INFO - 录音结束。
+2025-08-29 01:05:54,590 - INFO - 录音已保存至: recordings/q_2_20250829_010554.wav
+2025-08-29 01:05:58,023 - INFO - 开始录音...
+2025-08-29 01:05:58,837 - INFO - 录音结束。
+2025-08-29 01:05:58,842 - INFO - 录音已保存至: recordings/q_3_20250829_010558.wav
+2025-08-29 01:06:00,927 - INFO - 开始录音...
+2025-08-29 01:06:01,924 - INFO - 录音结束。
+2025-08-29 01:06:01,924 - INFO - 录音已保存至: recordings/q_4_20250829_010601.wav
+2025-08-29 01:06:03,527 - INFO - 开始录音...
+2025-08-29 01:06:04,456 - INFO - 录音结束。
+2025-08-29 01:06:04,463 - INFO - 录音已保存至: recordings/q_5_20250829_010604.wav
+2025-08-29 01:06:07,276 - INFO - 应用程序正在关闭...

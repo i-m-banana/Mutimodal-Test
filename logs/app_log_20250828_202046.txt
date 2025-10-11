@@ -1,0 +1,68 @@
+2025-08-28 20:20:46,845 - INFO - 成功从CSV加载 1 个用户。
+2025-08-28 20:20:46,857 - INFO - 应用程序启动。
+2025-08-28 20:20:47,338 - INFO - 正在初始化摄像头...
+2025-08-28 20:20:47,470 - ERROR - 无法打开摄像头！
+2025-08-28 20:20:47,543 - INFO - TestPage 初始化完成。
+2025-08-28 20:20:47,551 - INFO - 应用程序主窗口初始化完成。
+2025-08-28 20:20:48,395 - INFO - 用户 'admin' 登录成功。
+2025-08-28 20:20:48,395 - INFO - 正在切换到校准页面...
+2025-08-28 20:20:48,395 - INFO - 进入校准页面。
+2025-08-28 20:20:48,395 - INFO - 摄像头初始化线程已启动。
+2025-08-28 20:20:48,906 - INFO - 模拟摄像头初始化成功。
+2025-08-28 20:20:49,518 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:49,628 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:49,737 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:49,844 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:49,953 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,064 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,175 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,283 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,391 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,501 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,610 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,718 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,831 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:50,940 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,047 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,156 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,269 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,375 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,484 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,596 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,703 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,815 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:51,923 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,032 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,141 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,251 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,359 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,468 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,579 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,688 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,798 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:52,908 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,017 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,125 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,235 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,345 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,453 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,564 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,673 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,785 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:53,890 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,000 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,109 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,219 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,331 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,441 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,549 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,656 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,766 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,878 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:54,985 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:55,094 - ERROR - 模拟摄像头更新失败: local variable 'QPixmap' referenced before assignment
+2025-08-28 20:20:55,149 - INFO - 用户完成设备校准。
+2025-08-28 20:20:55,149 - INFO - 正在切换到测试页面...
+2025-08-28 20:20:55,149 - INFO - TestPage.start_test() 已被调用。
+2025-08-28 20:20:55,551 - INFO - 离开校准页面。
+2025-08-28 20:20:58,223 - INFO - 应用程序正在关闭...

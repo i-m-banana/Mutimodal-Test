@@ -1,0 +1,132 @@
+
+    /* --- 全局字体和颜色 --- */
+    QWidget {
+        font-family: "Microsoft YaHei UI", "Segoe UI", Arial, sans-serif;
+        font-size: 15px;
+        color: #333;
+    }
+
+    /* --- 卡片式容器 --- */
+    #card, #loginForm, #cameraContainer {
+        background-color: white;
+        border-radius: 15px;
+    }
+
+    #cameraView {
+        background-color: #F5F5F5;
+        border-radius: 10px;
+    }
+
+    /* --- 标题和文本 --- */
+    #loginTitle {
+        font-size: 28px;
+        font-weight: bold;
+        color: #1A237E; /* 深靛蓝 */
+        margin-bottom: 10px;
+    }
+    #h1 {
+        font-size: 26px;
+        font-weight: bold;
+        color: #0D47A1; /* 深蓝 */
+    }
+    #h2 {
+        font-size: 18px;
+        color: #424242;
+    }
+    #subtitle {
+        font-size: 14px;
+        color: #757575;
+        margin-top: 5px;
+    }
+    #copyrightLabel {
+        color: #9E9E9E;
+        font-size: 12px;
+    }
+
+    /* --- 输入框 --- */
+    #loginInput {
+        border: 1px solid #CFD8DC;
+        border-radius: 8px;
+        padding: 15px;
+        font-size: 16px;
+        background-color: #ECEFF1;
+    }
+    #loginInput:focus {
+        border: 2px solid #1976D2;
+        background-color: white;
+    }
+
+    /* --- 按钮 --- */
+    QPushButton {
+        border: none;
+        border-radius: 25px;
+        font-size: 16px;
+        font-weight: bold;
+        color: white;
+        min-height: 50px;
+    }
+
+    /* 登录按钮 */
+    #loginButton {
+        background-color: #1976D2;
+    }
+    #loginButton:hover {
+        background-color: #1565C0;
+    }
+    #loginButton:pressed {
+        background-color: #0D47A1;
+    }
+
+    /* 成功/确认按钮 */
+    #successButton {
+        background-color: #388E3C;
+    }
+    #successButton:hover {
+        background-color: #2E7D32;
+    }
+    #successButton:pressed {
+        background-color: #1B5E20;
+    }
+
+    /* 完成评估按钮 */
+    #finishButton {
+        background-color: #FF5722;
+    }
+    #finishButton:hover {
+        background-color: #E64A19;
+    }
+    #finishButton:pressed {
+        background-color: #D84315;
+    }
+
+    /* --- 进度条 --- */
+    #calibrationProgressBar {
+        border: none;
+        border-radius: 4px;
+        background: #ECEFF1;
+    }
+    #calibrationProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #42A5F5, stop:1 #90CAF9);
+        border-radius: 4px;
+    }
+
+    /* --- 舒特格测试样式 --- */
+    #statusLabel {
+        font-size: 16px;
+        color: #424242;
+        font-weight: bold;
+    }
+
+    /* --- 消息框 --- */
+    QMessageBox {
+        background-color: #FFFFFF;
+    }
+    QMessageBox QLabel {
+        font-size: 15px;
+        color: #333;
+    }
+    QMessageBox QPushButton {
+        min-width: 90px;
+        background-color: #1976D2;
+    }
+    

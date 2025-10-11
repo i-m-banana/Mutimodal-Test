@@ -1,0 +1,48 @@
+2025-08-30 00:20:43,697 - INFO - 成功从CSV加载 1 个用户。
+2025-08-30 00:20:43,717 - INFO - 应用程序启动。
+2025-08-30 00:20:44,195 - INFO - Imported existing <module 'comtypes.gen' from 'C:\\Users\\zgy19\\AppData\\Roaming\\Python\\Python311\\site-packages\\comtypes\\gen\\__init__.py'>
+2025-08-30 00:20:44,196 - INFO - Using writeable comtypes cache directory: 'C:\Users\zgy19\AppData\Roaming\Python\Python311\site-packages\comtypes\gen'
+2025-08-30 00:20:44,534 - INFO - 正在初始化摄像头...
+2025-08-30 00:20:46,130 - INFO - TestPage 初始化完成。
+2025-08-30 00:20:46,151 - INFO - 应用程序主窗口初始化完成。
+2025-08-30 00:20:47,026 - INFO - 用户 'admin' 登录成功。
+2025-08-30 00:20:47,026 - INFO - 正在切换到校准页面...
+2025-08-30 00:20:47,546 - INFO - 进入校准页面。
+2025-08-30 00:20:47,550 - INFO - 摄像头初始化线程已启动。
+2025-08-30 00:20:48,052 - INFO - 模拟摄像头初始化成功。
+2025-08-30 00:20:50,162 - INFO - 用户完成设备校准。
+2025-08-30 00:20:50,162 - INFO - 正在切换到测试页面...
+2025-08-30 00:20:50,163 - INFO - TestPage.start_test() 已被调用。
+2025-08-30 00:20:50,164 - INFO - 语音答题会话目录: recordings\admin\20250830_002050
+2025-08-30 00:20:50,167 - INFO - TestPage.start_test() 已被调用。
+2025-08-30 00:20:50,168 - INFO - 语音答题会话目录: recordings\admin\20250830_002050
+2025-08-30 00:20:51,173 - INFO - 离开校准页面。
+2025-08-30 00:20:54,803 - INFO - 开始录音...
+2025-08-30 00:20:54,840 - INFO - 开始视频录制: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\1.avi @ 30.0fps (640, 480)
+2025-08-30 00:20:56,682 - INFO - 视频录制已停止，文件保存到: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\1.avi
+2025-08-30 00:20:56,690 - INFO - 录音结束。
+2025-08-30 00:20:56,692 - INFO - 录音已保存至: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\1.wav
+2025-08-30 00:20:59,223 - INFO - 开始录音...
+2025-08-30 00:20:59,245 - INFO - 开始视频录制: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\2.avi @ 30.0fps (640, 480)
+2025-08-30 00:21:00,477 - INFO - 视频录制已停止，文件保存到: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\2.avi
+2025-08-30 00:21:00,488 - INFO - 录音结束。
+2025-08-30 00:21:00,490 - INFO - 录音已保存至: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\2.wav
+2025-08-30 00:21:02,183 - INFO - 开始录音...
+2025-08-30 00:21:02,206 - INFO - 开始视频录制: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\3.avi @ 30.0fps (640, 480)
+2025-08-30 00:21:03,316 - INFO - 视频录制已停止，文件保存到: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\3.avi
+2025-08-30 00:21:03,326 - INFO - 录音结束。
+2025-08-30 00:21:03,328 - INFO - 录音已保存至: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\3.wav
+2025-08-30 00:21:05,229 - INFO - 开始录音...
+2025-08-30 00:21:05,252 - INFO - 开始视频录制: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\4.avi @ 30.0fps (640, 480)
+2025-08-30 00:21:06,676 - INFO - 视频录制已停止，文件保存到: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\4.avi
+2025-08-30 00:21:06,687 - INFO - 录音结束。
+2025-08-30 00:21:06,689 - INFO - 录音已保存至: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\4.wav
+2025-08-30 00:21:08,523 - INFO - 开始录音...
+2025-08-30 00:21:08,547 - INFO - 开始视频录制: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\5.avi @ 30.0fps (640, 480)
+2025-08-30 00:21:10,518 - INFO - 视频录制已停止，文件保存到: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\5.avi
+2025-08-30 00:21:10,530 - INFO - 录音结束。
+2025-08-30 00:21:10,532 - INFO - 录音已保存至: D:\pycharm_work\2025-8-9__Multimodal-Project\recordings\admin\20250830_002050\5.wav
+2025-08-30 00:21:11,206 - INFO - 正在释放摄像头资源。
+2025-08-30 00:21:11,679 - INFO - 语音答题环节结束，摄像头已关闭。
+2025-08-30 00:21:11,699 - ERROR - 写入数据库失败: (1049, "Unknown database 'test_db'")
+2025-08-30 00:21:49,696 - INFO - 应用程序正在关闭...

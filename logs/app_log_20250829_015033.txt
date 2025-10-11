@@ -1,0 +1,19 @@
+2025-08-29 01:50:33,395 - INFO - 成功从CSV加载 1 个用户。
+2025-08-29 01:50:33,411 - INFO - 应用程序启动。
+2025-08-29 01:50:33,862 - INFO - Imported existing <module 'comtypes.gen' from 'D:\\Anaconda\\anaconda3\\envs\\QT\\lib\\site-packages\\comtypes\\gen\\__init__.py'>
+2025-08-29 01:50:33,862 - INFO - Using writeable comtypes cache directory: 'D:\Anaconda\anaconda3\envs\QT\lib\site-packages\comtypes\gen'
+2025-08-29 01:50:34,094 - INFO - 正在初始化摄像头...
+2025-08-29 01:50:34,233 - ERROR - 无法打开摄像头！
+2025-08-29 01:50:34,304 - INFO - TestPage 初始化完成。
+2025-08-29 01:50:34,313 - INFO - 应用程序主窗口初始化完成。
+2025-08-29 01:50:35,080 - INFO - 用户 'admin' 登录成功。
+2025-08-29 01:50:35,080 - INFO - 正在切换到校准页面...
+2025-08-29 01:50:35,081 - INFO - 进入校准页面。
+2025-08-29 01:50:35,081 - INFO - 摄像头初始化线程已启动。
+2025-08-29 01:50:35,596 - INFO - 模拟摄像头初始化成功。
+2025-08-29 01:50:37,102 - INFO - 用户完成设备校准。
+2025-08-29 01:50:37,102 - INFO - 正在切换到测试页面...
+2025-08-29 01:50:37,103 - INFO - TestPage.start_test() 已被调用。
+2025-08-29 01:50:37,106 - INFO - TestPage.start_test() 已被调用。
+2025-08-29 01:50:37,530 - INFO - 离开校准页面。
+2025-08-29 01:50:44,118 - INFO - 应用程序正在关闭...
