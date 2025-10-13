@@ -1,0 +1,14 @@
+interfaces:
+  - name: websocket
+    class: interfaces.websocket_server.WebsocketPushInterface
+    enabled: true
+    options:
+      host: 127.0.0.1
+      port: 8765
+      topics:
+        - detector.result
+        - system.heartbeat
+        - camera.frame
+        - audio.level
+        - multimodal.frame
+        - multimodal.snapshot

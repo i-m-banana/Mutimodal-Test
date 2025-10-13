@@ -1,0 +1,15 @@
+# 多模态模型后端依赖
+
+# 核心框架
+websockets>=10.0
+
+# PyTorch生态
+torch>=1.13.0
+torchvision>=0.14.0
+
+# 图像处理
+pillow>=9.0.0
+numpy>=1.21.0
+
+# 工具库
+pyyaml>=6.0

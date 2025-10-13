@@ -1,0 +1,19 @@
+# 基础依赖
+websockets==11.0
+aiofiles==23.0
+
+# 深度学习框架
+torch==2.0.1
+torchvision==0.15.2
+transformers==4.30.0
+
+# 音频处理
+librosa==0.10.0
+soundfile==0.12.1
+
+# 视频处理
+opencv-python==4.7.0
+
+# 工具库
+numpy==1.24.3
+pillow==9.5.0

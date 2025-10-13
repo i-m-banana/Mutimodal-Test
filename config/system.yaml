@@ -1,0 +1,10 @@
+heartbeat_interval: 2.0
+enable_monitor: true
+collector_stop_timeout: 3.0
+
+# UI设置
+ui:
+  # 是否自动启动后端服务器进程
+  # true: UI启动时自动启动后端 (适合一键运行)
+  # false: 需要手动启动后端 (适合开发调试,后端在独立窗口运行)
+  auto_start_backend: false

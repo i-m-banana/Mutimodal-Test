@@ -1,0 +1,56 @@
+models:
+  - name: vision
+    class: models.torch_model.TorchModel
+    enabled: true
+    options:
+      jit: true
+  - name: text_ocr
+    class: models.onnx_model.ONNXModel
+    enabled: false
+    path: null
+    options:
+      providers:
+        - CPUExecutionProvider
+
+# 多模型后端配置 (独立Python进程)
+# 每个模型后端运行在独立的Python环境中,通过WebSocket与主后端通信
+model_backends:
+  # 多模态疲劳检测模型后端
+  - name: multimodal_backend
+    type: multimodal
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8766
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      timeout: 5.0
+      batch_size: 1
+  
+  # 情绪识别模型后端
+  - name: emotion_backend
+    type: emotion
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8767
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      confidence_threshold: 0.7
+      timeout: 5.0
+  
+  # 脑电分析模型后端
+  - name: eeg_backend
+    type: eeg
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8768
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      sampling_rate: 250
+      channels: 8
+      timeout: 5.0
