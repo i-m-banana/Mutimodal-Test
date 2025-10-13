@@ -1,242 +1,486 @@
-# Multimodal Platform (Refactored)
+# Multimodal Platform# Multimodal Platform (Refactored)
 
-该项目基于 `Multimodal-Project` 旧版代码，按模块化架构重构，形成可配置、可扩展且便于测试的多模态采集与检测平台。
 
-## 功能亮点
 
-- **配置驱动**:通过 YAML 文件启停 Collector / Detector / Model。
-- **事件解耦**:内部组件经事件总线通信,易于扩展新功能。
-- **多模态采集**:内置摄像头、传感器、文件目录三类采集器,支持硬件与模拟双模式。
-- **统一模型管理**:PyTorch / ONNX 模型统一注册与推理调用。
-- **可观测性**:标准化日志输出 + 系统心跳事件,便于运维监控。
-- **🚀 多模型后端架构**:支持将不同环境的AI模型部署为独立后端服务,通过WebSocket与主后端通信,实现完全的环境隔离。
+一个模块化、可配置、可扩展的多模态数据采集与检测平台，支持音视频、脑电（EEG）、多模态传感器等数据源的统一管理和智能分析。该项目是一个模块化的多模态采集与检测平台，支持配置驱动、可扩展且便于测试。
 
-## 近期重要改动(2025-10 & 2025-01)
 
-### 🚀 多模型后端架构 (2025-01-XX)
 
-为解决不同AI模型(多模态、情绪、脑电)需要不同Python环境的问题,新增了基于WebSocket的微服务架构:
+## ✨ 功能特性## 功能亮点
 
-#### 核心组件
-- **BaseModelBackend** (`model_backends/base/`): 抽象基类,提供WebSocket服务器框架
-- **ModelBackendClient** (`src/interfaces/model_ws_client.py`): 异步WebSocket客户端,支持自动重连
-- **ModelProxyService** (`src/services/model_proxy_service.py`): 代理服务,管理多个模型后端连接
-- **示例实现** (`model_backends/multimodal_backend/`): 完整的PyTorch多模态模型后端模板
 
-#### 架构优势
-- ✅ **完全环境隔离**: 每个模型运行在独立Python环境/进程中,避免依赖冲突
-- ✅ **独立进程管理**: 模型崩溃不影响主系统,自动重连机制保证可靠性
-- ✅ **标准化接口**: 统一的WebSocket协议,快速添加新模型
-- ✅ **生产级错误处理**: Future-based API + 超时控制 + 健康检查
+
+- **🎯 配置驱动**: 通过 YAML 文件灵活配置采集器、检测器和模型- **配置驱动**: 通过 YAML 文件启停 Collector / Detector / Model
+
+- **🔌 事件解耦**: 基于事件总线的松耦合架构，易于扩展新功能- **事件解耦**: 内部组件经事件总线通信，易于扩展新功能
+
+- **📹 多模态采集**: 支持摄像头、传感器、文件等多种数据源，硬件/模拟模式自动切换- **多模态采集**: 内置摄像头、传感器、文件目录三类采集器，支持硬件与模拟双模式
+
+- **🤖 统一模型管理**: PyTorch/ONNX 模型统一注册与推理调用- **统一模型管理**: PyTorch / ONNX 模型统一注册与推理调用
+
+- **📊 可观测性**: 标准化日志输出和系统心跳监控- **可观测性**: 标准化日志输出 + 系统心跳事件，便于运维监控
+
+- **🚀 微服务架构**: 多模型后端隔离部署，通过 WebSocket 通信- **🚀 多模型后端架构**: 支持将不同环境的AI模型部署为独立后端服务，通过WebSocket与主后端通信，实现完全的环境隔离
+
+
+
+## 🏗️ 架构设计## 架构特性
+
+
+
+### 核心组件### 🚀 多模型后端架构
+
+
+
+- **后端服务** (`src/`): 为解决不同AI模型（多模态、情绪、脑电）需要不同Python环境的问题，采用了基于WebSocket的微服务架构：
+
+  - 调度中心、事件总线、系统监控
+
+  - 数据采集器（音视频、EEG、多模态传感器）#### 核心组件
+
+  - 检测器和模型推理引擎
+
+  - WebSocket 接口服务- **BaseModelBackend** (`model_backends/base/`): 抽象基类，提供WebSocket服务器框架
+
+- **ModelBackendClient** (`src/interfaces/model_ws_client.py`): 异步WebSocket客户端，支持自动重连
+
+- **前端界面** (`ui/`):- **ModelProxyService** (`src/services/model_proxy_service.py`): 代理服务，管理多个模型后端连接
+
+  - Qt 应用程序框架- **示例实现** (`model_backends/multimodal_backend/`): 完整的PyTorch多模态模型后端模板
+
+  - 响应式 UI（自适应 1080p-4K 分辨率）
+
+  - 实时监控和数据可视化组件#### 架构优势
+
+  - 用户管理和测评系统
+
+- ✅ **完全环境隔离**: 每个模型运行在独立Python环境/进程中，避免依赖冲突
+
+- **模型后端** (`model_backends/`):- ✅ **独立进程管理**: 模型崩溃不影响主系统，自动重连机制保证可靠性
+
+  - 独立进程运行，环境完全隔离- ✅ **标准化接口**: 统一的WebSocket协议，快速添加新模型
+
+  - WebSocket 协议标准化接口- ✅ **生产级错误处理**: Future-based API + 超时控制 + 健康检查
+
+  - 支持 PyTorch、TensorFlow 等多种框架
 
 #### 数据流
-```
+
+### 数据流```
+
 UI → 主后端(EventBus) → ModelProxyService → 多个模型后端(隔离环境)
-     ↓                      ↓
-MULTIMODAL_SNAPSHOT → 分发到各模型 → DETECTION_RESULT → 结果聚合
-```
 
-#### 端口分配
+```     ↓                      ↓
+
+UI ─→ 主后端 (EventBus) ─→ ModelProxyService ─→ 模型后端 (隔离环境)MULTIMODAL_SNAPSHOT → 分发到各模型 → DETECTION_RESULT → 结果聚合
+
+       ↓                        ↓```
+
+   数据采集               检测结果聚合
+
+```#### 端口分配
+
 - 8765: 主后端WebSocket接口
-- 8766: 多模态模型后端
+
+### 端口分配- 8766: 多模态模型后端
+
 - 8767: 情绪模型后端
-- 8768: 脑电模型后端
 
-#### 快速开始
-1. **📋 文档索引**: `MULTI_MODEL_BACKEND_INDEX.md` (完整导航,从这里开始!)
+- **8765**: 主后端 WebSocket 接口- 8768: 脑电模型后端
+
+- **8766**: 多模态模型后端
+
+- **8767**: 情绪模型后端#### 快速开始
+
+- **8768**: 脑电模型后端1. **📋 文档索引**: `MULTI_MODEL_BACKEND_INDEX.md` (完整导航,从这里开始!)
+
 2. **✅ 完整性检查**: `MULTI_MODEL_BACKEND_CHECKLIST.md` (验证所有组件)
-3. **🚀 快速接入**: `MULTI_MODEL_BACKEND_QUICKSTART.md` (5步接入指南)
+
+## 📁 目录结构3. **🚀 快速接入**: `MULTI_MODEL_BACKEND_QUICKSTART.md` (5步接入指南)
+
 4. **📐 架构设计**: `MULTI_MODEL_BACKEND_ARCHITECTURE.md` (完整设计文档)
-5. **🔌 接口说明**: `MULTI_MODEL_BACKEND_INTERFACES.md` (API文档)
-6. **📝 实现总结**: `MULTI_MODEL_BACKEND_SUMMARY.md` (实现清单)
 
-#### 测试验证
-```bash
-# 测试架构组件
-python tests/test_model_backend_architecture.py
+```5. **🔌 接口说明**: `MULTI_MODEL_BACKEND_INTERFACES.md` (API文档)
 
-# 启动示例模型后端
-cd model_backends/multimodal_backend
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-python main.py
-```
+project-root/6. **📝 实现总结**: `MULTI_MODEL_BACKEND_SUMMARY.md` (实现清单)
 
----
+├── aidebug/         # 调试文档和测试脚本
 
-### Phase 3 UI增强(2025-10-07)🎨
-- **响应式分辨率适配**：解决2K开发环境到1080p部署环境的显示问题：
-  - 新建 `ui/app/utils/responsive.py` - 响应式缩放系统，基于2560x1440基准自动缩放
-  - 支持分辨率范围：1280x720 ~ 4K，自动检测并计算缩放因子
-  - 更新所有主要页面使用响应式API：`scale()`, `scale_size()`, `scale_font()`
-  - 1080p环境缩放因子0.75，所有UI组件按比例缩放，完美适配小屏幕
-- **实时监控弹窗**：测试页面智能布局优化：
-  - 新建 `ui/app/utils/monitor_window.py` - 独立监控窗口，显示摄像头+检测结果
-  - 小屏幕（<0.85缩放因子）：隐藏内嵌画面，显示"显示实时监控"按钮
-  - 大屏幕（>=0.85缩放因子）：保留原有内嵌画面布局
-  - 监控窗口自适应尺寸（2K: 1000x750, 1080p: 800x600），30fps实时刷新
-- **测试验证**：`test_responsive.py` 和 `test_responsive_simulated.py` 验证多分辨率缩放 ✅
+├── config/          # 配置文件 (YAML)#### 测试验证
+
+├── data/            # 数据目录```bash
+
+├── docs/            # 架构与API文档# 测试架构组件
+
+├── logs/            # 日志输出python tests/test_model_backend_architecture.py
+
+├── model_backends/  # 独立模型后端服务
+
+│   ├── base/                 # 抽象基类# 启动示例模型后端
+
+│   ├── multimodal_backend/   # 多模态模型示例cd model_backends/multimodal_backend
+
+│   ├── emotion_backend/      # 情绪模型python -m venv .venv
+
+│   └── eeg_backend/          # 脑电模型.venv\Scripts\activate  # Windows
+
+├── src/             # 后端源代码pip install -r requirements.txt
+
+│   ├── core/        # 核心调度和事件总线python main.py
+
+│   ├── collectors/  # 数据采集器```
+
+│   ├── detectors/   # 检测模块
+
+│   ├── services/    # 后端服务---
+
+│   ├── interfaces/  # WebSocket 接口
+
+│   └── utils/       # 工具类### Phase 3 UI增强(2025-10-07)🎨
+
+├── ui/              # Qt 前端- **响应式分辨率适配**：解决2K开发环境到1080p部署环境的显示问题：
+
+│   ├── app/         # 应用核心  - 新建 `ui/app/utils/responsive.py` - 响应式缩放系统，基于2560x1440基准自动缩放
+
+│   ├── data/        # 资源文件  - 支持分辨率范围：1280x720 ~ 4K，自动检测并计算缩放因子
+
+│   ├── services/    # UI 服务层  - 更新所有主要页面使用响应式API：`scale()`, `scale_size()`, `scale_font()`
+
+│   ├── widgets/     # UI 组件  - 1080p环境缩放因子0.75，所有UI组件按比例缩放，完美适配小屏幕
+
+│   └── models/      # 模型推理- **实时监控弹窗**：测试页面智能布局优化：
+
+├── tests/           # 单元与集成测试  - 新建 `ui/app/utils/monitor_window.py` - 独立监控窗口，显示摄像头+检测结果
+
+├── pyproject.toml   # 项目配置  - 小屏幕（<0.85缩放因子）：隐藏内嵌画面，显示"显示实时监控"按钮
+
+├── requirements.txt # 依赖列表  - 大屏幕（>=0.85缩放因子）：保留原有内嵌画面布局
+
+└── README.md  - 监控窗口自适应尺寸（2K: 1000x750, 1080p: 800x600），30fps实时刷新
+
+```- **测试验证**：`test_responsive.py` 和 `test_responsive_simulated.py` 验证多分辨率缩放 ✅
+
 - **文档完善**：`RESOLUTION_ADAPTATION.md` 详细说明，`TESTING_GUIDE.md` 测试指南
 
-### Phase 2 重构（2025-01-07）✨
-- **资源文件组织化**：`ui/` 根目录的 CSV/YAML 文件统一迁移到 `ui/data/` 目录，实现资源集中管理：
-  - `ui/data/users/` - 用户数据（users.csv, scores.csv, schulte_scores.csv）
-  - `ui/data/questionnaires/` - 问卷配置（questionnaire.yaml）
-  - 所有路径配置集中到 `ui/app/config.py` 的 `DATA_DIR` 常量
-- **EEG服务后端迁移**：将UI层的EEG硬件连接代码（602行）完全迁移到后端：
-  - 新建 `src/services/eeg_service.py` (368行) - 后端EEG服务，管理BLE连接和数据采集
-  - 精简 `ui/services/eeg_service.py` (602→122行, -79.7%) - 改为纯WebSocket客户端代理
-  - UI层不再依赖 `bleak`、`asyncio` 等硬件库，实现完全的前后端解耦
-  - WebSocket命令协议：`eeg.start`, `eeg.stop`, `eeg.snapshot`, `eeg.file_paths`
-  - 集成测试验证：后端服务、命令路由、UI客户端全部测试通过 ✅
-- **环境变量增强**：新增 `BACKEND_EEG_SIMULATION=1` 用于后端EEG模拟模式（独立于UI的模拟控制）
+## 🚀 快速开始
 
-### Phase 1 重构（2025-10-07）
-- **Qt 前端模块化**：`ui/main.py` 现仅作为薄封装，核心窗口与页面迁移至 `ui/app/application.py` 和 `ui/app/pages/*`。调试模式开关逻辑仍由 `ui/app/config.py` 解析 `--debug` / `--mode` 参数，兼容 `python -m ui.main --debug` 的原有体验。
-- **TTS 后端自愈**：`src/services/tts_service.py` 针对 PowerShell 管道新增超时检测，若 18 秒内未完成朗读会自动禁用该后端并回退到 `pyttsx3`，同时沿用用户请求中的语速、音量等参数。前端无需改动即可获得稳定播报，也可通过 `UI_TTS_BACKEND=pyttsx3` 强制指定。
+### Phase 2 重构（2025-01-07）✨
+
+### 1. 环境准备- **资源文件组织化**：`ui/` 根目录的 CSV/YAML 文件统一迁移到 `ui/data/` 目录，实现资源集中管理：
+
+  - `ui/data/users/` - 用户数据（users.csv, scores.csv, schulte_scores.csv）
+
+```bash  - `ui/data/questionnaires/` - 问卷配置（questionnaire.yaml）
+
+# 克隆仓库  - 所有路径配置集中到 `ui/app/config.py` 的 `DATA_DIR` 常量
+
+git clone <repository-url>- **EEG服务后端迁移**：将UI层的EEG硬件连接代码（602行）完全迁移到后端：
+
+cd project-root  - 新建 `src/services/eeg_service.py` (368行) - 后端EEG服务，管理BLE连接和数据采集
+
+  - 精简 `ui/services/eeg_service.py` (602→122行, -79.7%) - 改为纯WebSocket客户端代理
+
+# 创建虚拟环境  - UI层不再依赖 `bleak`、`asyncio` 等硬件库，实现完全的前后端解耦
+
+python -m venv .venv  - WebSocket命令协议：`eeg.start`, `eeg.stop`, `eeg.snapshot`, `eeg.file_paths`
+
+  - 集成测试验证：后端服务、命令路由、UI客户端全部测试通过 ✅
+
+# 激活虚拟环境- **环境变量增强**：新增 `BACKEND_EEG_SIMULATION=1` 用于后端EEG模拟模式（独立于UI的模拟控制）
+
+# Windows:
+
+.venv\Scripts\activate### Phase 1 重构（2025-10-07）
+
+# Linux/Mac:- **Qt 前端模块化**：`ui/main.py` 现仅作为薄封装，核心窗口与页面迁移至 `ui/app/application.py` 和 `ui/app/pages/*`。调试模式开关逻辑仍由 `ui/app/config.py` 解析 `--debug` / `--mode` 参数，兼容 `python -m ui.main --debug` 的原有体验。
+
+source .venv/bin/activate- **TTS 后端自愈**：`src/services/tts_service.py` 针对 PowerShell 管道新增超时检测，若 18 秒内未完成朗读会自动禁用该后端并回退到 `pyttsx3`，同时沿用用户请求中的语速、音量等参数。前端无需改动即可获得稳定播报，也可通过 `UI_TTS_BACKEND=pyttsx3` 强制指定。
+
 - **摄像头缺失自动降级**：`src/services/av_service.py` 在硬件初始化失败（或 `UI_FORCE_SIMULATION=1`）时会自动启用合成画面生成器，并在日志中提示“Camera unavailable…启用模拟视频帧”。该模式生成的彩条 Frame 仍会广播到 `camera.frame` 主题，方便前端和调试脚本继续验证链路。
-- **数据库错误透传**：当 MySQL 服务不可达时，`DatabaseUnavailable` 异常会同步到 UI 并在日志中给出原始错误码（如 `WinError 10061`），避免静默失败。若仅需演示，可设置 `UI_SKIP_DATABASE=1` 暂时跳过持久化。
-- **录制指令保护**：AV 录制接口在预览未成功启动时会直接返回 `Preview not started`，防止误触发空音视频文件。请先确认 `av.start_preview` 成功（或启用模拟模式）再调用 `av.start_recording`。
+
+# 安装依赖- **数据库错误透传**：当 MySQL 服务不可达时，`DatabaseUnavailable` 异常会同步到 UI 并在日志中给出原始错误码（如 `WinError 10061`），避免静默失败。若仅需演示，可设置 `UI_SKIP_DATABASE=1` 暂时跳过持久化。
+
+pip install -r requirements.txt- **录制指令保护**：AV 录制接口在预览未成功启动时会直接返回 `Preview not started`，防止误触发空音视频文件。请先确认 `av.start_preview` 成功（或启用模拟模式）再调用 `av.start_recording`。
+
+```
 
 ## 目录结构
 
+### 2. 启动后端服务
+
 ```
-project-root/
-├── config/          # 配置文件
-│   └── models.yaml  # ✨ 新增model_backends配置节
+
+```bashproject-root/
+
+python -m src.main --root .├── config/          # 配置文件
+
+```│   └── models.yaml  # ✨ 新增model_backends配置节
+
 ├── data/            # 原始/处理/结果数据目录
-├── docs/            # 架构与部署文档
+
+后端启动后会监听 `8765` 端口，提供 WebSocket 接口。├── docs/            # 架构与部署文档
+
 ├── logs/            # 日志输出目录（运行时自动生成）
-├── model_backends/  # 🚀 独立模型后端服务(新增)
+
+### 3. 启动前端界面├── model_backends/  # 🚀 独立模型后端服务(新增)
+
 │   ├── base/                      # 抽象基类
-│   │   └── base_backend.py        # BaseModelBackend - WebSocket服务器框架
-│   ├── multimodal_backend/        # 示例: PyTorch多模态模型
-│   │   ├── main.py               # 完整实现(含模拟推理)
+
+```bash│   │   └── base_backend.py        # BaseModelBackend - WebSocket服务器框架
+
+# 监控看板（轻量级）│   ├── multimodal_backend/        # 示例: PyTorch多模态模型
+
+python -m ui.dashboard│   │   ├── main.py               # 完整实现(含模拟推理)
+
 │   │   ├── requirements.txt      # 独立依赖(torch, torchvision, websockets)
-│   │   └── README.md             # 使用文档
-│   ├── emotion_backend/           # 待实现: TensorFlow情绪模型
-│   └── eeg_backend/               # 待实现: MNE-Python脑电模型
-├── src/             # 后端源代码
+
+# 完整界面│   │   └── README.md             # 使用文档
+
+python -m ui.main           # 正常模式│   ├── emotion_backend/           # 待实现: TensorFlow情绪模型
+
+python -m ui.main --debug   # 调试模式（模拟数据源）│   └── eeg_backend/               # 待实现: MNE-Python脑电模型
+
+```├── src/             # 后端源代码
+
 │   ├── core/        # 调度中心、事件总线、系统监控
-│   ├── collectors/  # 数据采集器
+
+### 4. 启动模型后端（可选）│   ├── collectors/  # 数据采集器
+
 │   ├── models/      # 模型封装与管理
-│   ├── detectors/   # 检测模块
-│   ├── services/    # 后端服务
-│   │   ├── av_service.py          # 音视频服务
-│   │   ├── eeg_service.py         # EEG服务
-│   │   ├── multimodal_service.py  # 多模态数据采集
-│   │   ├── tts_service.py         # 语音播报
-│   │   ├── model_proxy_service.py # 🚀 新增: 模型后端代理服务
-│   │   └── database_service.py    # 数据库服务
+
+```bash│   ├── detectors/   # 检测模块
+
+cd model_backends/multimodal_backend│   ├── services/    # 后端服务
+
+python -m venv .venv│   │   ├── av_service.py          # 音视频服务
+
+.venv\Scripts\activate  # Windows│   │   ├── eeg_service.py         # EEG服务
+
+# source .venv/bin/activate  # Linux/Mac│   │   ├── multimodal_service.py  # 多模态数据采集
+
+pip install -r requirements.txt│   │   ├── tts_service.py         # 语音播报
+
+python main.py│   │   ├── model_proxy_service.py # 🚀 新增: 模型后端代理服务
+
+```│   │   └── database_service.py    # 数据库服务
+
 │   ├── interfaces/  # WebSocket服务器
-│   │   ├── ws_server.py           # 主WebSocket服务器(8765)
+
+## ⚙️ 配置说明│   │   ├── ws_server.py           # 主WebSocket服务器(8765)
+
 │   │   └── model_ws_client.py     # 🚀 新增: 模型后端WebSocket客户端
-│   └── utils/       # 公共工具类
+
+### 环境变量│   └── utils/       # 公共工具类
+
 ├── ui/              # Qt 前端
-│   ├── app/         # 应用核心（应用入口、配置、页面）
-│   │   ├── utils/   # 🎨 UI工具（响应式缩放、监控弹窗 - Phase 3新增）
-│   │   └── pages/   # 页面组件（登录、校准、测试、血压、成绩等）
-│   ├── data/        # 📁 资源文件（Phase 2新增）
-│   │   ├── users/            # 用户数据CSV
-│   │   └── questionnaires/   # 问卷配置YAML
-│   ├── services/    # UI服务层（后端客户端、EEG代理、AV代理、多模态代理）
-│   ├── widgets/     # UI组件（多模态预览、脑负荷条、舒尔特表、仪表盘、成绩页）
+
+| 变量名 | 说明 | 默认值 |│   ├── app/         # 应用核心（应用入口、配置、页面）
+
+|--------|------|--------|│   │   ├── utils/   # 🎨 UI工具（响应式缩放、监控弹窗 - Phase 3新增）
+
+| `UI_FORCE_SIMULATION` | 全局模拟模式 | 0 |│   │   └── pages/   # 页面组件（登录、校准、测试、血压、成绩等）
+
+| `UI_DEBUG_MODE` | 调试模式 | 0 |│   ├── data/        # 📁 资源文件（Phase 2新增）
+
+| `BACKEND_EEG_SIMULATION` | 后端 EEG 模拟 | 0 |│   │   ├── users/            # 用户数据CSV
+
+| `UI_SKIP_DATABASE` | 跳过数据库 | 0 |│   │   └── questionnaires/   # 问卷配置YAML
+
+| `UI_DB_HOST` | 数据库主机 | localhost |│   ├── services/    # UI服务层（后端客户端、EEG代理、AV代理、多模态代理）
+
+| `UI_TTS_BACKEND` | 语音后端 | powershell (Windows) / pyttsx3 (其他) |│   ├── widgets/     # UI组件（多模态预览、脑负荷条、舒尔特表、仪表盘、成绩页）
+
 │   ├── models/      # 模型推理
-│   └── utils_common/ # 通用工具（数据库、线程管理、工具函数）
+
+### 配置文件│   └── utils_common/ # 通用工具（数据库、线程管理、工具函数）
+
 ├── tests/           # 单元与集成测试
-│   ├── test_model_backend_architecture.py  # 🚀 新增: 多模型后端架构测试
-│   ├── test_integration_thread_optimization.py  # 线程池集成测试
-│   ├── test_eeg_integration.py      # Phase 2 EEG服务集成测试
-│   ├── test_responsive.py           # Phase 3 响应式缩放测试 🎨
+
+- `config/system.yaml`: 系统参数（心跳间隔、超时设置等）│   ├── test_model_backend_architecture.py  # 🚀 新增: 多模型后端架构测试
+
+- `config/collectors.yaml`: 采集器配置（采样率、工作模式）│   ├── test_integration_thread_optimization.py  # 线程池集成测试
+
+- `config/detectors.yaml`: 检测器配置（阈值、启用状态）│   ├── test_eeg_integration.py      # Phase 2 EEG服务集成测试
+
+- `config/models.yaml`: 模型配置（路径、参数）│   ├── test_responsive.py           # Phase 3 响应式缩放测试 🎨
+
 │   └── test_responsive_simulated.py # Phase 3 多分辨率模拟测试 🎨
-├── MULTI_MODEL_BACKEND_INDEX.md              # 🚀 多模型后端文档索引(从这里开始!)
+
+## 🔧 开发指南├── MULTI_MODEL_BACKEND_INDEX.md              # 🚀 多模型后端文档索引(从这里开始!)
+
 ├── MULTI_MODEL_BACKEND_CHECKLIST.md          # 🚀 多模型后端完整性检查清单
-├── MULTI_MODEL_BACKEND_ARCHITECTURE.md       # 🚀 多模型后端完整设计文档
+
+### 扩展新采集器├── MULTI_MODEL_BACKEND_ARCHITECTURE.md       # 🚀 多模型后端完整设计文档
+
 ├── MULTI_MODEL_BACKEND_QUICKSTART.md         # 🚀 快速接入指南
-├── MULTI_MODEL_BACKEND_INTERFACES.md         # 🚀 接口使用文档
-├── MULTI_MODEL_BACKEND_SUMMARY.md            # 🚀 实现总结与清单
-├── BACKEND_THREAD_OPTIMIZATION.md            # 🧵 后端线程池优化文档
+
+1. 在 `src/collectors/` 创建类，继承 `BaseCollector`├── MULTI_MODEL_BACKEND_INTERFACES.md         # 🚀 接口使用文档
+
+2. 实现 `run_once()` 方法├── MULTI_MODEL_BACKEND_SUMMARY.md            # 🚀 实现总结与清单
+
+3. 在 `config/collectors.yaml` 注册├── BACKEND_THREAD_OPTIMIZATION.md            # 🧵 后端线程池优化文档
+
 ├── UI_THREAD_OPTIMIZATION.md                 # 🧵 UI线程池优化文档
-├── THREAD_POOL_QUICK_REF.md                  # 🧵 线程池快速参考
+
+### 扩展新模型├── THREAD_POOL_QUICK_REF.md                  # 🧵 线程池快速参考
+
 ├── RESOLUTION_ADAPTATION.md        # Phase 3 分辨率适配详细说明 🎨
-├── RESOLUTION_ADAPTATION_SUMMARY.md # Phase 3 完成总结 🎨
-├── TESTING_GUIDE.md                # Phase 3 测试指南 🎨
-├── REFACTORING_PHASE2_SUMMARY.md   # Phase 2 重构总结 ✨
+
+1. 实现 `BaseModel` 子类├── RESOLUTION_ADAPTATION_SUMMARY.md # Phase 3 完成总结 🎨
+
+2. 配置到 `config/models.yaml`├── TESTING_GUIDE.md                # Phase 3 测试指南 🎨
+
+3. 由 `ModelManager` 自动加载├── REFACTORING_PHASE2_SUMMARY.md   # Phase 2 重构总结 ✨
+
 ├── REFACTORING_REPORT.md           # Phase 1 完整报告
-├── REFACTORING_SUMMARY.md        # Phase 1详细总结
+
+### 扩展新检测器├── REFACTORING_SUMMARY.md        # Phase 1详细总结
+
 ├── test_ui_refactor.py          # Phase 1 UI重构测试
-├── pyproject.toml   # 依赖与构建配置
-├── requirements.txt # 运行依赖列表
-├── QUICK_START.md   # 快速启动指南
+
+1. 继承 `BaseDetector`├── pyproject.toml   # 依赖与构建配置
+
+2. 声明订阅的事件主题├── requirements.txt # 运行依赖列表
+
+3. 实现事件处理逻辑├── QUICK_START.md   # 快速启动指南
+
 └── README.md
+
+## 🧪 测试```
+
+
+
+```bash## 快速开始
+
+# 运行所有测试
+
+pytest1. 安装依赖：
+
+
+
+# 测试特定模块```bash
+
+python tests/test_model_backend_architecture.pypython -m venv .venv
+
+python tests/test_responsive.py. .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+```pip install -r requirements.txt
+
 ```
 
-## 快速开始
-
-1. 安装依赖：
-
-```bash
-python -m venv .venv
-. .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+## 📚 文档
 
 2. 运行 Orchestrator：
 
-```bash
-python -m src.main --root .
-```
-
-默认会在控制台打印 Detector 的检测结果与系统心跳，如需关闭监听可添加 `--no-listeners`。
-
-3. 启动 Qt 前端监控看板（可选）：
+详细文档位于 `aidebug/` 目录：
 
 ```bash
+
+- **快速开始**: `QUICK_START.md`python -m src.main --root .
+
+- **架构设计**: `MULTI_MODEL_BACKEND_ARCHITECTURE.md````
+
+- **接口文档**: `MULTI_MODEL_BACKEND_INTERFACES.md`
+
+- **快速接入**: `MULTI_MODEL_BACKEND_QUICKSTART.md`默认会在控制台打印 Detector 的检测结果与系统心跳，如需关闭监听可添加 `--no-listeners`。
+
+- **测试指南**: `TESTING_GUIDE.md`
+
+- **分辨率适配**: `RESOLUTION_ADAPTATION.md`3. 启动 Qt 前端监控看板（可选）：
+
+
+
+## 🎨 UI 特性```bash
+
 python -m ui.dashboard
-```
 
-请先确保 Orchestrator 已运行并启用了 `interfaces.yaml` 中的 WebSocket 接口。监控看板仅负责展示后端推送的检测结果与系统心跳，不再直接驱动采集任务。
+- **响应式设计**: 自动适配 1280x720 到 4K 分辨率```
+
+- **智能布局**: 小屏幕自动切换独立监控窗口
+
+- **实时监控**: 30fps 视频流和检测结果显示请先确保 Orchestrator 已运行并启用了 `interfaces.yaml` 中的 WebSocket 接口。监控看板仅负责展示后端推送的检测结果与系统心跳，不再直接驱动采集任务。
+
+- **模块化架构**: 页面组件完全解耦，易于维护
 
 > **提示**：若需要在 UI 中查看实时摄像头画面或音频电平，请确认 `config/interfaces.yaml` 的 `topics` 列表包含 `camera.frame` 与 `audio.level`（仓库默认已开启）。
 
+## 🔒 模拟模式
+
 4. 启动完整旧版 UI（依赖后端命令链路）：
 
+支持在无硬件环境下运行，便于开发和演示：
+
 ```powershell
-cd F:\mutilUI\project-root
-python -m ui.main           # 正常模式：真实信号，需要后端在线
-python -m ui.main --debug   # 调试模式：启用模拟信号，界面窗口化
+
+```bashcd F:\mutilUI\project-root
+
+# 方式1: 启动参数（推荐）python -m ui.main           # 正常模式：真实信号，需要后端在线
+
+python -m ui.main --debugpython -m ui.main --debug   # 调试模式：启用模拟信号，界面窗口化
+
 ```
 
-确保第二步的 Orchestrator 已启动，否则正常模式会提示“Backend connection not established”。该界面保留了历史测评流程，但所有音视频操作都改由后端服务执行。
+# 方式2: 环境变量（Windows）
 
-> **离线演示**：在无后端或无硬件的环境下，请使用 `python -m ui.main --debug`，系统会自动切换到模拟信号并以窗口化模式运行，便于调试。正常模式始终请求真实信号，若缺少设备或后台将直接报错提醒。
+set UI_FORCE_SIMULATION=1确保第二步的 Orchestrator 已启动，否则正常模式会提示“Backend connection not established”。该界面保留了历史测评流程，但所有音视频操作都改由后端服务执行。
 
-5. 运行测试：
+
+
+# 方式3: 细分控制> **离线演示**：在无后端或无硬件的环境下，请使用 `python -m ui.main --debug`，系统会自动切换到模拟信号并以窗口化模式运行，便于调试。正常模式始终请求真实信号，若缺少设备或后台将直接报错提醒。
+
+set UI_MULTIMODAL_SIMULATION=1
+
+set BACKEND_EEG_SIMULATION=15. 运行测试：
+
+```
 
 ```bash
-pytest
-```
 
-## 模拟模式切换
+模拟模式功能：pytest
+
+- ✅ 生成合成音视频数据```
+
+- ✅ 模拟传感器读数
+
+- ✅ 模拟 EEG 信号## 模拟模式切换
+
+- ✅ 跳过硬件设备连接
 
 前端与采集脚本现已支持统一的模拟模式，便于在无硬件/无后台的环境下演示：
 
+## 📝 许可证
+
 - **启动参数（推荐）**：
 
+本项目采用 MIT 许可证。
+
    ```powershell
-   python -m ui.main --debug
+
+## 🤝 贡献   python -m ui.main --debug
+
    ```
+
+欢迎提交 Issue 和 Pull Request！
 
    该命令会在当前进程内设置 `UI_DEBUG_MODE=1` 与 `UI_FORCE_SIMULATION=1`，并禁用所有真实设备调用。若需强制回到真实信号，可执行 `python -m ui.main --mode normal`。
 
+## 📧 联系方式
+
 - **全局开关**：
 
+如有问题，请通过 GitHub Issues 联系。
+
   ```powershell
-  setx UI_FORCE_SIMULATION 1
+
+---  setx UI_FORCE_SIMULATION 1
+
   ```
 
-  重新打开终端后，音视频、多模态、脑电模块都会使用内置的合成数据源。
+**注意**: 
+
+- 首次运行需要联网下载模型文件，后续可离线运行  重新打开终端后，音视频、多模态、脑电模块都会使用内置的合成数据源。
+
+- 部分功能需要特定硬件支持（摄像头、EEG 设备等），可使用模拟模式进行测试
 
 - **后端模拟开关**（Phase 2新增）：
 

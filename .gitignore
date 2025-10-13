@@ -39,6 +39,9 @@ env/
 logs/
 *.log
 
+ui/logs/
+*.log
+
 # Recordings and Generated Data
 recordings/
 data/
