@@ -107,3 +107,8 @@ htmlcov/
 
 # Historical Versions
 历史版本/
+
+scripts/
+docs/
+
+*.git

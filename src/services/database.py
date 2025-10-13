@@ -1,24 +1,21 @@
 """
-脚本提供以下工具：
-- MysqlDB：提供增删改查功能
-- TestTableStore：test表的记录新增和更改
-- build_store_dir：构建"root/username/时间戳"存储目录
+Database access layer for the backend service.
+Provides database operations for the test data table.
 """
-
 
 import datetime
 import json
 import os
 import pymysql
 from pymysql.cursors import DictCursor
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 
 class MysqlDB:
-    """MySQL 简易封装：提供增删改查基础能力。"""
+    """MySQL wrapper providing basic CRUD operations."""
 
     def __init__(self, host="localhost", user="root", password="", database="test_db"):
-        # 数据库连接配置
+        # Database connection configuration
         self.config = {
             'host': host,
             'user': user,
@@ -29,11 +26,11 @@ class MysqlDB:
         }
 
     def _connect(self):
-        """获取数据库连接。"""
+        """Get database connection."""
         return pymysql.connect(**self.config)
 
-    def query_all(self, table) -> List[Dict]:
-        """查询指定表的全部数据。"""
+    def query_all(self, table: str) -> List[Dict]:
+        """Query all data from specified table."""
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
@@ -42,9 +39,9 @@ class MysqlDB:
         finally:
             conn.close()
 
-    def insert(self, data: Dict, table, show_all=False) -> int | Optional[List[Dict]]:
-        """插入一行数据。
-        - show_all: True 时返回整表数据，False 返回自增主键 id
+    def insert(self, data: Dict, table: str, show_all: bool = False) -> int | Optional[List[Dict]]:
+        """Insert a row of data.
+        - show_all: True returns all table data, False returns auto-increment primary key id
         """
         conn = self._connect()
         try:
@@ -58,8 +55,8 @@ class MysqlDB:
         finally:
             conn.close()
 
-    def update(self, id: int, data: Dict, table, show_all=False) -> Optional[List[Dict]]:
-        """按 id 更新一行数据。"""
+    def update(self, id: int, data: Dict, table: str, show_all: bool = False) -> Optional[List[Dict]]:
+        """Update a row by id."""
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
@@ -71,8 +68,8 @@ class MysqlDB:
         finally:
             conn.close()
 
-    def delete(self, id: int, table, show_all=False) -> Optional[List[Dict]]:
-        """按 id 删除一行数据。"""
+    def delete(self, id: int, table: str, show_all: bool = False) -> Optional[List[Dict]]:
+        """Delete a row by id."""
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
@@ -85,10 +82,10 @@ class MysqlDB:
 
 
 class TestTableStore:
-    """与 `test` 表交互的高层接口。
-    对JSON处理：
-    - 写入时：将 list/dict 转为 JSON 字符串；其他类型保持不变
-    - 读取时：提供 `_parse_json_string` 将 JSON 字符串转回 list/dict（由调用方按需使用）
+    """High-level interface for interacting with the `test` table.
+    JSON handling:
+    - Writing: Converts list/dict to JSON string; other types remain unchanged
+    - Reading: Provides `_parse_json_string` to convert JSON string back to list/dict (used by caller as needed)
     """
 
     def __init__(self, *, host: str, user: str, password: str, database: str):
@@ -96,7 +93,7 @@ class TestTableStore:
 
     @staticmethod
     def _ensure_json_string(value: Optional[object]) -> Optional[str]:
-        """仅将 list/dict 转为 JSON 字符串；其他类型保持原样。"""
+        """Only convert list/dict to JSON string; other types remain unchanged."""
         if value is None:
             return None
         if isinstance(value, (list, dict)):
@@ -105,7 +102,7 @@ class TestTableStore:
 
     @staticmethod
     def _parse_json_string(value: Optional[object]) -> Optional[object]:
-        """尝试将 JSON 字符串解析为 Python 对象(list/dict)；解析失败则原样返回。"""
+        """Try to parse JSON string into Python object (list/dict); return unchanged if parsing fails."""
         if value is None:
             return None
         if isinstance(value, str):
@@ -134,8 +131,8 @@ class TestTableStore:
             accuracy: Optional[float] = None,
             elapsed: Optional[float] = None,
     ) -> int:
-        """插入一条记录。
-        JSON 字段：record、audio、video、ptime 支持直接传 list/dict，将自动序列化为 JSON 字符串。
+        """Insert a record.
+        JSON fields: record, audio, video, ptime support direct list/dict, will be auto-serialized to JSON string.
         """
         record_json = self._ensure_json_string(record_text)
         audio_json = self._ensure_json_string(audio)
@@ -177,9 +174,9 @@ class TestTableStore:
             elapsed: Optional[float] = None,
             score: Optional[float] = None,
     ) -> None:
-        """按需更新指定 id 记录的字段。
-        - 对 JSON 列（audio、video、ptime、record）若传入 list/dict，将自动序列化为 JSON 字符串。
-        - 未提供的字段不会更新。
+        """Update specified id record fields as needed.
+        - For JSON columns (audio, video, ptime, record), if list/dict is passed, will be auto-serialized to JSON string.
+        - Fields not provided will not be updated.
         """
         payload: Dict[str, Optional[object]] = {}
         if audio is not None:
@@ -187,7 +184,6 @@ class TestTableStore:
         if video is not None:
             payload["video"] = self._ensure_json_string(video)
         if record_text is not None:
-            print(self._ensure_json_string(record_text))
             payload["record"] = self._ensure_json_string(record_text)
         if rgb is not None:
             payload["rgb"] = rgb
@@ -213,30 +209,30 @@ class TestTableStore:
             return
         self.db.update(id=row_id, data=payload, table="test", show_all=False)
 
-    def get_user_history_data(self, username: str) -> Dict[str, any]:
-        """获取指定用户的历史数据，用于分数展示页面
+    def get_user_history_data(self, username: str) -> Dict[str, Any]:
+        """Get historical data for specified user, for score display page
         
         Args:
-            username: 用户名
+            username: Username
             
         Returns:
-            包含当前数据和历史数据的字典
+            Dictionary containing current data and historical data
         """
         try:
-            # 查询该用户的所有历史记录
+            # Query all historical records for this user
             all_records = self.db.query_all("test")
             user_records = [record for record in all_records if record.get('name') == username]
             
-            # 按时间排序，获取最新的记录
+            # Sort by time, get latest records
             user_records.sort(key=lambda x: x.get('datetime', ''), reverse=True)
             
-            # 提取历史数据
+            # Extract historical data
             blood_pressure_history = []
             accuracy_history = []
             score_history = []
             
             for record in user_records:
-                # 血压脉搏（只取收缩压）
+                # Blood pressure (only take systolic)
                 blood_data = record.get('blood', '')
                 if blood_data and '/' in blood_data:
                     try:
@@ -245,17 +241,17 @@ class TestTableStore:
                     except (ValueError, IndexError):
                         pass
                 
-                # 舒尔特准确率
+                # Schulte accuracy
                 accuracy = record.get('accuracy')
                 if accuracy is not None:
                     accuracy_history.append(float(accuracy))
                 
-                # 舒尔特综合得分
+                # Schulte comprehensive score
                 score = record.get('score')
                 if score is not None:
                     score_history.append(int(score))
             
-            # 获取当前最新数据
+            # Get current latest data
             current_blood = blood_pressure_history[0] if blood_pressure_history else 0
             current_accuracy = accuracy_history[0] if accuracy_history else 0
             current_score = score_history[0] if score_history else 0
@@ -265,14 +261,14 @@ class TestTableStore:
                 "舒尔特准确率": current_accuracy,
                 "舒尔特综合得分": current_score,
                 "历史": {
-                    "血压脉搏": blood_pressure_history[::-1] if blood_pressure_history else [0],  # 反转顺序，最新的在后面
-                    "舒尔特准确率": accuracy_history[::-1] if accuracy_history else [0],  # 反转顺序，最新的在后面
-                    "舒尔特综合得分": score_history[::-1] if score_history else [0],  # 反转顺序，最新的在后面
+                    "血压脉搏": blood_pressure_history[::-1] if blood_pressure_history else [0],  # Reverse order, latest at end
+                    "舒尔特准确率": accuracy_history[::-1] if accuracy_history else [0],  # Reverse order, latest at end
+                    "舒尔特综合得分": score_history[::-1] if score_history else [0],  # Reverse order, latest at end
                 }
             }
             
-        except Exception as e:
-            # 如果查询失败，返回空数据
+        except Exception:
+            # If query fails, return empty data
             return {
                 "血压脉搏": 0,
                 "舒尔特准确率": 0,
@@ -286,8 +282,11 @@ class TestTableStore:
 
 
 def build_store_dir(root: str, username: str, start_time: Optional[str] = None) -> str:
-    """构建存储目录，路径格式：root/username/时间戳。"""
+    """Build storage directory, path format: root/username/timestamp."""
     ts = start_time or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     store_dir = os.path.join(root, username, ts)
     os.makedirs(store_dir, exist_ok=True)
     return store_dir
+
+
+__all__ = ["MysqlDB", "TestTableStore", "build_store_dir"]

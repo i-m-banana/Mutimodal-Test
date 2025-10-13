@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, Optional
 
 try:  # pragma: no cover - backend service can run without database module in tests
-    from ui.database import TestTableStore  # type: ignore
+    from .database import TestTableStore
 except ImportError:  # pragma: no cover
     TestTableStore = None  # type: ignore
 
@@ -63,7 +63,7 @@ class DatabaseService:
         self._config = {
             "host": os.getenv("UI_DB_HOST", "localhost"),
             "user": os.getenv("UI_DB_USER", "root"),
-            "password": os.getenv("UI_DB_PASSWORD", "123456"),
+            "password": os.getenv("UI_DB_PASSWORD", "root"),
             "database": os.getenv("UI_DB_NAME", "tired"),
         }
         if TestTableStore is None:
