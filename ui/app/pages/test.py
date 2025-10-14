@@ -430,167 +430,174 @@ class TestPage(QWidget):
             logger.error(f"触发情绪分析失败: {exc}", exc_info=True)
 
     def _poll_multimodal_snapshot(self) -> None:
-        """轮询多模态数据快照，仅更新内嵌显示（安全，失败不影响UI）。"""
+        """轮询多模态数据快照，仅更新内嵌显示（安全，失败不影响UI）"""
         if not HAS_MULTIMODAL:
             self._multimodal_poll_timer.stop()
             self._multimodal_poll_active = False
             return
 
-        # 防护性检查：如果监控已被明确停止，不要继续轮询
-        if not self._multimodal_poll_active:
-            logger.debug("监控已停止，跳过本次轮询")
-            if self._multimodal_poll_timer.isActive():
-                self._multimodal_poll_timer.stop()
-            return
-
-        def warn_if_gap(reason: str) -> None:
-            last_snapshot = self._last_multimodal_snapshot_monotonic
-            if last_snapshot is None:
-                return
-            elapsed = time.monotonic() - last_snapshot
-            if elapsed >= 8.0 and not self._multimodal_gap_warned:
-                logger.warning("多模态快照%s已持续 %.1f 秒，检查采集任务", reason, elapsed)
-                self._multimodal_gap_warned = True
-
         try:
             snapshot = multidata_get_snapshot()
         except Exception as exc:
             logger.debug(f"获取多模态采集状态失败: {exc}")
-            warn_if_gap("获取失败")
             return
 
         if not snapshot:
             logger.debug("多模态快照为空")
-            warn_if_gap("为空")
             return
 
         try:
-            previous_snapshot_ts = self._last_multimodal_snapshot_monotonic
-            now_monotonic = time.monotonic()
-            if previous_snapshot_ts is not None:
-                gap = now_monotonic - previous_snapshot_ts
-                if gap >= 8.0 and not self._multimodal_gap_warned:
-                    logger.warning("多模态快照间隔 %.1f 秒，请检查采集状态", gap)
-                    self._multimodal_gap_warned = True
-            self._last_multimodal_snapshot_monotonic = now_monotonic
-            self._multimodal_gap_warned = False
-
             status = (snapshot.get("status") or "idle").lower()
 
-            if getattr(self, "_multimodal_last_status", None) != status:
-                logger.info("多模态采集状态: %s", status)
-                self._multimodal_last_status = status
-
+            # 首次收到数据时记录日志
             if not hasattr(self, '_multimodal_first_data'):
                 logger.info(f"多模态数据轮询已启动，当前状态: {status}")
                 self._multimodal_first_data = True
 
-            score = snapshot.get("fatigue_score")
-            if score is not None:
-                try:
-                    score_value = float(score)
-                except (TypeError, ValueError):
-                    if not hasattr(self, '_fatigue_score_cast_failed'):
-                        logger.warning("⚠️ 疲劳度字段无法转换为浮点数: %s", score)
-                        self._fatigue_score_cast_failed = True
-                    score_value = None
+            # 调试：打印完整的snapshot数据
+            if not hasattr(self, '_snapshot_logged'):
+                logger.info(f"多模态快照数据: {snapshot}")
+                logger.info(f"快照包含 fatigue_score: {'fatigue_score' in snapshot}")
+                if 'fatigue_score' in snapshot:
+                    logger.info(f"fatigue_score 值: {snapshot['fatigue_score']}")
+                self._snapshot_logged = True
 
-                if score_value is not None:
-                    last_value = self._last_fatigue_score
-                    last_log_time = self._last_fatigue_log_time or 0.0
-                    should_log = False
-
-                    if last_value is None:
-                        should_log = True
-                    elif abs(score_value - last_value) >= 0.5:
-                        should_log = True
-                    elif now_monotonic - last_log_time >= 12.0:
-                        should_log = True
-
-                    if should_log:
-                        logger.info("多模态疲劳度更新: %.2f", score_value)
-                        self._last_fatigue_score = score_value
-                        self._last_fatigue_log_time = now_monotonic
-                    else:
-                        self._last_fatigue_score = score_value
-
-                self._update_fatigue_display(score)
+            # 更新疲劳度
+            fatigue = snapshot.get("fatigue_score")
+            brain = snapshot.get("fatigue_score")
+            if fatigue is not None or brain is not None:
+                # 全部交给 _update_fatigue_display
+                self._update_fatigue_display(
+                    fatigue if fatigue is not None else 0,
+                    brain if brain is not None else 0
+                )
             else:
-                if not hasattr(self, '_no_fatigue_score_warned'):
-                    logger.warning("⚠️ 多模态快照中没有 fatigue_score 字段")
-                    self._no_fatigue_score_warned = True
+                if not hasattr(self, '_no_scores_warned'):
+                    logger.warning("⚠️ 多模态快照中没有 fatigue_score 或 brain_load_score 字段")
+                    self._no_scores_warned = True
+            # 检查采集状态
+            if status != "running" and self._multimodal_poll_active:
+                self._multimodal_poll_timer.stop()
+                self._multimodal_poll_active = False
+                logger.info("多模态采集已停止，停止轮询")
 
         except Exception as exc:
             logger.error(f"处理多模态快照数据时出错: {exc}")
-    
-    def _update_fatigue_display(self, score) -> None:
-        """更新疲劳度显示（安全，失败不影响UI）"""
+
+    def _update_fatigue_display(self, score_f, score_b) -> None:
+        """更新疲劳度和脑负荷显示（安全，失败不影响UI）"""
         try:
-            score_value = float(score)
-            logger.debug(f"收到疲劳度数据: {score_value}")
-            
+            # 转换为浮动数值
+            score_value_f = float(score_f)
+            score_value_b = float(score_b)
+
+            logger.debug(f"收到疲劳度数据: {score_value_f}")
+            logger.debug(f"收到脑负荷数据: {score_value_b}")
+
             # 调试：检查当前步骤
             logger.debug(f"当前步骤: {self.current_step}")
             logger.debug(f"是否有 fatigue_info_label: {hasattr(self, 'fatigue_info_label')}")
             logger.debug(f"是否有 schulte_fatigue_label: {hasattr(self, 'schulte_fatigue_label')}")
-            
-            # 更新主窗口的脑负荷条
-            try:
-                main_window = self.window()
-                if main_window and hasattr(main_window, "brain_load_bar"):
-                    main_window.brain_load_bar.set_value(score_value)
-            except Exception as e:
-                logger.debug(f"更新脑负荷条失败: {e}")
-            
+            logger.debug(f"是否有 brain_load_info_label: {hasattr(self, 'brain_load_info_label')}")
+            logger.debug(f"是否有 schulte_brain_load_label: {hasattr(self, 'schulte_brain_load_label')}")
+
             # 根据疲劳度设置不同颜色
-            if score_value < 30:
-                color = "#27ae60"  # 绿色 - 正常
-                bg_color = "#d5f4e6"
-            elif score_value < 60:
-                color = "#f39c12"  # 橙色 - 警告
-                bg_color = "#fef5e7"
+            if score_value_f < 30:
+                color_f = "#27ae60"  # 绿色 - 正常
+                bg_color_f = "#d5f4e6"
+            elif score_value_f < 60:
+                color_f = "#f39c12"  # 橙色 - 警告
+                bg_color_f = "#fef5e7"
             else:
-                color = "#e74c3c"  # 红色 - 疲劳
-                bg_color = "#fadbd8"
-            
-            style_sheet = f"""
-                QLabel {{
-                    color: {color};
-                    background-color: {bg_color};
-                    padding: 8px;
-                    border-radius: 8px;
-                    font-weight: bold;
-                }}
-            """
-            
+                color_f = "#e74c3c"  # 红色 - 疲劳
+                bg_color_f = "#fadbd8"
+
+            # 根据脑负荷设置不同颜色
+            if score_value_b < 30:
+                color_b = "#27ae60"  # 绿色 - 正常
+                bg_color_b = "#d5f4e6"
+            elif score_value_b < 60:
+                color_b = "#f39c12"  # 橙色 - 警告
+                bg_color_b = "#fef5e7"
+            else:
+                color_b = "#e74c3c"  # 红色 - 疲劳
+                bg_color_b = "#fadbd8"
+
+            # 设置样式
+            style_f = f"""
+                     QLabel {{
+                         color: {color_f};
+                         background-color: {bg_color_f};
+                         padding: 8px;
+                         border-radius: 8px;
+                         font-weight: bold;
+                     }}
+                 """
+
+            style_b = f"""
+                     QLabel {{
+                         color: {color_b};
+                         background-color: {bg_color_b};
+                         padding: 8px;
+                         border-radius: 8px;
+                         font-weight: bold;
+                     }}
+                 """
+
             # 更新内嵌的疲劳度显示（第一页答题界面）
             if hasattr(self, 'fatigue_info_label'):
-                self.fatigue_info_label.setText(f"疲劳度: {int(score_value)}%")
-                self.fatigue_info_label.setStyleSheet(style_sheet)
-                
+                self.fatigue_info_label.setText(f"疲劳度: {int(score_value_f)}%")
+                self.fatigue_info_label.setStyleSheet(style_f)
+
                 if not hasattr(self, '_fatigue_updated'):
-                    logger.info(f"✅ 第一页疲劳度显示已更新: {int(score_value)}%")
+                    logger.info(f"✅ 第一页疲劳度显示已更新: {int(score_value_f)}%")
                     self._fatigue_updated = True
                 else:
-                    logger.debug(f"第一页疲劳度更新: {int(score_value)}%")
+                    logger.debug(f"第一页疲劳度更新: {int(score_value_f)}%")
             else:
                 logger.warning("⚠️ 第一页 fatigue_info_label 不存在！")
-            
-            # 同时更新舒尔特页面的疲劳度显示
+
+            # 更新舒尔特页面的疲劳度显示
             if hasattr(self, 'schulte_fatigue_label'):
-                self.schulte_fatigue_label.setText(f"疲劳度: {int(score_value)}%")
-                self.schulte_fatigue_label.setStyleSheet(style_sheet)
-                
+                self.schulte_fatigue_label.setText(f"疲劳度: {int(score_value_f)}%")
+                self.schulte_fatigue_label.setStyleSheet(style_f)
+
                 if not hasattr(self, '_schulte_fatigue_updated'):
-                    logger.info(f"✅ 舒尔特页疲劳度显示已更新: {int(score_value)}%")
+                    logger.info(f"✅ 舒尔特页疲劳度显示已更新: {int(score_value_f)}%")
                     self._schulte_fatigue_updated = True
                 else:
-                    logger.debug(f"舒尔特页疲劳度更新: {int(score_value)}%")
+                    logger.debug(f"舒尔特页疲劳度更新: {int(score_value_f)}%")
             else:
                 logger.debug("舒尔特页 schulte_fatigue_label 尚未创建")
-                        
+
+            # 更新脑负荷显示
+            if hasattr(self, 'brain_load_info_label'):
+                self.brain_load_info_label.setText(f"脑负荷: {int(score_value_b)}%")
+                self.brain_load_info_label.setStyleSheet(style_b)
+
+                if not hasattr(self, '_brain_load_updated'):
+                    logger.info(f"✅ 第一页脑负荷显示已更新: {int(score_value_b)}%")
+                    self._brain_load_updated = True
+                else:
+                    logger.debug(f"第一页脑负荷更新: {int(score_value_b)}%")
+            else:
+                logger.warning("⚠️ 第一页 brain_load_info_label 不存在！")
+
+            # 更新舒尔特页面的脑负荷显示
+            if hasattr(self, 'schulte_brain_load_label'):
+                self.schulte_brain_load_label.setText(f"脑负荷: {int(score_value_b)}%")
+                self.schulte_brain_load_label.setStyleSheet(style_b)
+
+                if not hasattr(self, '_schulte_brain_load_updated'):
+                    logger.info(f"✅ 舒尔特页脑负荷显示已更新: {int(score_value_b)}%")
+                    self._schulte_brain_load_updated = True
+                else:
+                    logger.debug(f"舒尔特页脑负荷更新: {int(score_value_b)}%")
+            else:
+                logger.debug("舒尔特页 schulte_brain_load_label 尚未创建")
+
         except Exception as exc:
-            logger.error(f"更新疲劳度显示失败: {exc}")
+            logger.error(f"更新疲劳度和脑负荷显示失败: {exc}")
 
     def _init_ui(self):
         """初始化用户界面。"""
@@ -843,14 +850,16 @@ class TestPage(QWidget):
         return container
 
     def _create_camera_view(self):
-        """创建摄像头视图，包含画面和疲劳度信息"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(scale(8))
-        layout.setContentsMargins(0, 0, 0, 0)
-        
+        """创建摄像头视图，包含画面和疲劳度、脑负荷信息"""
+        inner_widget = QWidget()
+        vlayout = QVBoxLayout(inner_widget)
+        vlayout.setSpacing(scale(8))
+        vlayout.setContentsMargins(0, 0, 0, 0)
+
+        vlayout.addStretch(1)
+
         # 摄像头画面 - 缩小尺寸以匹配右侧高度
-        cam_width, cam_height = scale_size(360, 260)
+        cam_width, cam_height = scale_size(560, 420)
         self.camera_preview = CameraPreviewWidget(cam_width, cam_height, placeholder_text="摄像头画面加载中...")
         self.camera_preview.label.setObjectName("cameraView")
         self.camera_preview.label.setStyleSheet(
@@ -864,28 +873,28 @@ class TestPage(QWidget):
             }
             """
         )
-        layout.addWidget(self.camera_preview, 0, Qt.AlignCenter)
-        
+        vlayout.addWidget(self.camera_preview, 0, Qt.AlignCenter)
+
         # 疲劳度信息容器 - 调整尺寸和间距
         fatigue_container = QFrame()
         fatigue_container.setObjectName("fatigueContainer")
         fatigue_container.setFixedWidth(cam_width)
         fatigue_container.setStyleSheet("""
-            QFrame#fatigueContainer {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff, stop:1 #f8f9fa);
-                border: 2px solid #e0e0e0;
-                border-radius: 10px;
-                padding: 10px;
-            }
-        """)
-        
+                  QFrame#fatigueContainer {
+                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      border: 2px solid #e0e0e0;
+                      border-radius: 10px;
+                      padding: 10px;
+                  }
+              """)
+
         fatigue_layout = QVBoxLayout(fatigue_container)
         fatigue_layout.setSpacing(scale(6))
         margin = scale(6)
         fatigue_layout.setContentsMargins(margin, margin, margin, margin)
-        
-        # 标题
+
+        # 疲劳度标题
         title_label = QLabel("🧠 疲劳度监测")
         title_font = QFont()
         title_font.setPointSize(scale_font(11))
@@ -894,14 +903,14 @@ class TestPage(QWidget):
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
         fatigue_layout.addWidget(title_label)
-        
+
         # 分隔线
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
         separator.setStyleSheet("background-color: #bdc3c7;")
         fatigue_layout.addWidget(separator)
-        
+
         # 疲劳度显示（大号）
         self.fatigue_info_label = QLabel("疲劳度: --")
         info_font = QFont()
@@ -910,38 +919,104 @@ class TestPage(QWidget):
         self.fatigue_info_label.setFont(info_font)
         self.fatigue_info_label.setAlignment(Qt.AlignCenter)
         self.fatigue_info_label.setStyleSheet("""
-            QLabel {
-                color: #7f8c8d;
-                padding: 8px;
-                background-color: #ecf0f1;
-                border-radius: 8px;
-            }
-        """)
+                  QLabel {
+                      color: #7f8c8d;
+                      padding: 8px;
+                      background-color: #ecf0f1;
+                      border-radius: 8px;
+                  }
+              """)
         fatigue_layout.addWidget(self.fatigue_info_label)
-        
-        # 提示信息
+
+        vlayout.addWidget(fatigue_container, 0, Qt.AlignCenter)
+
+        # 脑负荷信息容器 - 与疲劳度信息容器相同
+        brain_load_container = QFrame()
+        brain_load_container.setObjectName("brainLoadContainer")
+        brain_load_container.setFixedWidth(cam_width)
+        brain_load_container.setStyleSheet("""
+                  QFrame#brainLoadContainer {
+                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      border: 2px solid #e0e0e0;
+                      border-radius: 10px;
+                      padding: 10px;
+                  }
+              """)
+
+        brain_load_layout = QVBoxLayout(brain_load_container)
+        brain_load_layout.setSpacing(scale(6))
+        brain_load_layout.setContentsMargins(margin, margin, margin, margin)
+
+        # 脑负荷标题
+        brain_load_title_label = QLabel("🧠 脑负荷监测")
+        brain_load_title_font = QFont()
+        brain_load_title_font.setPointSize(scale_font(11))
+        brain_load_title_font.setBold(True)
+        brain_load_title_label.setFont(brain_load_title_font)
+        brain_load_title_label.setAlignment(Qt.AlignCenter)
+        brain_load_title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
+        brain_load_layout.addWidget(brain_load_title_label)
+
+        # 分隔线
+        brain_load_separator = QFrame()
+        brain_load_separator.setFrameShape(QFrame.HLine)
+        brain_load_separator.setFrameShadow(QFrame.Sunken)
+        brain_load_separator.setStyleSheet("background-color: #bdc3c7;")
+        brain_load_layout.addWidget(brain_load_separator)
+
+        # 脑负荷显示（大号）
+        self.brain_load_info_label = QLabel("脑负荷: --")
+        brain_load_info_font = QFont()
+        brain_load_info_font.setPointSize(scale_font(13))
+        brain_load_info_font.setBold(True)
+        self.brain_load_info_label.setFont(brain_load_info_font)
+        self.brain_load_info_label.setAlignment(Qt.AlignCenter)
+        self.brain_load_info_label.setStyleSheet("""
+                  QLabel {
+                      color: #7f8c8d;
+                      padding: 8px;
+                      background-color: #ecf0f1;
+                      border-radius: 8px;
+                  }
+              """)
+        brain_load_layout.addWidget(self.brain_load_info_label)
+
+        vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
+
+        # 实时监测中... 提示放在疲劳度和脑负荷显示下方
         tip_label = QLabel("实时监测中...")
         tip_font = QFont()
         tip_font.setPointSize(scale_font(8))
         tip_label.setFont(tip_font)
         tip_label.setAlignment(Qt.AlignCenter)
         tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
-        fatigue_layout.addWidget(tip_label)
-        
-        layout.addWidget(fatigue_container, 0, Qt.AlignCenter)
-        layout.addStretch(1)
+        vlayout.addWidget(tip_label)
 
-        return widget
-    
+        vlayout.addStretch(1)
+
+        # ✅ 新增一层水平布局，用于让整个块在水平方向居中
+        outer_widget = QWidget()
+        hlayout = QHBoxLayout(outer_widget)
+        hlayout.setContentsMargins(0, 0, 0, 0)
+        hlayout.addStretch(1)  # 左侧空白
+        hlayout.addWidget(inner_widget)  # 中间摄像头列
+        hlayout.addStretch(1)  # 右侧空白
+
+        return outer_widget
+
     def _create_camera_view_for_schulte(self):
         """为舒尔特页面创建摄像头视图（与第一页保持一致）"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(scale(8))
-        layout.setContentsMargins(0, 0, 0, 0)
-        
+        inner_widget = QWidget()
+        vlayout = QVBoxLayout(inner_widget)
+        vlayout.setSpacing(scale(8))
+        vlayout.setContentsMargins(0, 0, 0, 0)
+
+        # 顶部拉伸
+        vlayout.addStretch(1)
+
         # 摄像头画面（与第一页相同尺寸）- 缩小尺寸以匹配右侧高度
-        cam_width, cam_height = scale_size(360, 260)
+        cam_width, cam_height = scale_size(560, 420)
         self.schulte_camera_preview = CameraPreviewWidget(cam_width, cam_height, placeholder_text="摄像头画面")
         self.schulte_camera_preview.label.setObjectName("schulteCameraView")
         self.schulte_camera_preview.label.setStyleSheet(
@@ -955,28 +1030,28 @@ class TestPage(QWidget):
             }
             """
         )
-        layout.addWidget(self.schulte_camera_preview, 0, Qt.AlignCenter)
-        
+        vlayout.addWidget(self.schulte_camera_preview, 0, Qt.AlignCenter)
+
         # 疲劳度信息容器（与第一页相同样式）- 调整尺寸和间距
         fatigue_container = QFrame()
         fatigue_container.setObjectName("schulteFatigueContainer")
         fatigue_container.setFixedWidth(cam_width)
         fatigue_container.setStyleSheet("""
-            QFrame#schulteFatigueContainer {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #ffffff, stop:1 #f8f9fa);
-                border: 2px solid #e0e0e0;
-                border-radius: 10px;
-                padding: 10px;
-            }
-        """)
-        
+                  QFrame#schulteFatigueContainer {
+                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      border: 2px solid #e0e0e0;
+                      border-radius: 10px;
+                      padding: 10px;
+                  }
+              """)
+
         fatigue_layout = QVBoxLayout(fatigue_container)
         fatigue_layout.setSpacing(scale(6))
         margin = scale(6)
         fatigue_layout.setContentsMargins(margin, margin, margin, margin)
-        
-        # 标题
+
+        # 疲劳度标题
         title_label = QLabel("🧠 疲劳度监测")
         title_font = QFont()
         title_font.setPointSize(scale_font(11))
@@ -985,14 +1060,14 @@ class TestPage(QWidget):
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
         fatigue_layout.addWidget(title_label)
-        
+
         # 分隔线
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
         separator.setStyleSheet("background-color: #bdc3c7;")
         fatigue_layout.addWidget(separator)
-        
+
         # 疲劳度显示（大号）
         self.schulte_fatigue_label = QLabel("疲劳度: --")
         info_font = QFont()
@@ -1001,15 +1076,67 @@ class TestPage(QWidget):
         self.schulte_fatigue_label.setFont(info_font)
         self.schulte_fatigue_label.setAlignment(Qt.AlignCenter)
         self.schulte_fatigue_label.setStyleSheet("""
-            QLabel {
-                color: #7f8c8d;
-                padding: 8px;
-                background-color: #ecf0f1;
-                border-radius: 8px;
-            }
-        """)
+                  QLabel {
+                      color: #7f8c8d;
+                      padding: 8px;
+                      background-color: #ecf0f1;
+                      border-radius: 8px;
+                  }
+              """)
         fatigue_layout.addWidget(self.schulte_fatigue_label)
-        
+
+        # 脑负荷信息容器 - 与疲劳度信息容器相同
+        brain_load_container = QFrame()
+        brain_load_container.setObjectName("schulteBrainLoadContainer")
+        brain_load_container.setFixedWidth(cam_width)
+        brain_load_container.setStyleSheet("""
+                  QFrame#schulteBrainLoadContainer {
+                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      border: 2px solid #e0e0e0;
+                      border-radius: 10px;
+                      padding: 10px;
+                  }
+              """)
+
+        brain_load_layout = QVBoxLayout(brain_load_container)
+        brain_load_layout.setSpacing(scale(6))
+        brain_load_layout.setContentsMargins(margin, margin, margin, margin)
+
+        # 脑负荷标题
+        brain_load_title_label = QLabel("🧠 脑负荷监测")
+        brain_load_title_font = QFont()
+        brain_load_title_font.setPointSize(scale_font(11))
+        brain_load_title_font.setBold(True)
+        brain_load_title_label.setFont(brain_load_title_font)
+        brain_load_title_label.setAlignment(Qt.AlignCenter)
+        brain_load_title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
+        brain_load_layout.addWidget(brain_load_title_label)
+
+        # 分隔线
+        brain_load_separator = QFrame()
+        brain_load_separator.setFrameShape(QFrame.HLine)
+        brain_load_separator.setFrameShadow(QFrame.Sunken)
+        brain_load_separator.setStyleSheet("background-color: #bdc3c7;")
+        brain_load_layout.addWidget(brain_load_separator)
+
+        # 脑负荷显示（大号）
+        self.schulte_brain_load_label = QLabel("脑负荷: --")
+        brain_load_info_font = QFont()
+        brain_load_info_font.setPointSize(scale_font(13))
+        brain_load_info_font.setBold(True)
+        self.schulte_brain_load_label.setFont(brain_load_info_font)
+        self.schulte_brain_load_label.setAlignment(Qt.AlignCenter)
+        self.schulte_brain_load_label.setStyleSheet("""
+                  QLabel {
+                      color: #7f8c8d;
+                      padding: 8px;
+                      background-color: #ecf0f1;
+                      border-radius: 8px;
+                  }
+              """)
+        brain_load_layout.addWidget(self.schulte_brain_load_label)
+
         # 提示信息
         tip_label = QLabel("实时监测中...")
         tip_font = QFont()
@@ -1017,12 +1144,23 @@ class TestPage(QWidget):
         tip_label.setFont(tip_font)
         tip_label.setAlignment(Qt.AlignCenter)
         tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
-        fatigue_layout.addWidget(tip_label)
-        
-        layout.addWidget(fatigue_container, 0, Qt.AlignCenter)
-        layout.addStretch(1)
-        
-        return widget
+        brain_load_layout.addWidget(tip_label)
+
+        # 将疲劳度和脑负荷容器添加到布局
+        vlayout.addWidget(fatigue_container, 0, Qt.AlignCenter)
+        vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
+
+        vlayout.addStretch(1)
+
+        # ✅ 新增一层水平布局，用于让整个块在水平方向居中
+        outer_widget = QWidget()
+        hlayout = QHBoxLayout(outer_widget)
+        hlayout.setContentsMargins(0, 0, 0, 0)
+        hlayout.addStretch(1)  # 左侧空白
+        hlayout.addWidget(inner_widget)  # 中间摄像头列
+        hlayout.addStretch(1)  # 右侧空白
+
+        return outer_widget
 
     def _create_answer_area_widgets(self):
         # 语音答题页面
@@ -2378,11 +2516,7 @@ class TestPage(QWidget):
                 av_stop_recording()
             except Exception:
                 pass
-            try:
-                av_stop_collection()
-            except Exception:
-                pass
-            logger.info("语音答题环节结束，已停止 AV 采集器")
+            logger.info("语音答题环节结束，停止录制")
         except Exception as e:
             logger.warning(f"关闭摄像头时出现问题: {e}")
 
