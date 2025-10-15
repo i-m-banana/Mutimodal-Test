@@ -113,4 +113,5 @@ docs/
 model_backends/emotion_fatigue_infer/
 
 .gitignore
-.copilot-instructions.md
+
+AGENTS.MD
