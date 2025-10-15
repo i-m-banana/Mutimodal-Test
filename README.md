@@ -19,16 +19,25 @@
 ### 3.1 核心组件
 | 组件类型     | 包含模块                                                                 |
 |--------------|--------------------------------------------------------------------------|
-| 后端服务（src/） | 调度中心、事件总线、系统监控、数据采集器（音视频/EEG/传感器）、检测器、推理引擎、WebSocket 接口服务 |
+| 后端服务（src/） | 调度中心、事件总线、系统监控、数据采集器（音视频/EEG/传感器）、检测器、统一推理服务、WebSocket 接口服务 |
 | 前端界面（ui/）  | Qt 应用框架、响应式 UI 组件、实时监控面板、用户管理与测评系统、数据可视化模块       |
 | 模型后端（model_backends/） | 抽象基类（base/）、疲劳度模型（fatigue_backend/）、情绪模型（emotion_backend/）、脑电模型（eeg_backend/） |
+| 集成模型（src/models/） | 疲劳度模型（FatigueModel）、情绪模型（EmotionModel），支持集成模式直接在主进程中运行 |
 
 ### 3.2 数据流
 ```
-UI → 主后端 (EventBus) → ModelProxyService → 模型后端 (隔离环境)
-       ↓                        ↓
-   数据采集               检测结果聚合
+UI → 主后端 (WebSocket:8765) → UnifiedInferenceService → 模型实例 (集成/远程)
+       ↓                              ↓                        ↓
+   数据采集                    模型推理调度              推理结果返回
+       ↓                              ↓                        ↓
+   检测结果聚合                  日志记录                UI显示结果
 ```
+
+**两种模型部署模式**：
+- **集成模式（Integrated）**：模型直接在主进程中运行，性能最优，内存共享
+- **远程模式（Remote）**：模型运行在独立进程，通过WebSocket通信，环境隔离
+
+**详细调用流程**：参见 `UI_TO_BACKEND_FLOW.md` 文档
 
 ### 3.3 端口分配
 | 端口  | 用途                     |
@@ -39,10 +48,12 @@ UI → 主后端 (EventBus) → ModelProxyService → 模型后端 (隔离环境
 | 8769  | 脑电模型后端接口          |
 
 ### 3.4 架构优势
-- **环境隔离**：每个模型运行在独立 Python 进程/环境，避免依赖冲突
+- **灵活部署**：支持集成模式（高性能）和远程模式（环境隔离），配置文件即可切换
+- **环境隔离**：远程模式下每个模型运行在独立 Python 进程/环境，避免依赖冲突
 - **可靠性**：模型崩溃不影响主系统，支持自动重连机制
 - **扩展性**：统一 WebSocket 协议，快速新增模型后端
 - **错误处理**：Future-based API + 超时控制 + 健康检查（生产级保障）
+- **完整日志**：全链路推理日志记录，方便性能分析和问题排查（参见 `MODEL_INFERENCE_LOGGING.md`）
 
 
 ## 四、目录结构
@@ -57,6 +68,12 @@ project-root/
 ├── data/            # 数据目录（原始数据、处理结果、日志输出）
 ├── docs/            # 架构与部署文档
 ├── logs/            # 日志输出（运行时自动生成）
+│   ├── model/       # 模型推理日志
+│   │   ├── fatigue_backend.log   # 疲劳度模型日志
+│   │   ├── emotion_backend.log   # 情绪模型日志
+│   │   └── model.log             # 集成模型日志
+│   ├── collector/   # 数据采集日志
+│   └── detector/    # 检测器日志
 ├── model_backends/  # 独立模型后端服务
 │   ├── base/                 # 抽象基类（BaseModelBackend：WebSocket 服务器框架）
 │   ├── fatigue_backend/      # 疲劳度模型（PyTorch 实现，多模态推理）
@@ -66,7 +83,8 @@ project-root/
 │   ├── core/        # 核心模块（调度中心、事件总线、系统监控）
 │   ├── collectors/  # 数据采集器（音视频、EEG、多模态传感器）
 │   ├── detectors/   # 检测模块（事件订阅与处理逻辑）
-│   ├── services/    # 后端服务（AV/EEG/TTS/数据库/模型代理）
+│   ├── models/      # 集成模型（FatigueModel、EmotionModel）
+│   ├── services/    # 后端服务（AV/EEG/TTS/数据库/统一推理服务）
 │   ├── interfaces/  # 接口模块（WebSocket 服务器/客户端）
 │   └── utils/       # 工具类（通用函数、格式处理）
 ├── ui/              # Qt 前端界面
@@ -139,7 +157,12 @@ python -m ui.main --debug
 ```
 
 
-### 5.4 启动模型后端（可选）
+### 5.4 启动模型后端（可选 - 仅远程模式需要）
+
+**注意**：如果配置文件中使用 `mode: integrated`（集成模式），模型会在主后端进程中运行，**无需启动独立的模型后端**。
+
+只有在使用 `mode: remote`（远程模式）时，才需要手动启动独立的模型后端进程：
+
 以「疲劳度模型后端」为例：
 ```bash
 # 进入模型后端目录
@@ -165,6 +188,15 @@ python -m venv .venv
 pip install -r requirements.txt
 python main.py  # 默认端口8768
 ```
+
+**模式对比**：
+| 特性 | 集成模式 (integrated) | 远程模式 (remote) |
+|------|----------------------|-------------------|
+| 启动方式 | 主后端自动加载 | 需手动启动独立进程 |
+| 性能 | 最优（内存共享） | 略低（网络通信） |
+| 隔离性 | 共享环境 | 完全隔离 |
+| 稳定性 | 模型崩溃影响主进程 | 模型崩溃不影响主系统 |
+| 适用场景 | 开发测试、单机部署 | 生产环境、分布式部署 |
 
 
 ## 六、配置说明
@@ -195,7 +227,24 @@ setx UI_FORCE_SIMULATION 1
 | config/system.yaml    | 系统全局参数                          | 心跳间隔、超时时间        |
 | config/collectors.yaml| 采集器配置                            | 采样率、设备类型、启用状态 |
 | config/detectors.yaml | 检测器配置                            | 检测阈值、订阅事件主题    |
-| config/models.yaml    | 模型配置                              | 模型路径、后端关联、参数  |
+| config/app_config.yaml| 模型部署配置                          | 模型模式(集成/远程)、后端地址、启用状态 |
+
+**模型配置示例** (`config/app_config.yaml`):
+```yaml
+model_backends:
+  # 集成模式 - 模型在主进程中运行
+  - name: "fatigue"
+    type: "fatigue"
+    enabled: true
+    mode: "integrated"  # ✅ 推荐：性能最优
+    
+  # 远程模式 - 模型在独立进程中运行
+  - name: "emotion"
+    type: "emotion"
+    enabled: true
+    mode: "remote"
+    remote_url: "ws://127.0.0.1:8768"  # 需手动启动emotion_backend
+```
 
 
 ## 七、开发指南
@@ -212,15 +261,32 @@ setx UI_FORCE_SIMULATION 1
 
 
 ### 7.2 扩展新模型
+#### 方式1：集成模式（推荐）
+1. 在 `src/models/` 新建模型类，继承 `BaseInferenceModel`
+2. 实现 `initialize()` 和 `infer()` 方法
+3. 在 `config/app_config.yaml` 配置：
+   ```yaml
+   model_backends:
+     - name: "new_model"
+       type: "new_model"
+       enabled: true
+       mode: "integrated"
+   ```
+
+#### 方式2：远程模式（环境隔离）
 1. 在 `model_backends/` 新建目录（如 `new_model_backend/`）
 2. 继承 `base/base_backend.py` 中的 `BaseModelBackend`
-3. 实现 `infer()` 推理方法与 WebSocket 通信逻辑
-4. 在 `config/models.yaml` 关联模型与后端：
+3. 实现 `initialize_model()` 和 `infer()` 推理方法
+4. 在 `config/app_config.yaml` 配置：
    ```yaml
-   - name: new_model
-     path: ./models/new_model.pth
-     backend_port: 8769  # 新模型后端端口
+   model_backends:
+     - name: "new_model"
+       type: "new_model"
+       enabled: true
+       mode: "remote"
+       remote_url: "ws://127.0.0.1:8770"
    ```
+5. 手动启动后端：`python model_backends/new_model_backend/main.py`
 
 
 ### 7.3 扩展新检测器
@@ -242,12 +308,18 @@ python tests/test_responsive.py                  # 响应式 UI
 
 
 ### 8.2 参考文档
-所有详细文档位于 `aidebug/` 目录：
-- `QUICK_START.md`：快速启动指南（简化版）
-- `MULTI_MODEL_BACKEND_ARCHITECTURE.md`：多模型后端架构设计
-- `MULTI_MODEL_BACKEND_INTERFACES.md`：WebSocket 接口协议说明
-- `TESTING_GUIDE.md`：测试用例编写指南
-- `RESOLUTION_ADAPTATION.md`：UI 分辨率适配说明
+所有详细文档位于项目根目录：
+- **核心文档**：
+  - `UI_TO_BACKEND_FLOW.md`：UI通过WebSocket调用模型的完整流程（含代码示例）
+  - `MODEL_INFERENCE_LOGGING.md`：模型推理日志配置与使用说明
+  - `README.md`：本文档，项目总体说明
+
+- **aidebug/ 目录**（调试与开发文档）：
+  - `QUICK_START.md`：快速启动指南（简化版）
+  - `MULTI_MODEL_BACKEND_ARCHITECTURE.md`：多模型后端架构设计
+  - `MULTI_MODEL_BACKEND_INTERFACES.md`：WebSocket 接口协议说明
+  - `TESTING_GUIDE.md`：测试用例编写指南
+  - `RESOLUTION_ADAPTATION.md`：UI 分辨率适配说明
 
 
 ## 九、模拟模式说明
@@ -279,7 +351,49 @@ python tests/test_responsive.py                  # 响应式 UI
 - 防火墙拦截：关闭本地防火墙或添加端口例外（8765~8768）
 
 
-## 十一、许可证与贡献
+## 十一、常见问题（FAQ）
+
+### Q1: 集成模式和远程模式如何选择？
+**A**: 
+- **集成模式**（推荐）：适合单机部署、开发测试，性能最优，配置简单，无需启动独立进程
+- **远程模式**：适合生产环境、分布式部署，环境完全隔离，模型崩溃不影响主系统
+
+### Q2: 如何查看模型推理日志？
+**A**: 
+- 集成模式日志：`logs/model/model.log`
+- 远程模式日志：
+  - 疲劳度：`logs/model/fatigue_backend.log`
+  - 情绪：`logs/model/emotion_backend.log`
+- 日志内容包括：推理分数、耗时、数据量统计等
+- 详细说明参见 `MODEL_INFERENCE_LOGGING.md`
+
+### Q3: UI如何调用后端模型？
+**A**: 
+两种调用方式：
+1. **命令模式**：通过 `backend_proxy.emotion_analyze()` 发送命令
+2. **推理模式**：直接发送 `model_inference` WebSocket消息
+
+完整调用流程和代码示例参见 `UI_TO_BACKEND_FLOW.md`
+
+### Q4: 模型后端启动失败怎么办？
+**A**: 
+1. 检查端口占用：`netstat -ano | findstr 8767`
+2. 检查依赖安装：`pip install -r requirements.txt`
+3. 检查配置文件：确认 `config/app_config.yaml` 中模型启用且端口正确
+4. 查看日志：检查 `logs/model/` 目录下对应的日志文件
+
+### Q5: 如何切换模型部署模式？
+**A**: 
+修改 `config/app_config.yaml`：
+```yaml
+model_backends:
+  - name: "fatigue"
+    mode: "integrated"  # 改为 "remote" 即可切换
+```
+切换到远程模式后需要手动启动对应的模型后端进程。
+
+
+## 十二、许可证与贡献
 - **许可证**：本项目采用 MIT 许可证（可自由使用、修改，需保留版权声明）
 - **贡献方式**：欢迎提交 Issue（问题反馈）或 Pull Request（代码贡献）
 - **联系方式**：通过 GitHub Issues 沟通，或联系项目维护者
