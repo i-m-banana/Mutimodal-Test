@@ -21,7 +21,7 @@
 |--------------|--------------------------------------------------------------------------|
 | 后端服务（src/） | 调度中心、事件总线、系统监控、数据采集器（音视频/EEG/传感器）、检测器、推理引擎、WebSocket 接口服务 |
 | 前端界面（ui/）  | Qt 应用框架、响应式 UI 组件、实时监控面板、用户管理与测评系统、数据可视化模块       |
-| 模型后端（model_backends/） | 抽象基类（base/）、多模态模型（multimodal_backend/）、情绪模型（emotion_backend/）、脑电模型（eeg_backend/） |
+| 模型后端（model_backends/） | 抽象基类（base/）、疲劳度模型（fatigue_backend/）、情绪模型（emotion_backend/）、脑电模型（eeg_backend/） |
 
 ### 3.2 数据流
 ```
@@ -34,9 +34,9 @@ UI → 主后端 (EventBus) → ModelProxyService → 模型后端 (隔离环境
 | 端口  | 用途                     |
 |-------|--------------------------|
 | 8765  | 主后端 WebSocket 接口    |
-| 8766  | 多模态模型后端接口        |
-| 8767  | 情绪模型后端接口          |
-| 8768  | 脑电模型后端接口          |
+| 8767  | 疲劳度模型后端接口        |
+| 8768  | 情绪模型后端接口          |
+| 8769  | 脑电模型后端接口          |
 
 ### 3.4 架构优势
 - **环境隔离**：每个模型运行在独立 Python 进程/环境，避免依赖冲突
@@ -59,8 +59,8 @@ project-root/
 ├── logs/            # 日志输出（运行时自动生成）
 ├── model_backends/  # 独立模型后端服务
 │   ├── base/                 # 抽象基类（BaseModelBackend：WebSocket 服务器框架）
-│   ├── multimodal_backend/   # 多模态模型示例（PyTorch 实现，含模拟推理）
-│   ├── emotion_backend/      # 情绪模型（待实现，TensorFlow 框架）
+│   ├── fatigue_backend/      # 疲劳度模型（PyTorch 实现，多模态推理）
+│   ├── emotion_backend/      # 情绪模型（PyTorch + Transformers，视觉+音频+文本）
 │   └── eeg_backend/          # 脑电模型（待实现，MNE-Python 框架）
 ├── src/             # 后端源代码
 │   ├── core/        # 核心模块（调度中心、事件总线、系统监控）
@@ -140,10 +140,10 @@ python -m ui.main --debug
 
 
 ### 5.4 启动模型后端（可选）
-以「多模态模型后端」为例：
+以「疲劳度模型后端」为例：
 ```bash
 # 进入模型后端目录
-cd model_backends/multimodal_backend
+cd model_backends/fatigue_backend
 
 # 创建并激活独立虚拟环境（避免依赖冲突）
 python -m venv .venv
@@ -153,8 +153,17 @@ python -m venv .venv
 # 安装模型依赖
 pip install -r requirements.txt
 
-# 启动模型后端
+# 启动模型后端（默认端口8767）
 python main.py
+```
+
+**情绪模型后端**：
+```bash
+cd model_backends/emotion_backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py  # 默认端口8768
 ```
 
 

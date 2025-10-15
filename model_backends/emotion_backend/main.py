@@ -334,6 +334,14 @@ class EmotionBackend(BaseModelBackend):
         print(f"  平均每样本: {inference_time*1000/len(samples):.0f}ms")
         print(f"{'='*60}\n")
         
+        # 记录推理日志
+        self.logger.info(
+            f"情绪推理完成: 分数={round(final_score, 2)}, "
+            f"样本数={len(samples)}, "
+            f"总耗时={inference_time*1000:.0f}ms, "
+            f"平均={inference_time*1000/len(samples):.0f}ms/样本"
+        )
+        
         result = {
             "emotion_score": round(final_score, 2),
             "sample_scores": scores.tolist(),
@@ -376,12 +384,34 @@ class EmotionBackend(BaseModelBackend):
 
 def main():
     """主函数"""
-    # 配置日志
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    # 配置日志 - 同时输出到控制台和文件
+    log_dir = Path(__file__).parent.parent.parent / "logs" / "model"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "emotion_backend.log"
+    
+    # 创建根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # 日志格式
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # 文件处理器（追加模式）
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    
+    logging.info(f"📝 日志保存到: {log_file}")
     
     # 模型后端配置
     config = {

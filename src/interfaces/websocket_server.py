@@ -145,6 +145,19 @@ class WebsocketPushInterface(BaseInterface):
             self.logger.info("Received command from client: %s", action)
             self._emit_command(action, body, request_id, websocket)
             return
+        if msg_type == "model_inference":
+            # 模型推理请求
+            model_type = data.get("model_type")
+            request_id = data.get("request_id") or uuid.uuid4().hex
+            inference_data = data.get("data") or {}
+            self.logger.info("🔍 收到模型推理请求: model=%s, request_id=%s", model_type, request_id)
+            await self._handle_inference_request(model_type, inference_data, request_id, websocket)
+            return
+        if msg_type == "get_model_status":
+            # 查询模型状态
+            self.logger.info("📊 收到模型状态查询请求")
+            await self._handle_model_status_request(websocket)
+            return
         self.logger.debug("Unhandled client message: %s", data)
 
     def _make_event_handler(self, topic: EventTopic):
@@ -218,6 +231,117 @@ class WebsocketPushInterface(BaseInterface):
             except Exception as exc:  # pragma: no cover - defensive guard
                 self.logger.debug("Failed to replay cached payload: %s", exc)
                 break
+
+    async def _handle_inference_request(
+        self,
+        model_type: str,
+        data: Dict[str, Any],
+        request_id: str,
+        websocket: WebSocketServerProtocol
+    ) -> None:
+        """处理模型推理请求"""
+        import time
+        start_time = time.time()
+        
+        try:
+            # 通过事件总线触发推理
+            inference_service = getattr(self.bus, '_inference_service', None)
+            if not inference_service:
+                self.logger.error("❌ 推理服务未初始化")
+                await websocket.send(json.dumps({
+                    "type": "model_inference_result",
+                    "request_id": request_id,
+                    "result": {
+                        "status": "error",
+                        "error": "推理服务未初始化"
+                    }
+                }))
+                return
+            
+            # 检查模型是否可用
+            if model_type in inference_service.integrated_models:
+                self.logger.info("✅ 使用集成模型: %s", model_type)
+                model = inference_service.integrated_models[model_type]
+                result = model.infer(data)
+            elif model_type in inference_service.remote_clients:
+                self.logger.info("✅ 使用远程客户端: %s", model_type)
+                client = inference_service.remote_clients[model_type]
+                if not client.is_healthy():
+                    raise Exception(f"远程模型未连接: {model_type}")
+                future = client.send_inference_request(data, timeout=30.0)
+                result = future.result(timeout=30.0)
+            else:
+                raise Exception(f"模型未加载: {model_type}")
+            
+            # 计算延迟
+            latency_ms = (time.time() - start_time) * 1000
+            
+            # 返回结果
+            response = {
+                "type": "model_inference_result",
+                "request_id": request_id,
+                "result": {
+                    "status": result.get("status", "success"),
+                    "predictions": result.get("predictions", result),
+                    "latency_ms": latency_ms
+                }
+            }
+            
+            if result.get("status") == "error":
+                response["result"]["error"] = result.get("error", "Unknown error")
+                self.logger.error("❌ 推理失败: %s", result.get("error"))
+            else:
+                self.logger.info("✅ 推理完成: model=%s, latency=%.2fms", model_type, latency_ms)
+            
+            await websocket.send(json.dumps(response, default=self._json_default))
+            
+        except Exception as e:
+            self.logger.error("❌ 推理请求处理失败: %s", e, exc_info=True)
+            await websocket.send(json.dumps({
+                "type": "model_inference_result",
+                "request_id": request_id,
+                "result": {
+                    "status": "error",
+                    "error": str(e)
+                }
+            }))
+
+    async def _handle_model_status_request(self, websocket: WebSocketServerProtocol) -> None:
+        """处理模型状态查询"""
+        try:
+            inference_service = getattr(self.bus, '_inference_service', None)
+            if not inference_service:
+                await websocket.send(json.dumps({
+                    "type": "model_status",
+                    "running": False,
+                    "models": {
+                        "integrated_models": [],
+                        "remote_clients": [],
+                        "total": 0
+                    }
+                }))
+                return
+            
+            status = inference_service.get_status()
+            self.logger.info("📊 模型状态: %s", status)
+            
+            await websocket.send(json.dumps({
+                "type": "model_status",
+                "running": status["running"],
+                "models": {
+                    "integrated_models": status["integrated_models"],
+                    "remote_clients": status["remote_clients"],
+                    "total": status["total"]
+                }
+            }))
+            
+        except Exception as e:
+            self.logger.error("❌ 查询模型状态失败: %s", e, exc_info=True)
+            await websocket.send(json.dumps({
+                "type": "model_status",
+                "running": False,
+                "error": str(e)
+            }))
 
     @staticmethod
     def _json_default(value: Any) -> Any:

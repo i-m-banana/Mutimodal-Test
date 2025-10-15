@@ -108,6 +108,7 @@ htmlcov/
 # Historical Versions
 历史版本/
 
+tests/
 scripts/
 docs/
 model_backends/emotion_fatigue_infer/
@@ -115,3 +116,4 @@ model_backends/emotion_fatigue_infer/
 .gitignore
 
 AGENTS.MD
+

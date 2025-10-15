@@ -10,11 +10,14 @@
 model_backends/
 ├── base/                      # 抽象基类
 │   └── base_backend.py        # BaseModelBackend - 所有后端的父类
-├── multimodal_backend/        # 多模态模型后端 (示例实现) ✅
+├── fatigue_backend/           # 疲劳度模型后端 ✅
 │   ├── main.py               # 完整实现
 │   ├── requirements.txt      # 独立依赖
 │   └── README.md             # 使用说明
-├── emotion_backend/           # 情绪模型后端 (待实现) ⚠️
+├── emotion_backend/           # 情绪模型后端 ✅
+│   ├── main.py               # 完整实现
+│   ├── requirements.txt      # 独立依赖
+│   └── README.md             # 使用说明
 └── eeg_backend/               # 脑电模型后端 (待实现) ⚠️
 ```
 
@@ -24,11 +27,11 @@ model_backends/
 
 ### 1. 创建新的模型后端
 
-使用 `multimodal_backend` 作为模板:
+使用 `fatigue_backend` 或 `emotion_backend` 作为模板:
 
 ```bash
 # 复制模板
-cp -r multimodal_backend your_backend
+cp -r fatigue_backend your_backend
 
 # 修改实现
 cd your_backend
@@ -477,10 +480,10 @@ def cleanup(self):
 | 后端 | 端口 | 状态 | 框架 |
 |-----|------|------|------|
 | 主后端 | 8765 | ✅ 运行中 | - |
-| multimodal | 8766 | ✅ 示例实现 | PyTorch |
-| emotion | 8767 | ⚠️ 待实现 | TensorFlow |
-| eeg | 8768 | ⚠️ 待实现 | MNE-Python |
-| (预留) | 8769+ | - | - |
+| fatigue | 8767 | ✅ 已实现 | PyTorch |
+| emotion | 8768 | ✅ 已实现 | PyTorch + Transformers |
+| eeg | 8769 | ⚠️ 待实现 | MNE-Python |
+| (预留) | 8770+ | - | - |
 
 ---
 

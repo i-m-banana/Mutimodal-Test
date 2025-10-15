@@ -55,6 +55,7 @@ class Orchestrator:
     def __init__(self, *, system: Dict[str, Any], collectors: Iterable[Dict[str, Any]],
                  detectors: Iterable[Dict[str, Any]], models: Iterable[Dict[str, Any]],
                  interfaces: Iterable[Dict[str, Any]] | None = None,
+                 inference_models: Iterable[Dict[str, Any]] | None = None,
                  log_root: Optional[str] = None) -> None:
         setup_logging(log_root)
         self.logger = logging.getLogger("orchestrator")
@@ -70,6 +71,11 @@ class Orchestrator:
         self.interface_configs = _parse_components(interfaces or [])
         self.interfaces: Dict[str, BaseInterface] = {}
         self.command_router = UICommandRouter(self.bus, logger=logging.getLogger("ui.command"))
+        
+        # 统一推理服务（支持集成和远程模式）
+        self.inference_models_config = list(inference_models or [])
+        self.inference_service = None
+        
         self._running = False
 
     @classmethod
@@ -78,10 +84,12 @@ class Orchestrator:
         system = cls._read_yaml(directory / "config" / "system.yaml")
         collectors = cls._read_yaml(directory / "config" / "collectors.yaml").get("collectors", [])
         detectors = cls._read_yaml(directory / "config" / "detectors.yaml").get("detectors", [])
-        models = cls._read_yaml(directory / "config" / "models.yaml").get("models", [])
+        models_yaml = cls._read_yaml(directory / "config" / "models.yaml")
+        models = models_yaml.get("models", [])
+        inference_models = models_yaml.get("inference_models", [])
         interfaces = cls._read_yaml(directory / "config" / "interfaces.yaml").get("interfaces", [])
         return cls(system=system, collectors=collectors, detectors=detectors, models=models,
-                   interfaces=interfaces, log_root=directory / "logs")
+                   interfaces=interfaces, inference_models=inference_models, log_root=directory / "logs")
 
     @staticmethod
     def _read_yaml(path: Path) -> Dict[str, Any]:
@@ -127,6 +135,22 @@ class Orchestrator:
         self._instantiate_collectors()
         self._instantiate_detectors()
         self._instantiate_interfaces()
+        
+        # 启动统一推理服务
+        if self.inference_models_config:
+            try:
+                from ..services.unified_inference_service import UnifiedInferenceService
+                self.inference_service = UnifiedInferenceService(
+                    self.bus,
+                    self.inference_models_config,
+                    logger=logging.getLogger("inference")
+                )
+                # 将推理服务实例存储到事件总线，以便WebSocket服务器访问
+                self.bus._inference_service = self.inference_service
+                self.inference_service.start()
+            except Exception as e:
+                self.logger.error(f"启动推理服务失败: {e}", exc_info=True)
+        
         self.command_router.start()
         for detector in self.detectors.values():
             detector.start()
@@ -150,6 +174,14 @@ class Orchestrator:
         for detector in self.detectors.values():
             detector.stop()
         self.monitor.stop()
+        
+        # 停止推理服务
+        if self.inference_service:
+            try:
+                self.inference_service.stop()
+            except Exception:
+                self.logger.exception("Failed to stop inference service")
+        
         for interface in self.interfaces.values():
             try:
                 interface.stop()
