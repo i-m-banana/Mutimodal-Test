@@ -41,6 +41,7 @@ class BloodPressureService:
         self._mode = "hardware"
         self._current_port: Optional[str] = None
         self._last_error: Optional[str] = None
+        self._preferred_port = "COM8"
 
     # ------------------------------------------------------------------
     def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,7 +78,10 @@ class BloodPressureService:
                     self._mode = "simulation"
                 else:
                     if not self._current_port:
-                        self._current_port = self._detect_available_port()
+                        self._current_port = self._preferred_port
+                    detected_port = self._detect_available_port()
+                    if detected_port:
+                        self._current_port = detected_port
                     if not self._current_port:
                         message = "未检测到可用的血压仪端口"
                         self._last_error = message
@@ -152,8 +156,8 @@ class BloodPressureService:
         with self._lock:
             detected_port = self._detect_available_port()
             available_ports: List[str] = []
-            if detected_port:
-                available_ports.append(detected_port)
+            if self._preferred_port:
+                available_ports.append(self._preferred_port)
             return {
                 "running": self._running,
                 "mode": self._mode,
@@ -287,28 +291,16 @@ class BloodPressureService:
     def _detect_available_port(self) -> Optional[str]:
         if list_ports is None:
             return None
-        preferred: List[str] = []
-        if self._current_port:
-            preferred.append(self._current_port)
-        try:
-            for port in list_ports.comports():
-                for candidate in (getattr(port, "device", None), getattr(port, "name", None)):
-                    if candidate and candidate not in preferred:
-                        preferred.append(str(candidate))
-        except Exception as exc:
-            self.logger.debug("枚举串口失败: %s", exc)
+        target_port = self._current_port or self._preferred_port
+        if not target_port:
             return None
-        for candidate in preferred:
-            if not candidate:
-                continue
-            if serial is None:
-                break
-            try:
-                with serial.Serial(candidate, timeout=1):
-                    return candidate
-            except Exception:
-                continue
-        return preferred[0] if preferred else None
+        if serial is None:
+            return target_port
+        try:
+            with serial.Serial(target_port, timeout=1):
+                return target_port
+        except Exception:
+            return None
 
 
 __all__ = ["BloodPressureService", "HAS_MAIBOBO_DRIVER"]

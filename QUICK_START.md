@@ -14,6 +14,9 @@
 ```bash
 cd d:\非接触式安装程序\project-root
 python -m src.main --root .
+
+# 可选：关闭控制台监听输出
+python -m src.main --root . --no-listeners
 ```
 
 **期望输出**:

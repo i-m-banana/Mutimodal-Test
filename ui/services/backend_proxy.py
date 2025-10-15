@@ -167,10 +167,22 @@ get_multimodal_file_paths = multimodal_get_paths
 # 血压服务代理
 # ============================================================================
 
-def bp_start_measurement(port: Optional[str] = None, 
-                         simulation: bool = False) -> Dict[str, Any]:
+def bp_start_measurement(
+    *,
+    port: Optional[str] = None,
+    simulation: bool = False,
+    allow_simulation: Optional[bool] = None,
+    timeout: Optional[int] = None,
+) -> Dict[str, Any]:
     """启动血压测量."""
-    payload = {"port": port, "simulation": simulation}
+    payload: Dict[str, Any] = {
+        "port": port,
+        "simulation": simulation,
+    }
+    if allow_simulation is not None:
+        payload["allow_simulation"] = allow_simulation
+    if timeout is not None:
+        payload["timeout"] = timeout
     return send_command("bp.start", payload)
 
 

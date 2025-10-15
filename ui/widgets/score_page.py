@@ -41,7 +41,7 @@ def _env_flag(name: str) -> bool:
 SKIP_DATABASE = _env_flag("UI_SKIP_DATABASE")
 
 DEFAULT_METRICS = ["疲劳检测", "情绪", "血压脉搏", "脑负荷", "舒尔特准确率"]
-ALL_SCORE_KEYS = DEFAULT_METRICS + ["舒尔特综合得分"]
+ALL_SCORE_KEYS = DEFAULT_METRICS + ["舒尔特综合得分", "收缩压", "舒张压", "脉搏"]
 
 
 class ModernGaugeWidget(QWidget):
@@ -174,7 +174,7 @@ class HistoryDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
         self.metric_buttons = {}
-        metrics = ["疲劳检测", "情绪", "血压脉搏", "脑负荷", "舒尔特准确率"]
+        metrics = ["疲劳检测", "情绪", "收缩压", "舒张压", "脉搏", "脑负荷", "舒尔特准确率"]
 
         for m in metrics:
             btn = QPushButton(m, self)
@@ -310,8 +310,10 @@ class HistoryDialog(QDialog):
             ax.set_xlabel("测试时间", fontproperties=self.zh_font, fontsize=16)
 
             # 根据不同指标设置Y轴标签和单位
-            if metric == "血压脉搏":
+            if metric in ["收缩压", "舒张压"]:
                 ax.set_ylabel("血压 (mmHg)", fontproperties=self.zh_font, fontsize=16)
+            elif metric == "脉搏":
+                ax.set_ylabel("脉搏 (次/分)", fontproperties=self.zh_font, fontsize=16)
             elif metric == "舒尔特准确率":
                 ax.set_ylabel("准确率 (%)", fontproperties=self.zh_font, fontsize=16)
             else:
@@ -361,8 +363,10 @@ class HistoryDialog(QDialog):
                         time_str = date_val.strftime("%Y-%m-%d %H:%M")
 
                         # 根据不同指标显示不同单位
-                        if metric == "血压脉搏":
-                            text = f'{time_str}\n血压: {y_val} mmHg'
+                        if metric in ["收缩压", "舒张压"]:
+                            text = f'{time_str}\n{metric}: {y_val} mmHg'
+                        elif metric == "脉搏":
+                            text = f'{time_str}\n脉搏: {y_val} 次/分'
                         elif metric == "舒尔特准确率":
                             text = f'{time_str}\n准确率: {y_val}%'
                         else:
@@ -382,6 +386,65 @@ class HistoryDialog(QDialog):
         self.canvas.draw()
 
 
+class BloodPressureWidget(QWidget):
+    """血压脉搏显示组件"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.systolic = 120  # 收缩压
+        self.diastolic = 80  # 舒张压
+        self.pulse = 75  # 脉搏
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # 收缩压
+        systolic_layout = QHBoxLayout()
+        systolic_label = QLabel("收缩压:")
+        systolic_label.setStyleSheet("font-size:16px; color:#FF6B35; font-weight:bold;")
+        self.systolic_value = QLabel("120 mmHg")
+        self.systolic_value.setStyleSheet("font-size:18px; color:#FF6B35; font-weight:bold;")
+        systolic_layout.addWidget(systolic_label)
+        systolic_layout.addStretch()
+        systolic_layout.addWidget(self.systolic_value)
+        layout.addLayout(systolic_layout)
+
+        # 舒张压
+        diastolic_layout = QHBoxLayout()
+        diastolic_label = QLabel("舒张压:")
+        diastolic_label.setStyleSheet("font-size:16px; color:#FFA500; font-weight:bold;")
+        self.diastolic_value = QLabel("80 mmHg")
+        self.diastolic_value.setStyleSheet("font-size:18px; color:#FFA500; font-weight:bold;")
+        diastolic_layout.addWidget(diastolic_label)
+        diastolic_layout.addStretch()
+        diastolic_layout.addWidget(self.diastolic_value)
+        layout.addLayout(diastolic_layout)
+
+        # 脉搏
+        pulse_layout = QHBoxLayout()
+        pulse_label = QLabel("脉搏:")
+        pulse_label.setStyleSheet("font-size:16px; color:#4CAF50; font-weight:bold;")
+        self.pulse_value = QLabel("75 次/分")
+        self.pulse_value.setStyleSheet("font-size:18px; color:#4CAF50; font-weight:bold;")
+        pulse_layout.addWidget(pulse_label)
+        pulse_layout.addStretch()
+        pulse_layout.addWidget(self.pulse_value)
+        layout.addLayout(pulse_layout)
+
+    def set_values(self, systolic, diastolic, pulse):
+        """设置血压脉搏数值"""
+        self.systolic = systolic
+        self.diastolic = diastolic
+        self.pulse = pulse
+
+        self.systolic_value.setText(f"{systolic} mmHg")
+        self.diastolic_value.setText(f"{diastolic} mmHg")
+        self.pulse_value.setText(f"{pulse} 次/分")
+
+
 class ScorePage(QWidget):
     def __init__(self, username=None, data_interface=None):
         super().__init__()
@@ -398,7 +461,7 @@ class ScorePage(QWidget):
         self._pending_history_user = None
         self._current_data = self._mock_data_interface() if self._use_mock_data else self._blank_data()
         self.data_interface = self._fetch_data
-        
+
         # 加载动画定时器
         self._loading_angle = 0
         self._loading_timer = QTimer(self)
@@ -456,8 +519,8 @@ class ScorePage(QWidget):
         left_layout.addWidget(line1)
 
         # 指标卡片 - 简化设计
-        metrics = ["疲劳检测", "情绪", "血压脉搏", "脑负荷", "舒尔特准确率"]
-        icons = ["👁", "😊", "❤", "🧠", "🎯"]  # 简单的图标
+        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率"]
+        icons = ["👁", "😊", "🧠", "🎯"]  # 简单的图标
 
         for m, icon in zip(metrics, icons):
             # 创建水平布局
@@ -495,6 +558,39 @@ class ScorePage(QWidget):
                 separator.setFrameShadow(QFrame.Plain)
                 separator.setStyleSheet("background-color: #f0f0f0;")
                 left_layout.addWidget(separator)
+
+        # 血压脉搏区域
+        bp_separator = QFrame()
+        bp_separator.setFrameShape(QFrame.HLine)
+        bp_separator.setFrameShadow(QFrame.Plain)
+        bp_separator.setStyleSheet("background-color: #f0f0f0;")
+        left_layout.addWidget(bp_separator)
+
+        # 血压脉搏标题
+        bp_title_layout = QHBoxLayout()
+        bp_icon = QLabel("❤")
+        bp_icon.setFixedSize(30, 30)
+        bp_icon.setAlignment(Qt.AlignCenter)
+        bp_icon.setStyleSheet("font-size:20px;")
+        bp_title_layout.addWidget(bp_icon)
+
+        bp_title = QLabel("血压脉搏")
+        bp_title.setStyleSheet("font-size:18px; color:#333; font-weight:500;")
+        bp_title_layout.addWidget(bp_title)
+        bp_title_layout.addStretch()
+
+        left_layout.addLayout(bp_title_layout)
+
+        # 血压脉搏组件
+        self.bp_widget = BloodPressureWidget()
+        self.bp_widget.setStyleSheet("""
+            BloodPressureWidget {
+                background-color: #f8f9fa;
+                border-radius: 10px;
+                border: 1px solid #e9ecef;
+            }
+        """)
+        left_layout.addWidget(self.bp_widget)
 
         # 添加空间
         left_layout.addSpacing(20)
@@ -590,20 +686,20 @@ class ScorePage(QWidget):
         content_layout.addWidget(right_container, 4)
 
         main_layout.addLayout(content_layout)
-        
+
         # 添加加载覆盖层（初始隐藏）
         self.loading_overlay = QWidget(self)
         self.loading_overlay.setStyleSheet("background-color: rgba(255, 255, 255, 180);")
         self.loading_overlay.setVisible(False)
-        
+
         loading_layout = QVBoxLayout(self.loading_overlay)
         loading_layout.setAlignment(Qt.AlignCenter)
-        
+
         self.loading_label = QLabel("正在加载历史数据...")
         self.loading_label.setAlignment(Qt.AlignCenter)
         self.loading_label.setStyleSheet("font-size:24px; font-weight:bold; color:#333; background:transparent;")
         loading_layout.addWidget(self.loading_label)
-        
+
         # 加载动画标签
         self.loading_spinner = QLabel("⏳")
         self.loading_spinner.setAlignment(Qt.AlignCenter)
@@ -622,13 +718,13 @@ class ScorePage(QWidget):
             return "及格", "#aa8800", "需要注意休息和调整状态。"
         else:
             return "需要改进", "#aa0000", "建议充分休息，调整作息。"
-    
+
     def _update_loading_animation(self):
         """更新加载动画"""
         spinners = ["⏳", "⌛", "⏳", "⌛"]
         self._loading_angle = (self._loading_angle + 1) % len(spinners)
         self.loading_spinner.setText(spinners[self._loading_angle])
-    
+
     def _show_loading(self):
         """显示加载动画"""
         if not self._is_loading:
@@ -637,14 +733,14 @@ class ScorePage(QWidget):
             self.loading_overlay.setVisible(True)
             self.loading_overlay.raise_()
             self._loading_timer.start(250)
-    
+
     def _hide_loading(self):
         """隐藏加载动画"""
         if self._is_loading:
             self._is_loading = False
             self.loading_overlay.setVisible(False)
             self._loading_timer.stop()
-    
+
     def resizeEvent(self, event):
         """窗口大小改变时调整加载覆盖层大小"""
         super().resizeEvent(event)
@@ -791,14 +887,20 @@ class ScorePage(QWidget):
         return {
             "疲劳检测": random.randint(0, 100),
             "情绪": random.randint(0, 100),
-            "血压脉搏": random.randint(60, 120),
+            "血压脉搏": random.randint(60, 120),  # 保留原有字段用于兼容
+            "收缩压": random.randint(100, 140),
+            "舒张压": random.randint(60, 90),
+            "脉搏": random.randint(60, 100),
             "脑负荷": random.randint(0, 100),
             "舒尔特准确率": random.randint(80, 100),
             "舒尔特综合得分": random.randint(0, 100),
             "历史": {
                 "疲劳检测": [random.randint(0, 100) for _ in range(num_records)],
                 "情绪": [random.randint(0, 100) for _ in range(num_records)],
-                "血压脉搏": [random.randint(60, 120) for _ in range(num_records)],
+                "血压脉搏": [random.randint(60, 120) for _ in range(num_records)],  # 保留原有字段用于兼容
+                "收缩压": [random.randint(100, 140) for _ in range(num_records)],
+                "舒张压": [random.randint(60, 90) for _ in range(num_records)],
+                "脉搏": [random.randint(60, 100) for _ in range(num_records)],
                 "脑负荷": [random.randint(0, 100) for _ in range(num_records)],
                 "舒尔特准确率": [random.randint(80, 100) for _ in range(num_records)],
                 "舒尔特综合得分": [random.randint(0, 100) for _ in range(num_records)],
@@ -855,30 +957,31 @@ class ScorePage(QWidget):
     def _update_scores(self):
         """更新分数显示"""
         data = self.data_interface()
-        # print(data)
 
-
-        # 更新左侧指标卡片
+        # 更新左侧指标卡片（除血压脉搏外的其他指标）
         for key, lbl in self.score_labels.items():
             value = data.get(key, 0)
 
             # 根据不同指标显示不同单位
-            if key == "血压脉搏":
-                lbl.setText(f"{value} mmHg")
-            elif key == "舒尔特准确率":
+            if key == "舒尔特准确率":
                 lbl.setText(f"{value}%")
             else:
                 lbl.setText(f"{value} 分")
 
             # 根据分数设置颜色
-            if key in ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率"]:
-                if value >= 80:
-                    color = "#00aa00"  # 绿色
-                elif value >= 60:
-                    color = "#FFA500"  # 橙色
-                else:
-                    color = "#aa0000"  # 红色
-                lbl.setStyleSheet(f"font-size:24px; font-weight:bold; color:{color};")
+            if value >= 80:
+                color = "#00aa00"  # 绿色
+            elif value >= 60:
+                color = "#FFA500"  # 橙色
+            else:
+                color = "#aa0000"  # 红色
+            lbl.setStyleSheet(f"font-size:24px; font-weight:bold; color:{color};")
+
+        # 更新血压脉搏组件
+        systolic = data.get("收缩压", 120)
+        diastolic = data.get("舒张压", 80)
+        pulse = data.get("脉搏", 75)
+        self.bp_widget.set_values(systolic, diastolic, pulse)
 
         # 更新仪表盘
         total_score = data.get("舒尔特综合得分", 0)

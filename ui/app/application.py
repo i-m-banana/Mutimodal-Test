@@ -88,12 +88,12 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        
+
         # 使用响应式边距，减小上下边距以适配1080p显示器
         side_margin = scale(20)
         top_margin = scale(10)  # 顶部边距减小
         spacing = scale(12)  # 间距也减小
-        bottom_margin = scale(8)  # 底部边距进一步减小
+        bottom_margin = scale(30)  # 底部边距进一步减小
         main_layout.setContentsMargins(side_margin, top_margin, side_margin, bottom_margin)
         main_layout.setSpacing(spacing)
 
@@ -107,9 +107,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.stack, 1)
 
-        self.brain_load_bar = BrainLoadBar()
-        self.brain_load_bar.setVisible(False)
-
         self.brain_load_tip = QLabel("本测试需要全程采集您的脑电信号来进行脑负荷测试")
         self.brain_load_tip.setAlignment(Qt.AlignCenter)
         self.brain_load_tip.setWordWrap(True)
@@ -118,7 +115,6 @@ class MainWindow(QMainWindow):
         self.brain_load_tip.setMaximumHeight(scale(26))  # 进一步减小最大高度
 
         main_layout.addWidget(self.brain_load_tip, 0, Qt.AlignBottom)
-        main_layout.addWidget(self.brain_load_bar, 0, Qt.AlignBottom)
 
         self.stack.setCurrentWidget(self.login_page)
 
@@ -141,7 +137,6 @@ class MainWindow(QMainWindow):
         logger.info("调试快捷键：跳转到登录页面")
         self.stack.fade_to_index(0)
         self.brain_load_tip.setVisible(True)
-        self.brain_load_bar.setVisible(False)
 
     def _debug_show_calibration(self) -> None:
         logger.info("调试快捷键：跳转到校准页面")
@@ -153,7 +148,6 @@ class MainWindow(QMainWindow):
             logger.debug("同步调试用户名失败: %s", exc)
         self.stack.fade_to_index(1)
         self.brain_load_tip.setVisible(True)
-        self.brain_load_bar.setVisible(False)
 
     def _debug_show_test(self) -> None:
         logger.info("调试快捷键：跳转到测试页面")
@@ -165,7 +159,6 @@ class MainWindow(QMainWindow):
             logger.debug("同步调试用户名失败: %s", exc)
         self.stack.fade_to_index(2)
         self.brain_load_tip.setVisible(False)
-        self.brain_load_bar.setVisible(True)
         try:
             self.test_page.start_test()
         except Exception as exc:  # noqa: BLE001
@@ -184,7 +177,6 @@ class MainWindow(QMainWindow):
         logger.info("正在切换到测试页面...")
         self.stack.fade_to_index(2)
         self.brain_load_tip.setVisible(False)
-        self.brain_load_bar.setVisible(True)
         self.test_page.start_test()
 
     def _preload_camera(self) -> None:
