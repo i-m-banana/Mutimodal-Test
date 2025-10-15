@@ -63,7 +63,7 @@ class DatabaseService:
         self._config = {
             "host": os.getenv("UI_DB_HOST", "localhost"),
             "user": os.getenv("UI_DB_USER", "root"),
-            "password": os.getenv("UI_DB_PASSWORD", "root"),
+            "password": os.getenv("UI_DB_PASSWORD", "123456"),
             "database": os.getenv("UI_DB_NAME", "tired"),
         }
         if TestTableStore is None:

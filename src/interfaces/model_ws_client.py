@@ -91,7 +91,8 @@ class ModelBackendClient:
             try:
                 self.logger.info(f"正在连接到模型后端: {self.url}")
                 
-                async with websockets.connect(self.url) as ws:
+                # 增加max_size以支持大量图像数据 (默认1MB -> 100MB)
+                async with websockets.connect(self.url, max_size=100 * 1024 * 1024) as ws:
                     self.ws = ws
                     self.connected = True
                     self.logger.info(f"✅ 已连接到 {self.model_type} 模型后端")

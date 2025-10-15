@@ -14,7 +14,7 @@ from typing import List, Dict, Optional, Any
 class MysqlDB:
     """MySQL wrapper providing basic CRUD operations."""
 
-    def __init__(self, host="localhost", user="root", password="", database="test_db"):
+    def __init__(self, host="localhost", user="root", password="123456", database="tired"):
         # Database connection configuration
         self.config = {
             'host': host,

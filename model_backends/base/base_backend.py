@@ -258,7 +258,8 @@ class BaseModelBackend(ABC):
         # 启动WebSocket服务器
         self.logger.info(f"启动 {self.model_type} 模型后端: ws://{self.host}:{self.port}")
         
-        async with serve(self.handle_client, self.host, self.port):
+        # 增加max_size以支持大量图像数据 (默认1MB -> 100MB)
+        async with serve(self.handle_client, self.host, self.port, max_size=100 * 1024 * 1024):
             self.logger.info(f"✅ {self.model_type} 模型后端已就绪,等待连接...")
             await asyncio.Future()  # 永久运行
     

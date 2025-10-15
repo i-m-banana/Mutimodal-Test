@@ -34,6 +34,7 @@ from ..core.event_bus import Event, EventBus
 from ..core.thread_pool import get_thread_pool
 from ..devices import DeviceException, HAS_TOBII, TobiiDevice
 from .fatigue_estimator import estimate_fatigue_score
+from ..interfaces.model_ws_client import ModelBackendClient
 
 
 def _env_flag(name: str) -> bool:
@@ -165,7 +166,7 @@ class MultiModalDataCollector:
         self.username = username
         self.part = part
         self.queue_duration = queue_duration
-        self.save_dir = save_dir
+        self.save_dir = save_dir + '/fatigue'
         self.logger = logger or logging.getLogger("service.multimodal.collector")
         self._frame_callback = frame_callback
         self._thread_pool = get_thread_pool()
@@ -602,6 +603,19 @@ class MultimodalService:
         self._snapshot_active = False
         self._snapshot_requested = False
         self._thread_pool = get_thread_pool()
+        
+        # 初始化疲劳度模型后端客户端
+        self._fatigue_client: Optional[ModelBackendClient] = None
+        self._use_model_backend = os.getenv("USE_FATIGUE_MODEL_BACKEND", "").lower() in {"1", "true", "yes", "on"}
+        if self._use_model_backend:
+            try:
+                fatigue_url = os.getenv("FATIGUE_MODEL_URL", "ws://127.0.0.1:8767")
+                self._fatigue_client = ModelBackendClient("fatigue", fatigue_url, reconnect=True)
+                self._fatigue_client.start()
+                self.logger.info(f"疲劳度模型后端客户端已启动: {fatigue_url}")
+            except Exception as e:
+                self.logger.warning(f"无法启动疲劳度模型后端客户端: {e}, 将使用启发式估算")
+                self._fatigue_client = None
 
     # Internal helpers -------------------------------------------------
     def _handle_stream_frame(self, frame: Any, timestamp: str) -> None:
@@ -661,6 +675,16 @@ class MultimodalService:
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
             self._snapshot_requested = False
+            
+            # 关闭疲劳度模型后端客户端
+            if self._fatigue_client:
+                try:
+                    self._fatigue_client.stop()
+                    self.logger.info("疲劳度模型后端客户端已停止")
+                except Exception as e:
+                    self.logger.warning(f"停止疲劳度模型后端客户端失败: {e}")
+                finally:
+                    self._fatigue_client = None
         return {"status": "released"}
 
     def _ensure_snapshot_broadcast(self) -> None:
@@ -758,6 +782,118 @@ class MultimodalService:
             return {"paths": {}, "status": "idle"}
         return {"paths": collector.get_file_paths(), "status": "running" if collector.running else "stopped"}
 
+    def _get_fatigue_score(self, data: Dict[str, Any], elapsed: float) -> float:
+        """获取疲劳度分数
+        
+        优先使用模型后端进行推理,如果不可用则回退到启发式估算。
+        
+        Args:
+            data: 采集的多模态数据
+            elapsed: 采集时长(秒)
+        
+        Returns:
+            疲劳度分数 (0-100)
+        """
+        # 如果启用了模型后端且客户端健康,使用模型推理
+        if self._use_model_backend and self._fatigue_client and self._fatigue_client.is_healthy():
+            try:
+                return self._infer_fatigue_with_model(data, elapsed)
+            except Exception as e:
+                self.logger.warning(f"模型推理失败,回退到启发式估算: {e}")
+        
+        # 回退到启发式估算
+        return estimate_fatigue_score(
+            data.get("rgb") or [],
+            data.get("depth") or [],
+            data.get("eyetrack") or [],
+            elapsed_time=elapsed,
+        )
+    
+    def _infer_fatigue_with_model(self, data: Dict[str, Any], elapsed: float) -> float:
+        """使用模型后端进行疲劳度推理
+        
+        Args:
+            data: 采集的多模态数据
+            elapsed: 采集时长(秒)
+        
+        Returns:
+            疲劳度分数 (0-100)
+        
+        Raises:
+            Exception: 推理失败
+        """
+        rgb_frames = data.get("rgb") or []
+        depth_frames = data.get("depth") or []
+        eyetrack_samples = data.get("eyetrack") or []
+        
+        # 如果数据不足,返回默认值
+        if not rgb_frames or not depth_frames:
+            self.logger.debug("数据不足,无法进行模型推理")
+            return 0.0
+        
+        # 将RGB和深度帧编码为base64
+        rgb_b64_list = []
+        depth_b64_list = []
+        
+        try:
+            for rgb_frame in rgb_frames:
+                if cv2 is not None and np is not None:
+                    # 确保是numpy数组
+                    rgb_array = np.ascontiguousarray(rgb_frame)
+                    # 编码为JPEG
+                    ok, buffer = cv2.imencode(".jpg", rgb_array, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                    if ok:
+                        rgb_b64 = base64.b64encode(buffer).decode("ascii")
+                        rgb_b64_list.append(rgb_b64)
+            
+            for depth_frame in depth_frames:
+                if cv2 is not None and np is not None:
+                    # 将深度帧转换为8位图像
+                    depth_8u = cv2.convertScaleAbs(depth_frame, alpha=0.03)
+                    # 编码为PNG (保留更多信息)
+                    ok, buffer = cv2.imencode(".png", depth_8u)
+                    if ok:
+                        depth_b64 = base64.b64encode(buffer).decode("ascii")
+                        depth_b64_list.append(depth_b64)
+        except Exception as e:
+            self.logger.error(f"图像编码失败: {e}")
+            raise
+        
+        # 构建推理请求
+        inference_data = {
+            "rgb_frames": rgb_b64_list,
+            "depth_frames": depth_b64_list,
+            "eyetrack_samples": eyetrack_samples,
+            "elapsed_time": elapsed
+        }
+        
+        # 发送推理请求
+        self.logger.debug(f"发送疲劳度推理请求: {len(rgb_b64_list)} RGB帧, {len(depth_b64_list)} 深度帧, {len(eyetrack_samples)} 眼动样本")
+        
+        future = self._fatigue_client.send_inference_request(inference_data, timeout=3.0)
+        
+        try:
+            result = future.result(timeout=3.0)
+            
+            if result.get("status") == "success":
+                predictions = result.get("predictions", {})
+                fatigue_score = predictions.get("fatigue_score", 0.0)
+                self.logger.debug(
+                    f"模型推理成功: 疲劳度={fatigue_score}, "
+                    f"推理耗时={predictions.get('inference_time_ms')}ms"
+                )
+                return float(fatigue_score)
+            else:
+                error = result.get("error", "Unknown error")
+                raise Exception(f"推理失败: {error}")
+        
+        except TimeoutError:
+            self.logger.warning("模型推理超时")
+            raise
+        except Exception as e:
+            self.logger.error(f"模型推理异常: {e}")
+            raise
+
     # ------------------------------------------------------------------
     def _build_snapshot(self) -> Dict[str, Any]:
         with self._lock:
@@ -770,12 +906,9 @@ class MultimodalService:
         # Calculate elapsed time since collection started
         elapsed = time.time() - collector._start_time if collector._start_time > 0 else 0.0
         
-        fatigue_score = estimate_fatigue_score(
-            data.get("rgb") or [],
-            data.get("depth") or [],
-            data.get("eyetrack") or [],
-            elapsed_time=elapsed,  # Pass elapsed time for temporal dynamics
-        )
+        # 获取疲劳度分数
+        fatigue_score = self._get_fatigue_score(data, elapsed)
+        
         preview = self._encode_preview(latest.get("rgb") if latest else None)
         return {
             "status": "running" if collector.running else "stopped",

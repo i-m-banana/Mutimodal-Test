@@ -337,7 +337,8 @@ class TestPage(QWidget):
             self._multimodal_poll_active = True
             self._multimodal_last_status = None
             # 重置一次性日志标志，避免复用旧状态导致不更新
-            for attr in ("_multimodal_first_data", "_fatigue_score_cast_failed"):
+            for attr in ("_multimodal_first_data", "_fatigue_score_cast_failed",
+                        "_no_scores_warned"):
                 if hasattr(self, attr):
                     delattr(self, attr)
             self._last_multimodal_snapshot_monotonic = None
@@ -454,17 +455,14 @@ class TestPage(QWidget):
                 logger.info(f"多模态数据轮询已启动，当前状态: {status}")
                 self._multimodal_first_data = True
 
-            # 调试：打印完整的snapshot数据
-            if not hasattr(self, '_snapshot_logged'):
-                logger.info(f"多模态快照数据: {snapshot}")
-                logger.info(f"快照包含 fatigue_score: {'fatigue_score' in snapshot}")
-                if 'fatigue_score' in snapshot:
-                    logger.info(f"fatigue_score 值: {snapshot['fatigue_score']}")
-                self._snapshot_logged = True
-
-            # 更新疲劳度
-            fatigue = snapshot.get("fatigue_score")
-            brain = snapshot.get("fatigue_score")
+            # 更新疲劳度和脑负荷
+            fatigue = snapshot.get("fatigue_score")  # 疲劳度分数(后端已处理:有模型用模型,无模型用模拟)
+            brain = snapshot.get("brain_load_score")  # 脑负荷分数(后端尚未实现,使用相同值)
+            
+            # 如果没有brain_load_score,暂时使用fatigue_score的值
+            if brain is None:
+                brain = fatigue
+            
             if fatigue is not None or brain is not None:
                 # 全部交给 _update_fatigue_display
                 self._update_fatigue_display(
@@ -2301,6 +2299,11 @@ class TestPage(QWidget):
                     self._close_camera()
                 except Exception as e:
                     logger.warning(f"关闭摄像头失败: {e}")
+                try:
+                    # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
+                    multidata_stop_collection()
+                except Exception as stop_exc:
+                    logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
                 # 修复: 保持脑负荷/疲劳度轮询持续到舒特格测试结束
                 self.update_step_ui()
                 self._persist_av_paths_to_db()
@@ -2311,46 +2314,46 @@ class TestPage(QWidget):
             # ⚠️ 注释掉重新初始化逻辑，避免在切换到舒尔特阶段时重启多模态采集
             # 原因: 重启会导致疲劳度分数重新从初始值开始，影响连续性
             # 改进: 保持多模态采集持续运行，从答题阶段到舒尔特阶段无缝过渡
-            # if HAS_MULTIMODAL:
-            #     try:
-            #         try:
-            #             # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
-            #             multidata_stop_collection()
-            #         except Exception as stop_exc:
-            #             logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
-            #         result = multidata_start_collection(
-            #             self.current_user,
-            #             part=2,
-            #             save_dir=self.session_dir,
-            #         )
-            #         self.multimodal_collector = result
-            #         status = (result or {}).get("status", "").lower()
-            #         if status in {"running", "already-running"}:
-            #             logger.info("多模态数据采集 part=2 已启动，用户: %s", self.current_user)
-            #             logger.info("多模态数据保存目录: %s", self.session_dir)
-            #
-            #             timer_active = False
-            #             try:
-            #                 timer_active = self._multimodal_poll_timer.isActive()
-            #             except Exception:
-            #                 timer_active = False
-            #
-            #             if not self._multimodal_poll_active or not timer_active:
-            #                 if self._multimodal_poll_active and not timer_active:
-            #                     logger.warning("多模态监控定时器未运行，将强制重新启动监控")
-            #                 else:
-            #                     logger.info("启动多模态监控（从舒尔特方格开始）")
-            #                 self._start_multimodal_monitoring(force=True)
-            #             else:
-            #                 logger.info("✅ 多模态监控已在运行，无需重复启动")
-            #         else:
-            #             logger.warning("多模态数据采集启动失败: %s", result)
-            #     except Exception as e:
-            #         logger.error(f"启动多模态数据采集时出错: {e}")
+            if HAS_MULTIMODAL:
+                try:
+                    # try:
+                    #     # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
+                    #     multidata_stop_collection()
+                    # except Exception as stop_exc:
+                    #     logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
+                    result = multidata_start_collection(
+                        self.current_user,
+                        part=2,
+                        save_dir=self.session_dir,
+                    )
+                    self.multimodal_collector = result
+                    status = (result or {}).get("status", "").lower()
+                    if status in {"running", "already-running"}:
+                        logger.info("多模态数据采集 part=2 已启动，用户: %s", self.current_user)
+                        logger.info("多模态数据保存目录: %s", self.session_dir)
             
-            logger.info("✅ 保持多模态采集持续运行（从答题阶段到舒尔特阶段无缝过渡）")
-            self.current_step += 1
-            self.update_step_ui()
+                        timer_active = False
+                        try:
+                            timer_active = self._multimodal_poll_timer.isActive()
+                        except Exception:
+                            timer_active = False
+            
+                        if not self._multimodal_poll_active or not timer_active:
+                            if self._multimodal_poll_active and not timer_active:
+                                logger.warning("多模态监控定时器未运行，将强制重新启动监控")
+                            else:
+                                logger.info("启动多模态监控（从舒尔特方格开始）")
+                            self._start_multimodal_monitoring(force=True)
+                        else:
+                            logger.info("✅ 多模态监控已在运行，无需重复启动")
+                    else:
+                        logger.warning("多模态数据采集启动失败: %s", result)
+                except Exception as e:
+                    logger.error(f"启动多模态数据采集时出错: {e}")
+                
+                logger.info("✅ 保持多模态采集持续运行（从答题阶段到舒尔特阶段无缝过渡）")
+                self.current_step += 1
+                self.update_step_ui()
 
     def _on_schulte_completed(self):
         logger.info("舒特格测试完成，自动进入分数展示页面")

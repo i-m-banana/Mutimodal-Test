@@ -110,5 +110,7 @@ htmlcov/
 
 scripts/
 docs/
+model_backends/emotion_fatigue_infer/
 
-*.gitgnore
+.gitignore
+.copilot-instructions.md
