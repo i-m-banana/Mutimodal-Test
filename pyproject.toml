@@ -50,3 +50,11 @@ ui = [
 [build-system]
 requires = ["poetry-core>=1.5.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pyright]
+extraPaths = [
+    "model_backends/emotion_fatigue_infer",
+    "model_backends/emotion_fatigue_infer/emotion",
+    "model_backends/emotion_fatigue_infer/fatigue"
+]
+reportMissingImports = "warning"
