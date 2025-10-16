@@ -222,7 +222,7 @@ def emotion_analyze(
     audio_paths: list,
     video_paths: list,
     text_data: list,
-    timeout: float = 15.0
+    timeout: float = 30.0
 ) -> Dict[str, Any]:
     """
     执行情绪分析.
@@ -231,7 +231,7 @@ def emotion_analyze(
         audio_paths: 音频文件路径列表
         video_paths: 视频文件路径列表
         text_data: 文本识别结果列表
-        timeout: 超时时间(秒)，默认15秒
+        timeout: 超时时间(秒)，默认30秒(情绪推理需要较长时间)
         
     Returns:
         {

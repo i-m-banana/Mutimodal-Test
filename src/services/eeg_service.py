@@ -146,6 +146,21 @@ class EEGService:
             "recent_window": self._recorder.get_recent_window(),
         }
 
+    def get_recent_window(self, seconds: float = 5.0, sample_rate: float = 500.0) -> Dict[str, Any]:
+        """获取最近的时间窗口数据（代理到recorder）
+        
+        Args:
+            seconds: 窗口时长（秒）
+            sample_rate: 采样率（Hz）
+        
+        Returns:
+            包含ch1、ch2、timestamps等数据的字典
+        """
+        if not self._running or self._recorder is None:
+            return {'timestamps': [], 'ch1': [], 'ch2': [], 'ads_event': []}
+        
+        return self._recorder.get_recent_window(seconds, sample_rate)
+
     def diagnostics(self) -> Dict[str, Any]:
         """返回当前EEG模块的硬件可用性信息。"""
         return {

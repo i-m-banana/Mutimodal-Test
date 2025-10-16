@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 
 import yaml
 from yaml import FullLoader
@@ -246,8 +246,17 @@ class TestPage(QWidget):
         self._multimodal_last_status: Optional[str] = None
         self._last_multimodal_snapshot_monotonic: Optional[float] = None
         self._last_fatigue_score: Optional[float] = None
+        self._last_brain_load_score: Optional[float] = None  # 保存最后的脑负荷分数
         self._last_fatigue_log_time: Optional[float] = None
         self._multimodal_gap_warned: bool = False
+        
+        # 实时分数累积列表（用于计算平均值）
+        self._fatigue_scores_list: list[float] = []  # 疲劳度实时分数列表
+        self._brain_load_scores_list: list[float] = []  # 脑负荷实时分数列表
+        
+        # 情绪分数（测试结束时分析一次）
+        self._emotion_score: Optional[float] = None
+        self._emotion_analysis_triggered: bool = False  # 防止重复触发情绪分析
 
         # 数据库交互状态
         self._db_warning_logged = False
@@ -365,12 +374,54 @@ class TestPage(QWidget):
         except Exception as e:
             logger.debug(f"停止多模态监控时出错: {e}")
 
+    def _save_speech_recognition_results(self) -> None:
+        """保存语音识别结果到数据库和文件（在情绪分析前调用）"""
+        if not HAS_SPEECH_RECOGNITION:
+            return
+        
+        try:
+            # 获取语音识别结果
+            record_payload = get_recognition_results()
+            if not record_payload:
+                logger.debug("没有语音识别结果需要保存")
+                return
+            
+            logger.info(f"💾 保存 {len(record_payload)} 条语音识别结果")
+            
+            # 写入到文件
+            try:
+                record_txt = os.path.join(self.session_dir, 'emotion', "record.txt")
+                os.makedirs(os.path.dirname(record_txt), exist_ok=True)
+                with open(record_txt, 'w', encoding='utf-8') as f:
+                    f.write(str(record_payload))
+                logger.info(f"✅ 语音识别结果已写入文件: {record_txt}")
+            except Exception as exc:
+                logger.warning(f"写入语音识别记录文本失败: {exc}")
+            
+            # 更新到数据库
+            try:
+                self._queue_db_update(
+                    {'record_text': record_payload},
+                    "保存语音识别结果到数据库失败"
+                )
+                logger.info("✅ 语音识别结果已更新到数据库")
+            except Exception as exc:
+                logger.warning(f"更新语音识别结果到数据库失败: {exc}")
+            
+        except Exception as e:
+            logger.error(f"保存语音识别结果失败: {e}")
+    
     def _trigger_emotion_analysis(self) -> None:
         """
         📍 触发情绪分析 - 在答题结束、切换到血压测试时调用
         
         收集音视频和文本数据，发送到后端进行情绪推理
         """
+        # 防止重复触发（一个测试会话只分析一次）
+        if self._emotion_analysis_triggered:
+            logger.debug("情绪分析已经触发过，跳过重复调用")
+            return
+        
         try:
             # 收集音视频路径
             audio_paths = getattr(self, '_audio_paths', [])
@@ -394,6 +445,9 @@ class TestPage(QWidget):
                 logger.warning("没有可用的音视频或文本数据，跳过情绪分析")
                 return
             
+            # 标记为已触发，防止重复调用
+            self._emotion_analysis_triggered = True
+            
             # 异步发送情绪分析请求，不阻塞UI
             def analyze_async():
                 try:
@@ -404,7 +458,7 @@ class TestPage(QWidget):
                         audio_paths=audio_paths,
                         video_paths=video_paths,
                         text_data=text_data,
-                        timeout=15.0
+                        timeout=30.0  # 情绪推理需要较长时间(5个样本约5秒)
                     )
                     
                     emotion_score = result.get("emotion_score", 0.0)
@@ -416,8 +470,9 @@ class TestPage(QWidget):
                         f"(score={emotion_score:.3f}, confidence={confidence:.3f})"
                     )
                     
-                    # TODO: 将情绪分数保存到数据库或显示在UI上
-                    # self._save_emotion_score(emotion_score, emotion_label)
+                    # 保存情绪分数
+                    self._emotion_score = emotion_score
+                    logger.info(f"✅ 情绪分数已保存: {emotion_score:.2f}")
                     
                 except Exception as exc:
                     logger.error(f"情绪分析失败: {exc}", exc_info=True)
@@ -455,24 +510,23 @@ class TestPage(QWidget):
                 logger.info(f"多模态数据轮询已启动，当前状态: {status}")
                 self._multimodal_first_data = True
 
-            # 更新疲劳度和脑负荷
-            fatigue = snapshot.get("fatigue_score")  # 疲劳度分数(后端已处理:有模型用模型,无模型用模拟)
-            brain = snapshot.get("brain_load_score")  # 脑负荷分数(后端尚未实现,使用相同值)
+            # ⚠️ 注意：多模态快照中的分数数据已废弃
+            # 现在疲劳度和脑负荷通过 DETECTION_RESULT 事件独立推送
+            # 保留此代码仅用于兼容性检查
             
-            # 如果没有brain_load_score,暂时使用fatigue_score的值
-            if brain is None:
-                brain = fatigue
+            # 废弃：不再从快照中读取分数，因为：
+            # 1. 疲劳度通过 model_fatigue 的 DETECTION_RESULT 事件推送
+            # 2. 脑负荷通过 model_eeg 的 DETECTION_RESULT 事件推送
+            # 3. 两者完全独立，互不依赖
             
-            if fatigue is not None or brain is not None:
-                # 全部交给 _update_fatigue_display
-                self._update_fatigue_display(
-                    fatigue if fatigue is not None else 0,
-                    brain if brain is not None else 0
-                )
-            else:
-                if not hasattr(self, '_no_scores_warned'):
-                    logger.warning("⚠️ 多模态快照中没有 fatigue_score 或 brain_load_score 字段")
-                    self._no_scores_warned = True
+            # fatigue = snapshot.get("fatigue_score")  # 已废弃
+            # brain = snapshot.get("brain_load_score")  # 已废弃
+            
+            # 检查快照数据（仅用于调试）
+            if not hasattr(self, '_snapshot_check_warned'):
+                if "fatigue_score" in snapshot or "brain_load_score" in snapshot:
+                    logger.debug("检测到快照中仍包含分数数据（已不使用）")
+                self._snapshot_check_warned = True
             # 检查采集状态
             if status != "running" and self._multimodal_poll_active:
                 self._multimodal_poll_timer.stop()
@@ -482,8 +536,177 @@ class TestPage(QWidget):
         except Exception as exc:
             logger.error(f"处理多模态快照数据时出错: {exc}")
 
+    def _on_detection_result(self, payload: Dict) -> None:
+        """处理模型推理结果 (DETECTION_RESULT事件)
+        
+        Args:
+            payload: 推理结果数据,格式:
+                {
+                    "detector": "model_fatigue",
+                    "status": "detected", 
+                    "predictions": {
+                        "fatigue_score": 51.38,
+                        "prediction_class": 1
+                    },
+                    "timestamp": ...,
+                    "frame_count": 30
+                }
+        """
+        try:
+            detector = payload.get("detector", "")
+            status = payload.get("status", "")
+            predictions = payload.get("predictions", {})
+            
+            # 处理疲劳度推理结果（独立更新，不依赖脑负荷）
+            if detector == "model_fatigue" and status == "detected":
+                fatigue_score = predictions.get("fatigue_score")
+                prediction_class = predictions.get("prediction_class")
+                
+                if fatigue_score is not None:
+                    logger.info(f"📊 收到疲劳度推理结果: score={fatigue_score:.2f}, class={prediction_class}")
+                    
+                    # 保存疲劳度分数（最后一次）
+                    self._last_fatigue_score = fatigue_score
+                    
+                    # 累积到列表中用于计算平均值
+                    self._fatigue_scores_list.append(fatigue_score)
+                    
+                    # 只更新疲劳度显示，不影响脑负荷
+                    self._update_fatigue_only(fatigue_score)
+                else:
+                    logger.warning("⚠️ 疲劳度推理结果中没有 fatigue_score 字段")
+            
+            # 处理EEG脑负荷推理结果（独立更新，不依赖疲劳度）
+            elif detector == "model_eeg" and status == "detected":
+                brain_load_score = predictions.get("brain_load_score")
+                state = predictions.get("state")
+                
+                if brain_load_score is not None:
+                    logger.info(f"🧠 收到EEG脑负荷推理结果: score={brain_load_score:.2f}, state={state}")
+                    
+                    # 保存脑负荷分数（最后一次）
+                    self._last_brain_load_score = brain_load_score
+                    
+                    # 累积到列表中用于计算平均值
+                    self._brain_load_scores_list.append(brain_load_score)
+                    
+                    # 只更新脑负荷显示，不影响疲劳度
+                    self._update_brain_load_only(brain_load_score)
+                else:
+                    logger.warning("⚠️ EEG推理结果中没有 brain_load_score 字段")
+            
+        except Exception as exc:
+            logger.error(f"处理推理结果时出错: {exc}", exc_info=True)
+
+    def _update_fatigue_only(self, score_f) -> None:
+        """只更新疲劳度显示（安全，失败不影响UI）"""
+        try:
+            score_value_f = float(score_f)
+            logger.debug(f"更新疲劳度显示: {score_value_f}")
+
+            # 根据疲劳度设置不同颜色
+            if score_value_f < 30:
+                color_f = "#27ae60"  # 绿色 - 正常
+                bg_color_f = "#d5f4e6"
+            elif score_value_f < 60:
+                color_f = "#f39c12"  # 橙色 - 警告
+                bg_color_f = "#fef5e7"
+            else:
+                color_f = "#e74c3c"  # 红色 - 疲劳
+                bg_color_f = "#fadbd8"
+
+            # 更新语音答题页面的疲劳度显示
+            if hasattr(self, 'fatigue_info_label') and self.fatigue_info_label:
+                try:
+                    self.fatigue_info_label.setText(f"疲劳度: {score_value_f:.1f}")
+                    self.fatigue_info_label.setStyleSheet(f"""
+                        QLabel {{
+                            color: {color_f};
+                            padding: 8px;
+                            background-color: {bg_color_f};
+                            border-radius: 8px;
+                            font-weight: bold;
+                        }}
+                    """)
+                except Exception as e:
+                    logger.error(f"更新语音答题页疲劳度标签失败: {e}")
+
+            # 更新舒尔特页面的疲劳度显示
+            if hasattr(self, 'schulte_fatigue_label') and self.schulte_fatigue_label:
+                try:
+                    self.schulte_fatigue_label.setText(f"疲劳度: {score_value_f:.1f}")
+                    self.schulte_fatigue_label.setStyleSheet(f"""
+                        QLabel {{
+                            color: {color_f};
+                            padding: 8px;
+                            background-color: {bg_color_f};
+                            border-radius: 8px;
+                            font-weight: bold;
+                        }}
+                    """)
+                except Exception as e:
+                    logger.error(f"更新舒尔特页疲劳度标签失败: {e}")
+
+        except Exception as exc:
+            logger.error(f"更新疲劳度显示失败: {exc}")
+
+    def _update_brain_load_only(self, score_b) -> None:
+        """只更新脑负荷显示（安全，失败不影响UI）"""
+        try:
+            score_value_b = float(score_b)
+            logger.debug(f"更新脑负荷显示: {score_value_b}")
+
+            # 根据脑负荷设置不同颜色
+            if score_value_b < 30:
+                color_b = "#27ae60"  # 绿色 - 正常
+                bg_color_b = "#d5f4e6"
+            elif score_value_b < 60:
+                color_b = "#f39c12"  # 橙色 - 警告
+                bg_color_b = "#fef5e7"
+            else:
+                color_b = "#e74c3c"  # 红色 - 高负荷
+                bg_color_b = "#fadbd8"
+
+            # 更新语音答题页面的脑负荷显示
+            if hasattr(self, 'brain_load_info_label') and self.brain_load_info_label:
+                try:
+                    self.brain_load_info_label.setText(f"脑负荷: {score_value_b:.1f}")
+                    self.brain_load_info_label.setStyleSheet(f"""
+                        QLabel {{
+                            color: {color_b};
+                            padding: 8px;
+                            background-color: {bg_color_b};
+                            border-radius: 8px;
+                            font-weight: bold;
+                        }}
+                    """)
+                except Exception as e:
+                    logger.error(f"更新语音答题页脑负荷标签失败: {e}")
+
+            # 更新舒尔特页面的脑负荷显示
+            if hasattr(self, 'schulte_brain_load_label') and self.schulte_brain_load_label:
+                try:
+                    self.schulte_brain_load_label.setText(f"脑负荷: {score_value_b:.1f}")
+                    self.schulte_brain_load_label.setStyleSheet(f"""
+                        QLabel {{
+                            color: {color_b};
+                            padding: 8px;
+                            background-color: {bg_color_b};
+                            border-radius: 8px;
+                            font-weight: bold;
+                        }}
+                    """)
+                except Exception as e:
+                    logger.error(f"更新舒尔特页脑负荷标签失败: {e}")
+
+        except Exception as exc:
+            logger.error(f"更新脑负荷显示失败: {exc}")
+
     def _update_fatigue_display(self, score_f, score_b) -> None:
-        """更新疲劳度和脑负荷显示（安全，失败不影响UI）"""
+        """更新疲劳度和脑负荷显示（已废弃，保留用于兼容性）
+        
+        注意：此方法已废弃，建议使用 _update_fatigue_only 和 _update_brain_load_only
+        """
         try:
             # 转换为浮动数值
             score_value_f = float(score_f)
@@ -625,6 +848,10 @@ class TestPage(QWidget):
         self.btn_next.clicked.connect(self._next_step_or_question)
         self.btn_finish.clicked.connect(self._finish_test)
         self.btn_mic.clicked.connect(self._toggle_recording)
+        
+        # 连接后端推理结果信号 (用于获取真实的疲劳度分数)
+        backend_client = get_backend_client()
+        backend_client.detection_result.connect(self._on_detection_result)
 
     def _setup_mic_button_animation(self):
         """为麦克风按钮创建光晕（阴影模糊）动画，以避免布局抖动。"""
@@ -719,15 +946,16 @@ class TestPage(QWidget):
                 logger.error(f"延迟数据库更新执行失败: {exc}")
 
     def _ensure_db_row(self):
+        """确保数据库记录已创建（仅创建一次，后续使用更新）"""
         if self._db_disabled or self.row_id:
             return
         if self._row_id_future:
+            logger.debug("数据库记录创建请求已在处理中，跳过重复创建")
             return
 
+        # 只包含必填字段，其他数据通过后续更新添加
         payload = {
             "name": self.current_user or 'anonymous',
-            "audio": list(self._audio_paths),
-            "video": list(self._video_paths),
         }
 
         def _on_created(result: dict):
@@ -737,9 +965,11 @@ class TestPage(QWidget):
                 return
             self.row_id = row_id
             self._row_id_future = None
-            logger.info(f"数据库记录已创建，ID: {row_id}")
+            logger.info(f"✅ 数据库记录已创建，ID: {row_id}")
+            # 执行所有待处理的更新
             self._flush_pending_db_updates(row_id)
 
+        logger.info("📝 创建新的数据库记录...")
         self._row_id_future = self._send_db_command(
             "db.insert_test_record",
             payload,
@@ -1750,7 +1980,27 @@ class TestPage(QWidget):
     def _handle_debug_shortcut(self) -> bool:
         try:
             if self.current_step == 0:
-                logger.info("测试后门触发：按下 Q，语音问答视为完成")
+                logger.info("🔧 测试后门触发：按下 Q，语音问答视为完成")
+                
+                # 停止音视频录制并获取路径
+                try:
+                    logger.info("📹 正在停止音视频录制...")
+                    av_stop_recording()
+                    self._audio_paths = av_get_audio_paths()
+                    self._video_paths = av_get_video_paths()
+                    logger.info(f"✅ 音视频录制已停止: {len(self._audio_paths)} 个音频, {len(self._video_paths)} 个视频")
+                except Exception as e:
+                    logger.error(f"停止音视频录制失败: {e}")
+                    # 初始化为空列表,避免后续错误
+                    if not hasattr(self, '_audio_paths'):
+                        self._audio_paths = []
+                    if not hasattr(self, '_video_paths'):
+                        self._video_paths = []
+                
+                # 保存音视频路径到数据库
+                self._persist_av_paths_to_db()
+                
+                # 切换到下一步
                 self.current_step = 1
                 self.update_step_ui()
                 return True
@@ -1763,6 +2013,8 @@ class TestPage(QWidget):
                     'pulse': 75,
                 }
                 self._complete_bp_test()
+                # 立即推进到下一步，避免重复触发情绪分析
+                self.current_step = 2
                 self.update_step_ui()
                 return True
 
@@ -1933,7 +2185,8 @@ class TestPage(QWidget):
             if self.mic_anim.state() == QPropertyAnimation.Running:
                 self.mic_anim.stop()
             
-            # 📍 在切换到血压测试时触发情绪分析
+            # 📍 在切换到血压测试时，先保存语音识别结果，再触发情绪分析
+            self._save_speech_recognition_results()
             self._trigger_emotion_analysis()
         elif self.current_step == 2:
             self.answer_stack.setCurrentIndex(2)
@@ -1946,7 +2199,9 @@ class TestPage(QWidget):
             # 异步更新分数页数据，避免阻塞UI
             def update_scores_async():
                 try:
+                    # 正确的调用顺序：先设置用户，再发送测试结果，最后更新显示
                     self.score_page._set_user(self.current_user)
+                    self._send_scores_to_score_page()
                     self.score_page._update_scores()
                 except Exception as e:
                     logger.error(f"更新分数页失败: {e}")
@@ -1982,6 +2237,13 @@ class TestPage(QWidget):
         self.btn_finish.setVisible(False)
 
         self.spoken_questions = set()
+        
+        # 重置分数累积列表
+        self._fatigue_scores_list = []
+        self._brain_load_scores_list = []
+        self._emotion_score = None
+        self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
+        logger.info("已重置分数累积列表和情绪分析标志")
 
         if HAS_SPEECH_RECOGNITION:
             try:
@@ -2299,6 +2561,22 @@ class TestPage(QWidget):
                     self._close_camera()
                 except Exception as e:
                     logger.warning(f"关闭摄像头失败: {e}")
+                
+                # 停止音视频录制并获取路径
+                try:
+                    logger.info("📹 正在停止音视频录制...")
+                    av_stop_recording()
+                    self._audio_paths = av_get_audio_paths()
+                    self._video_paths = av_get_video_paths()
+                    logger.info(f"✅ 音视频录制已停止: {len(self._audio_paths)} 个音频, {len(self._video_paths)} 个视频")
+                except Exception as e:
+                    logger.error(f"停止音视频录制失败: {e}")
+                    # 初始化为空列表,避免后续错误
+                    if not hasattr(self, '_audio_paths'):
+                        self._audio_paths = []
+                    if not hasattr(self, '_video_paths'):
+                        self._video_paths = []
+                
                 try:
                     # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
                     multidata_stop_collection()
@@ -2306,6 +2584,8 @@ class TestPage(QWidget):
                     logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
                 # 修复: 保持脑负荷/疲劳度轮询持续到舒特格测试结束
                 self.update_step_ui()
+                
+                # 保存音视频路径到数据库
                 self._persist_av_paths_to_db()
         elif self.current_step == 1:
             call_timestamp = time.time()
@@ -2366,12 +2646,19 @@ class TestPage(QWidget):
         finally:
             self._stop_multimodal_monitoring()
         
-        # 停止EEG采集
+        # 停止EEG采集并保存路径到数据库
         try:
             eeg_stop_collection()
             logger.info("EEG采集已停止")
+            # 获取EEG文件路径并保存到数据库
+            eeg_paths = eeg_get_file_paths()
+            if eeg_paths:
+                logger.info(f"✅ 获取到EEG文件路径: {eeg_paths}")
+                self._persist_eeg_paths_to_db(eeg_paths)
+            else:
+                logger.warning("未获取到EEG文件路径")
         except Exception as e:
-            logger.warning(f"停止EEG采集失败: {e}")
+            logger.error(f"停止EEG采集或保存路径时出错: {e}")
         
         self.current_step += 1
         if self.current_step == 3:
@@ -2524,33 +2811,31 @@ class TestPage(QWidget):
             logger.warning(f"关闭摄像头时出现问题: {e}")
 
     def _persist_av_paths_to_db(self):
+        """保存音视频路径到数据库（使用更新而不是插入，避免重复创建记录）"""
         if self._db_disabled:
             return
 
-        payload = {
-            "name": self.current_user or 'anonymous',
-            "video": list(self._video_paths),
-            "audio": list(self._audio_paths),
-        }
-
-        def _on_created(result: dict) -> None:
-            row_id = result.get("row_id")
-            if not row_id:
-                logger.warning("数据库未返回有效记录ID，后续更新将被跳过。")
-                return
-            self.row_id = row_id
-            self._row_id_future = None
-            logger.info(f"音视频路径已写入数据库，记录ID: {row_id}")
-            self._flush_pending_db_updates(row_id)
-
-        self._row_id_future = self._send_db_command(
-            "db.insert_test_record",
-            payload,
-            context="写入音视频路径到数据库失败",
-            on_success=_on_created,
-        )
+        try:
+            update_payload = {
+                "video": list(self._video_paths),
+                "audio": list(self._audio_paths),
+            }
+            
+            logger.info(f"准备保存音视频路径: {len(self._video_paths)} 视频, {len(self._audio_paths)} 音频")
+            
+            # 使用排队更新机制，如果记录不存在会自动创建
+            self._queue_db_update(update_payload, "保存音视频路径失败")
+            
+            logger.info("✅ 音视频路径已加入数据库更新队列")
+            
+        except Exception as e:
+            logger.exception(f"❌ 保存音视频路径时发生异常: {e}")
 
     def _persist_multimodal_paths_to_db(self):
+        """保存多模态数据文件路径到数据库（RGB/Depth/Eyetrack）
+        
+        注意：语音识别结果已在情绪分析前保存，这里不再重复保存
+        """
         try:
             if not HAS_MULTIMODAL:
                 logger.warning("多模态数据采集模块不可用，跳过数据库写入。")
@@ -2564,20 +2849,12 @@ class TestPage(QWidget):
                 logger.warning("未获取到多模态数据文件路径")
                 return
 
-            record_payload = None
+            # 清理语音识别结果（避免内存泄漏），结果已在 _save_speech_recognition_results 中保存
             try:
-                record_payload = get_recognition_results()
-                logger.info(f"将 {len(record_payload or [])} 条语音识别结果写入 record 字段")
                 clear_recognition_results()
+                logger.debug("已清理语音识别结果缓存")
             except Exception as e:
-                logger.warning(f"获取语音识别结果失败: {e}")
-
-            try:
-                record_txt = os.path.join(self.session_dir, 'emotion', "record.txt")
-                with open(record_txt, 'w', encoding='utf-8') as f:
-                    f.write(str(record_payload))
-            except Exception as exc:
-                logger.debug(f"写入语音识别记录文本失败: {exc}")
+                logger.debug(f"清理语音识别结果失败: {e}")
 
             update_payload = {}
             if file_paths.get('rgb'):
@@ -2586,8 +2863,6 @@ class TestPage(QWidget):
                 update_payload['depth'] = file_paths.get('depth')
             if file_paths.get('eyetrack'):
                 update_payload['tobii'] = file_paths.get('eyetrack')
-            if record_payload is not None:
-                update_payload['record_text'] = record_payload
 
             if not update_payload:
                 logger.debug("多模态文件路径为空，跳过数据库更新。")
@@ -2599,13 +2874,66 @@ class TestPage(QWidget):
             logger.error(f"写入多模态数据路径到数据库失败: {e}")
 
     def _persist_eeg_paths_to_db(self, eeg_paths: dict):
+        """保存 EEG 数据文件路径到数据库（增强版，带同步等待）"""
+        if self._db_disabled:
+            logger.debug("数据库已禁用，跳过 EEG 路径保存")
+            return
+        
         try:
-            update_payload = {
-                'eeg1': eeg_paths.get('ch1_txt'),
-                'eeg2': eeg_paths.get('ch2_txt')
-            }
+            # 提取路径（兼容多种格式）
+            update_payload = {}
+            
+            # 格式 1: {'ch1_txt': 'path1', 'ch2_txt': 'path2'}
+            if 'ch1_txt' in eeg_paths or 'ch2_txt' in eeg_paths:
+                if eeg_paths.get('ch1_txt'):
+                    update_payload['eeg1'] = eeg_paths['ch1_txt']
+                if eeg_paths.get('ch2_txt'):
+                    update_payload['eeg2'] = eeg_paths['ch2_txt']
+            
+            # 格式 2: {'eeg_json_path': 'path1', 'eeg_csv_path': 'path2'}
+            elif 'eeg_json_path' in eeg_paths or 'eeg_csv_path' in eeg_paths:
+                if eeg_paths.get('eeg_json_path'):
+                    update_payload['eeg1'] = eeg_paths['eeg_json_path']
+                if eeg_paths.get('eeg_csv_path'):
+                    update_payload['eeg2'] = eeg_paths['eeg_csv_path']
+            
+            # 格式 3: 列表形式 ['path1', 'path2']
+            elif isinstance(eeg_paths, list):
+                if len(eeg_paths) > 0 and eeg_paths[0]:
+                    update_payload['eeg1'] = eeg_paths[0]
+                if len(eeg_paths) > 1 and eeg_paths[1]:
+                    update_payload['eeg2'] = eeg_paths[1]
+            
+            if not update_payload:
+                logger.warning(f"⚠️ EEG 路径为空或格式不支持: {eeg_paths}")
+                return
+            
+            logger.info(f"准备保存 EEG 路径: {update_payload}")
+            
+            # 如果数据库行还未创建，同步等待最多 3 秒
+            if not self.row_id:
+                logger.info("⏳ 等待数据库行创建...")
+                import time
+                max_wait = 30  # 最多等待 3 秒 (30 * 0.1s)
+                wait_count = 0
+                while not self.row_id and wait_count < max_wait:
+                    time.sleep(0.1)
+                    wait_count += 1
+                
+                if not self.row_id:
+                    logger.error("❌ 等待数据库行创建超时，EEG 路径将被加入待处理队列")
+                    # 仍然尝试排队
+                    self._queue_db_update(update_payload, "保存 EEG 路径失败（等待超时）")
+                    return
+                else:
+                    logger.info(f"✅ 数据库行已创建 (row_id={self.row_id})")
+            
+            # 使用排队机制
             self._queue_db_update(update_payload, "写入EEG路径到数据库失败")
+            logger.info(f"✅ EEG 路径已加入数据库更新队列 (row_id={self.row_id}): {update_payload}")
+            
         except Exception as e:
+            logger.exception(f"❌ 保存 EEG 路径时发生异常: {e}")
             self._handle_db_failure(e, "写入EEG路径到数据库失败")
 
     def save_score(self):
@@ -2663,6 +2991,157 @@ class TestPage(QWidget):
             self._queue_db_update(update_payload, "保存舒特结果到数据库失败")
         except Exception as e:
             logger.warning(f"处理舒特结果信号失败: {e}")
+    
+    def _calculate_average_scores(self) -> Dict[str, Optional[float]]:
+        """
+        计算疲劳度和脑负荷的平均分数
+        
+        Returns:
+            包含平均分数的字典:
+            {
+                "fatigue_avg": 平均疲劳度分数 (0-100),
+                "brain_load_avg": 平均脑负荷分数 (0-100),
+                "fatigue_count": 疲劳度样本数量,
+                "brain_load_count": 脑负荷样本数量
+            }
+        """
+        result = {
+            "fatigue_avg": None,
+            "brain_load_avg": None,
+            "fatigue_count": 0,
+            "brain_load_count": 0
+        }
+        
+        # 计算疲劳度平均值
+        if self._fatigue_scores_list:
+            result["fatigue_avg"] = sum(self._fatigue_scores_list) / len(self._fatigue_scores_list)
+            result["fatigue_count"] = len(self._fatigue_scores_list)
+            logger.info(
+                f"疲劳度平均分数: {result['fatigue_avg']:.2f} "
+                f"(基于 {result['fatigue_count']} 个样本)"
+            )
+        else:
+            logger.warning("没有收集到疲劳度分数数据")
+        
+        # 计算脑负荷平均值
+        if self._brain_load_scores_list:
+            result["brain_load_avg"] = sum(self._brain_load_scores_list) / len(self._brain_load_scores_list)
+            result["brain_load_count"] = len(self._brain_load_scores_list)
+            logger.info(
+                f"脑负荷平均分数: {result['brain_load_avg']:.2f} "
+                f"(基于 {result['brain_load_count']} 个样本)"
+            )
+        else:
+            logger.warning("没有收集到脑负荷分数数据")
+        
+        return result
+    
+    def _prepare_score_data(self) -> Dict[str, any]:
+        """
+        准备传递给分数展示页面的所有数据
+        
+        Returns:
+            包含所有测试结果的字典
+        """
+        # 计算平均分数
+        avg_scores = self._calculate_average_scores()
+        
+        # 准备数据
+        score_data = {
+            # 疲劳检测 (平均值)
+            "疲劳检测": avg_scores["fatigue_avg"] if avg_scores["fatigue_avg"] is not None else 0,
+            
+            # 情绪分数
+            "情绪": self._emotion_score if self._emotion_score is not None else 0,
+            
+            # 脑负荷 (平均值)
+            "脑负荷": avg_scores["brain_load_avg"] if avg_scores["brain_load_avg"] is not None else 0,
+            
+            # 舒尔特准确率
+            "舒尔特准确率": self.schulte_accuracy if self.schulte_accuracy is not None else 0,
+            
+            # 血压数据
+            "收缩压": self.bp_results.get("systolic", 0) if hasattr(self, 'bp_results') else 0,
+            "舒张压": self.bp_results.get("diastolic", 0) if hasattr(self, 'bp_results') else 0,
+            "脉搏": self.bp_results.get("pulse", 0) if hasattr(self, 'bp_results') else 0,
+            
+            # 舒尔特综合得分
+            "舒尔特综合得分": self.score if self.score is not None else 0,
+            
+            # 元数据
+            "_metadata": {
+                "fatigue_sample_count": avg_scores["fatigue_count"],
+                "brain_load_sample_count": avg_scores["brain_load_count"],
+                "has_emotion_score": self._emotion_score is not None,
+                "has_schulte_result": self.schulte_accuracy is not None,
+                "has_bp_result": hasattr(self, 'bp_results') and self.bp_results.get('systolic') is not None,
+            }
+        }
+        
+        logger.info(f"准备分数数据完成: {score_data}")
+        return score_data
+    
+    def _send_scores_to_score_page(self):
+        """
+        将所有测试分数发送到分数展示页面,并保存推理结果到数据库
+        """
+        try:
+            # 准备数据
+            score_data = self._prepare_score_data()
+            
+            # 保存推理结果到数据库
+            self._save_inference_scores_to_db(score_data)
+            
+            # 发送到分数页面
+            if not hasattr(self, 'score_page') or not self.score_page:
+                logger.warning("分数页面未初始化，无法发送分数数据")
+                return
+            
+            if hasattr(self.score_page, 'set_test_results'):
+                self.score_page.set_test_results(score_data)
+                logger.info("✅ 测试结果已发送到分数展示页面")
+            else:
+                logger.warning("分数页面没有 set_test_results 方法")
+                
+        except Exception as e:
+            logger.error(f"发送分数到分数页面失败: {e}", exc_info=True)
+    
+    def _save_inference_scores_to_db(self, score_data: dict):
+        """
+        将疲劳检测、脑负荷、情绪推理结果保存到数据库
+        
+        Args:
+            score_data: 包含所有分数的字典
+        """
+        try:
+            if self._db_disabled:
+                logger.debug("数据库已禁用,跳过保存推理结果")
+                return
+            
+            # 提取推理结果
+            update_payload = {
+                "fatigue_score": score_data.get("疲劳检测", 0),
+                "brain_load_score": score_data.get("脑负荷", 0),
+                "emotion_score": score_data.get("情绪", 0),
+            }
+            
+            # 过滤掉0值(表示没有数据)
+            update_payload = {k: v for k, v in update_payload.items() if v > 0}
+            
+            if not update_payload:
+                logger.debug("没有有效的推理结果需要保存到数据库")
+                return
+            
+            # 更新数据库记录
+            self._queue_db_update(
+                update_payload,
+                "保存推理结果到数据库失败"
+            )
+            
+            logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
+            
+        except Exception as e:
+            logger.error(f"保存推理结果到数据库失败: {e}", exc_info=True)
 
 
 __all__ = ["TestPage"]

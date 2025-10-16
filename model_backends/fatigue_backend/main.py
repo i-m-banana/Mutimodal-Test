@@ -50,9 +50,10 @@ class FatigueBackend(BaseModelBackend):
         """加载疲劳度模型"""
         self.logger.info("正在加载疲劳度模型...")
         
-        # 确定模型路径
-        model_dir = Path(__file__).parent.parent / "emotion_fatigue_infer" / "fatigue"
-        self.model_path = model_dir / "fatigue_best_model.pt"
+        # 确定模型路径 - 从根目录的models_data文件夹加载
+        project_root = Path(__file__).parent.parent.parent
+        models_dir = project_root / "models_data" / "fatigue_models"
+        self.model_path = models_dir / "fatigue_best_model.pt"
         
         if not self.model_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {self.model_path}")

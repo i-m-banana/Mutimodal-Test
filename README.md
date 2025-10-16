@@ -59,21 +59,11 @@ UI → 主后端 (WebSocket:8765) → UnifiedInferenceService → 模型实例 (
 ## 四、目录结构
 ```
 project-root/
-├── aidebug/         # 调试文档与测试脚本（含快速开始、架构设计、接口说明等）
 ├── config/          # 配置文件（YAML 格式）
 │   ├── system.yaml  # 系统参数（心跳间隔、超时设置）
 │   ├── collectors.yaml  # 采集器配置（采样率、工作模式）
 │   ├── detectors.yaml   # 检测器配置（阈值、启用状态）
-│   └── models.yaml      # 模型配置（路径、参数、后端关联）
-├── data/            # 数据目录（原始数据、处理结果、日志输出）
-├── docs/            # 架构与部署文档
-├── logs/            # 日志输出（运行时自动生成）
-│   ├── model/       # 模型推理日志
-│   │   ├── fatigue_backend.log   # 疲劳度模型日志
-│   │   ├── emotion_backend.log   # 情绪模型日志
-│   │   └── model.log             # 集成模型日志
-│   ├── collector/   # 数据采集日志
-│   └── detector/    # 检测器日志
+│   └── app_config.yaml  # 模型部署配置（模式、后端地址、启用状态）
 ├── model_backends/  # 独立模型后端服务
 │   ├── base/                 # 抽象基类（BaseModelBackend：WebSocket 服务器框架）
 │   ├── fatigue_backend/      # 疲劳度模型（PyTorch 实现，多模态推理）
@@ -95,13 +85,21 @@ project-root/
 │   ├── services/    # UI 服务（后端客户端、EEG/AV 代理）
 │   ├── widgets/     # UI 组件（多模态预览、脑负荷条、仪表盘）
 │   └── models/      # 前端模型推理（轻量场景）
-├── tests/           # 单元与集成测试
-│   ├── test_model_backend_architecture.py  # 模型后端架构测试
-│   ├── test_responsive.py                  # 响应式 UI 测试
-│   └── test_eeg_integration.py             # EEG 服务集成测试
-├── pyproject.toml   # 项目配置（依赖与构建）
 ├── requirements.txt # 运行依赖列表
-└── README.md        # 项目首页说明
+├── QUICK_START.md   # 快速开始指南
+├── UI_TO_BACKEND_FLOW.md        # UI 到后端的完整调用流程
+├── MODEL_INFERENCE_LOGGING.md   # 模型推理日志配置说明
+├── FRONTEND_BACKEND_BINDING.md  # 前后端绑定架构说明
+└── README.md        # 项目总览文档（本文件）
+
+注意：以下目录在运行时自动生成或用于本地开发，不会提交到 Git：
+├── logs/            # 日志输出（运行时自动生成）
+├── recordings/      # 录制文件（运行时生成）
+├── data/            # 数据目录（本地数据）
+├── debug/           # 调试脚本与测试工具（本地开发）
+├── tests/           # 单元测试（本地开发）
+├── scripts/         # 工具脚本（本地开发）
+└── docs/            # 文档归档（本地开发）
 ```
 
 
@@ -295,31 +293,18 @@ model_backends:
 3. 实现 `handle_event()` 方法（定义检测逻辑）
 
 
-## 八、测试与文档
-### 8.1 运行测试
-```bash
-# 运行所有测试
-pytest
+## 八、参考文档
+项目根目录包含以下核心文档：
 
-# 运行特定模块测试
-python tests/test_model_backend_architecture.py  # 模型后端架构
-python tests/test_responsive.py                  # 响应式 UI
-```
+| 文档名称 | 说明 |
+|---------|------|
+| `README.md` | 项目总览文档（本文件） |
+| `QUICK_START.md` | 快速启动指南（简化版） |
+| `UI_TO_BACKEND_FLOW.md` | UI通过WebSocket调用模型的完整流程（含代码示例） |
+| `MODEL_INFERENCE_LOGGING.md` | 模型推理日志配置与使用说明 |
+| `FRONTEND_BACKEND_BINDING.md` | 前后端绑定架构说明 |
 
-
-### 8.2 参考文档
-所有详细文档位于项目根目录：
-- **核心文档**：
-  - `UI_TO_BACKEND_FLOW.md`：UI通过WebSocket调用模型的完整流程（含代码示例）
-  - `MODEL_INFERENCE_LOGGING.md`：模型推理日志配置与使用说明
-  - `README.md`：本文档，项目总体说明
-
-- **aidebug/ 目录**（调试与开发文档）：
-  - `QUICK_START.md`：快速启动指南（简化版）
-  - `MULTI_MODEL_BACKEND_ARCHITECTURE.md`：多模型后端架构设计
-  - `MULTI_MODEL_BACKEND_INTERFACES.md`：WebSocket 接口协议说明
-  - `TESTING_GUIDE.md`：测试用例编写指南
-  - `RESOLUTION_ADAPTATION.md`：UI 分辨率适配说明
+**注意**：更多开发文档（测试指南、架构设计、调试工具等）位于本地 `debug/`、`docs/`、`tests/` 目录，不会提交到 GitHub。如需这些文档，请联系项目维护者或查看本地开发环境。
 
 
 ## 九、模拟模式说明

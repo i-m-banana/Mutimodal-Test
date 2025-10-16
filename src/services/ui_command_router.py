@@ -29,10 +29,15 @@ class UICommandRouter:
         self.bp_service = BloodPressureService(logger=self.logger.getChild("bp"))
         self.db_service = DatabaseService(logger=self.logger.getChild("db"))
         self.eeg_service = EEGService(bus=bus, logger=self.logger.getChild("eeg"))
-        self.multimodal_service = MultimodalService(bus=bus, logger=self.logger.getChild("multimodal"))
+        # 将EEG服务传递给Multimodal服务，以支持EEG数据轮询
+        self.multimodal_service = MultimodalService(
+            bus=bus,
+            logger=self.logger.getChild("multimodal"),
+            eeg_service=self.eeg_service
+        )
         self.tts_service = TTSService(logger=self.logger.getChild("tts"))
         self.emotion_service = EmotionService(
-            model_proxy=None,  # TODO: 初始化时传入 model_proxy
+            bus=bus,
             logger=self.logger.getChild("emotion")
         )
         self._running = False

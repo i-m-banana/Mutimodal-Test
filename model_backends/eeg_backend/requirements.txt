@@ -1,0 +1,13 @@
+# EEG脑负荷模型后端依赖
+
+# 核心依赖
+joblib>=1.3.0          # 模型加载
+numpy>=1.24.0          # 数值计算
+scipy>=1.10.0          # 信号处理 (滤波、频谱分析)
+pandas>=2.0.0          # 数据处理
+
+# WebSocket通信
+websockets>=11.0       # WebSocket服务器
+
+# 可选依赖 (用于Excel导出)
+openpyxl>=3.1.0        # Excel文件读写

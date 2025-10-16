@@ -9,6 +9,11 @@ import os
 import threading
 import time
 from typing import Optional, List, Dict
+
+# Prevent libiomp duplication when faster-whisper and torch load together on Windows
+if os.name == "nt" and not os.getenv("KMP_DUPLICATE_LIB_OK"):
+    os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 from faster_whisper import WhisperModel
 from opencc import OpenCC
 

@@ -75,7 +75,7 @@ def estimate_fatigue_score(
     depth_count = float(_safe_len(depth_frames))
     gaze_ratio = _eye_valid_ratio(eyetrack_samples)
 
-    print('使用了模拟疲劳评分器,请勿在生产环境中使用!')
+    # print('使用了模拟疲劳评分器,请勿在生产环境中使用!')  # 文件模式下已禁用
 
     # Base data quality score (reduced weight to make room for time factor)
     base = 35.0

@@ -142,7 +142,9 @@ class WebsocketPushInterface(BaseInterface):
             action = data.get("action")
             request_id = data.get("id") or uuid.uuid4().hex
             body = data.get("payload") or {}
-            self.logger.info("Received command from client: %s", action)
+            # 过滤掉频繁的命令日志(避免刷屏)
+            if action not in ["av.audio_level", "bp.status", "multimodal.snapshot"]:
+                self.logger.info("Received command from client: %s", action)
             self._emit_command(action, body, request_id, websocket)
             return
         if msg_type == "model_inference":

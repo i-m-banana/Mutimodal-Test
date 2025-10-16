@@ -56,14 +56,20 @@ inference_models:
   # 脑电分析模型
   - name: eeg
     type: eeg
-    mode: remote  # 暂时只支持 remote
-    enabled: false
+    mode: integrated  # integrated 或 remote
+    enabled: true
+    # integrated 模式配置
+    integrated:
+      class: models.eeg_model.EEGModel
+      options:
+        device: auto  # EEG模型不使用GPU,但保持统一接口
+    # remote 模式配置
     remote:
       host: 127.0.0.1
       port: 8769
       reconnect: true
       reconnect_interval: 5
-      timeout: 5.0
+      timeout: 10.0
 
 # === 旧的配置格式（向后兼容，已弃用）===
 # 多模型后端配置 (独立Python进程)

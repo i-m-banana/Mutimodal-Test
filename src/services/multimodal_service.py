@@ -33,7 +33,7 @@ from ..constants import EventTopic
 from ..core.event_bus import Event, EventBus
 from ..core.thread_pool import get_thread_pool
 from ..devices import DeviceException, HAS_TOBII, TobiiDevice
-from .fatigue_estimator import estimate_fatigue_score
+# from .fatigue_estimator import estimate_fatigue_score  # 文件模式下不再使用模拟评分
 from ..interfaces.model_ws_client import ModelBackendClient
 
 
@@ -591,7 +591,7 @@ class MultiModalDataCollector:
 class MultimodalService:
     """High-level service exposed to UI via the command router."""
 
-    def __init__(self, *, bus: Optional[EventBus] = None, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, *, bus: Optional[EventBus] = None, logger: Optional[logging.Logger] = None, eeg_service=None) -> None:
         self.logger = logger or logging.getLogger("service.multimodal")
         self.bus = bus
         self._collector: Optional[MultiModalDataCollector] = None
@@ -603,6 +603,13 @@ class MultimodalService:
         self._snapshot_active = False
         self._snapshot_requested = False
         self._thread_pool = get_thread_pool()
+        
+        # EEG服务集成（用于轮询脑负荷数据）
+        self._eeg_service = eeg_service
+        self._eeg_poll_thread_name = "multimodal-eeg-poller"
+        self._eeg_poll_stop = threading.Event()
+        self._eeg_poll_interval = 3.0  # 每3秒轮询一次（降低频率，避免过于频繁）
+        self._eeg_poll_active = False
         
         # 初始化疲劳度模型后端客户端
         self._fatigue_client: Optional[ModelBackendClient] = None
@@ -619,6 +626,7 @@ class MultimodalService:
 
     # Internal helpers -------------------------------------------------
     def _handle_stream_frame(self, frame: Any, timestamp: str) -> None:
+        """Callback from collector to stream RGB frames for UI preview."""
         self._stream_publisher.submit_frame(frame, timestamp)
 
     # Lifecycle --------------------------------------------------------
@@ -628,12 +636,16 @@ class MultimodalService:
         part = int(payload.get("part", 1))
         queue_duration = float(payload.get("queue_duration", 5.0))
         snapshot_interval = float(payload.get("snapshot_interval", 1.2))
+        eeg_poll_interval = float(payload.get("eeg_poll_interval", 3.0))  # EEG轮询间隔（默认3秒，降低频率）
+        
         with self._lock:
             if self._collector and self._collector.running:
                 self.logger.info("Multimodal collector already running")
                 self._snapshot_interval = max(0.5, snapshot_interval)
+                self._eeg_poll_interval = max(0.5, eeg_poll_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
+                self._ensure_eeg_polling()  # 确保EEG轮询已启动
                 return {"status": "already-running", "save_dir": self._collector.save_dir}
             try:
                 self._collector = MultiModalDataCollector(
@@ -647,8 +659,10 @@ class MultimodalService:
                 self._stream_publisher.start()
                 self._collector.start()
                 self._snapshot_interval = max(0.5, snapshot_interval)
+                self._eeg_poll_interval = max(0.5, eeg_poll_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
+                self._ensure_eeg_polling()  # 启动EEG轮询
             except Exception as exc:
                 self.logger.error("Failed to start multimodal collector: %s", exc)
                 self._stream_publisher.stop()
@@ -663,6 +677,7 @@ class MultimodalService:
             self._collector.stop()
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
+            self._stop_eeg_polling()  # 停止EEG轮询
             self._snapshot_requested = False
         return {"status": "stopped"}
 
@@ -674,6 +689,7 @@ class MultimodalService:
             self._collector = None
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
+            self._stop_eeg_polling()  # 停止EEG轮询
             self._snapshot_requested = False
             
             # 关闭疲劳度模型后端客户端
@@ -710,6 +726,100 @@ class MultimodalService:
         self._thread_pool.unregister_managed_thread(self._snapshot_thread_name, timeout=2.0)
         self._snapshot_active = False
         self._snapshot_stop.clear()
+
+    def _ensure_eeg_polling(self) -> None:
+        """启动EEG数据轮询线程，定期获取脑负荷数据并发送推理请求"""
+        if self.bus is None or self._eeg_service is None:
+            self.logger.debug("EventBus或EEG服务不可用，EEG轮询已禁用")
+            return
+        if self._eeg_poll_active:
+            return
+        self._eeg_poll_stop.clear()
+        thread = self._thread_pool.register_managed_thread(
+            self._eeg_poll_thread_name,
+            self._eeg_polling_loop,
+            daemon=True
+        )
+        self._eeg_poll_active = True
+        thread.start()
+        self.logger.info("✅ EEG数据轮询已启动 (间隔=%.2fs)", self._eeg_poll_interval)
+
+    def _stop_eeg_polling(self) -> None:
+        """停止EEG数据轮询"""
+        if not self._eeg_poll_active:
+            return
+        self._eeg_poll_stop.set()
+        self._thread_pool.unregister_managed_thread(self._eeg_poll_thread_name, timeout=2.0)
+        self._eeg_poll_active = False
+        self._eeg_poll_stop.clear()
+        self.logger.info("⏹️ EEG数据轮询已停止")
+
+    def _eeg_polling_loop(self) -> None:
+        """EEG轮询主循环：定期获取2秒窗口数据并发送推理请求"""
+        self.logger.debug("EEG轮询线程已启动")
+        try:
+            while not self._eeg_poll_stop.is_set():
+                # 使用IO线程池提交轮询任务，避免阻塞
+                self._thread_pool.submit_io_task(self._poll_eeg_and_publish)
+                interval = self._eeg_poll_interval
+                if interval <= 0:
+                    interval = 1.0
+                if self._eeg_poll_stop.wait(interval):
+                    break
+        finally:
+            self._eeg_poll_active = False
+            self.logger.debug("EEG轮询线程已停止")
+
+    def _poll_eeg_and_publish(self) -> None:
+        """在IO线程中轮询EEG数据并发布推理请求"""
+        if self._eeg_service is None or self.bus is None:
+            return
+        
+        try:
+            # 获取最近2秒的窗口数据 (2秒 @ 500Hz采样率 = 1000样本)
+            # 注意: EEG采集是500Hz，但模型期望250Hz，所以我们获取2秒数据后可能需要降采样
+            window_data = self._eeg_service.get_recent_window(seconds=2.0, sample_rate=500.0)
+            
+            if not window_data:
+                return  # 静默跳过空数据
+            
+            # 提取双通道数据
+            ch1_data = window_data.get("ch1", [])
+            ch2_data = window_data.get("ch2", [])
+            
+            # 检查数据是否足够（至少500个样本用于推理）
+            sample_count = len(ch1_data)
+            
+            if sample_count < 500:
+                return  # 静默等待更多数据,避免频繁日志
+            
+            if not ch1_data or not ch2_data:
+                return  # 静默跳过空通道
+            
+            if len(ch1_data) != len(ch2_data):
+                self.logger.warning(f"⚠️EEG通道长度不匹配 {len(ch1_data)}≠{len(ch2_data)}")
+                return
+            
+            # 转换为 [n_samples, 2] 格式 (与EEG模型期望一致)
+            if np is not None:
+                eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
+            else:
+                eeg_signal = [[ch1_data[i], ch2_data[i]] for i in range(len(ch1_data))]
+            
+            # 发布EEG_REQUEST事件到EventBus，触发推理
+            payload = {
+                "mode": "memory",  # 内存模式
+                "eeg_signal": eeg_signal,
+                "sample_count": sample_count,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+            self.bus.publish(Event(EventTopic.EEG_REQUEST, payload))
+            # 压缩日志: 只输出样本数,不输出"已发送"等冗余信息
+            self.logger.debug(f"📤EEG {sample_count}样本")
+            
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.debug(f"⚠️EEG轮询: {exc}")
 
     def _snapshot_loop(self) -> None:
         self.logger.debug("Snapshot broadcaster loop running")
@@ -782,117 +892,30 @@ class MultimodalService:
             return {"paths": {}, "status": "idle"}
         return {"paths": collector.get_file_paths(), "status": "running" if collector.running else "stopped"}
 
-    def _get_fatigue_score(self, data: Dict[str, Any], elapsed: float) -> float:
-        """获取疲劳度分数
-        
-        优先使用模型后端进行推理,如果不可用则回退到启发式估算。
-        
-        Args:
-            data: 采集的多模态数据
-            elapsed: 采集时长(秒)
-        
-        Returns:
-            疲劳度分数 (0-100)
-        """
-        # 如果启用了模型后端且客户端健康,使用模型推理
-        if self._use_model_backend and self._fatigue_client and self._fatigue_client.is_healthy():
-            try:
-                return self._infer_fatigue_with_model(data, elapsed)
-            except Exception as e:
-                self.logger.warning(f"模型推理失败,回退到启发式估算: {e}")
-        
-        # 回退到启发式估算
-        return estimate_fatigue_score(
-            data.get("rgb") or [],
-            data.get("depth") or [],
-            data.get("eyetrack") or [],
-            elapsed_time=elapsed,
-        )
-    
-    def _infer_fatigue_with_model(self, data: Dict[str, Any], elapsed: float) -> float:
-        """使用模型后端进行疲劳度推理
-        
-        Args:
-            data: 采集的多模态数据
-            elapsed: 采集时长(秒)
-        
-        Returns:
-            疲劳度分数 (0-100)
-        
-        Raises:
-            Exception: 推理失败
-        """
-        rgb_frames = data.get("rgb") or []
-        depth_frames = data.get("depth") or []
-        eyetrack_samples = data.get("eyetrack") or []
-        
-        # 如果数据不足,返回默认值
-        if not rgb_frames or not depth_frames:
-            self.logger.debug("数据不足,无法进行模型推理")
-            return 0.0
-        
-        # 将RGB和深度帧编码为base64
-        rgb_b64_list = []
-        depth_b64_list = []
-        
-        try:
-            for rgb_frame in rgb_frames:
-                if cv2 is not None and np is not None:
-                    # 确保是numpy数组
-                    rgb_array = np.ascontiguousarray(rgb_frame)
-                    # 编码为JPEG
-                    ok, buffer = cv2.imencode(".jpg", rgb_array, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-                    if ok:
-                        rgb_b64 = base64.b64encode(buffer).decode("ascii")
-                        rgb_b64_list.append(rgb_b64)
-            
-            for depth_frame in depth_frames:
-                if cv2 is not None and np is not None:
-                    # 将深度帧转换为8位图像
-                    depth_8u = cv2.convertScaleAbs(depth_frame, alpha=0.03)
-                    # 编码为PNG (保留更多信息)
-                    ok, buffer = cv2.imencode(".png", depth_8u)
-                    if ok:
-                        depth_b64 = base64.b64encode(buffer).decode("ascii")
-                        depth_b64_list.append(depth_b64)
-        except Exception as e:
-            self.logger.error(f"图像编码失败: {e}")
-            raise
-        
-        # 构建推理请求
-        inference_data = {
-            "rgb_frames": rgb_b64_list,
-            "depth_frames": depth_b64_list,
-            "eyetrack_samples": eyetrack_samples,
-            "elapsed_time": elapsed
-        }
-        
-        # 发送推理请求
-        self.logger.debug(f"发送疲劳度推理请求: {len(rgb_b64_list)} RGB帧, {len(depth_b64_list)} 深度帧, {len(eyetrack_samples)} 眼动样本")
-        
-        future = self._fatigue_client.send_inference_request(inference_data, timeout=3.0)
-        
-        try:
-            result = future.result(timeout=3.0)
-            
-            if result.get("status") == "success":
-                predictions = result.get("predictions", {})
-                fatigue_score = predictions.get("fatigue_score", 0.0)
-                self.logger.debug(
-                    f"模型推理成功: 疲劳度={fatigue_score}, "
-                    f"推理耗时={predictions.get('inference_time_ms')}ms"
-                )
-                return float(fatigue_score)
-            else:
-                error = result.get("error", "Unknown error")
-                raise Exception(f"推理失败: {error}")
-        
-        except TimeoutError:
-            self.logger.warning("模型推理超时")
-            raise
-        except Exception as e:
-            self.logger.error(f"模型推理异常: {e}")
-            raise
+    # ------------------------------------------------------------------
+    # 注释: 文件模式下,疲劳度推理由 UnifiedInferenceService 处理
+    # 如需启用模拟评分,取消下面代码的注释
+    # def _get_fatigue_score(self, data: Dict[str, Any], elapsed: float) -> float:
+    #     """获取疲劳度分数 (模拟估算)
+    #     
+    #     注意: 在文件模式下,疲劳度推理由 UnifiedInferenceService 处理,
+    #     此方法只返回启发式估算值,实际推理结果通过 DETECTION_RESULT 事件发布
+    #     
+    #     Args:
+    #         data: 采集的多模态数据
+    #         elapsed: 采集时长(秒)
+    #     
+    #     Returns:
+    #         疲劳度分数 (0-100) - 仅用于快照预览,非最终推理结果
+    #     """
+    #     # 文件模式下,返回启发式估算值(用于快照预览)
+    #     # 实际的模型推理由 UnifiedInferenceService 负责
+    #     return estimate_fatigue_score(
+    #         data.get("rgb") or [],
+    #         data.get("depth") or [],
+    #         data.get("eyetrack") or [],
+    #         elapsed_time=elapsed,
+    #     )
 
     # ------------------------------------------------------------------
     def _build_snapshot(self) -> Dict[str, Any]:
@@ -906,39 +929,61 @@ class MultimodalService:
         # Calculate elapsed time since collection started
         elapsed = time.time() - collector._start_time if collector._start_time > 0 else 0.0
         
-        # 获取疲劳度分数
-        fatigue_score = self._get_fatigue_score(data, elapsed)
+        # 文件模式: 不通过WebSocket传输图像数据,只传输文件路径
+        # 获取当前保存的文件路径（用于文件模式推理）
+        part_suffix = f"{collector.part}"
+        save_dir = collector.save_dir if collector.save_dir else None
+        rgb_video_path = str(Path(save_dir) / f"rgb{part_suffix}.avi") if save_dir else None
+        depth_video_path = str(Path(save_dir) / f"depth{part_suffix}.avi") if save_dir else None
+        eyetrack_json_path = str(Path(save_dir) / f"eyetrack{part_suffix}.json") if save_dir else None
         
-        preview = self._encode_preview(latest.get("rgb") if latest else None)
+        # 获取时间戳和帧计数
+        timestamps = data.get("timestamps") or []
+        latest_timestamp = timestamps[-1] if timestamps else None
+        # 从队列数据中获取实际帧数
+        rgb_samples = len(data.get("rgb") or [])
+        depth_samples = len(data.get("depth") or [])
+        eyetrack_count = len(data.get("eyetrack") or [])
+        
+        # 内存模式优化: 直接传递内存中的numpy数组给推理服务
+        # 这样可以避免"写文件→读文件"的重复I/O
+        rgb_frames_memory = data.get("rgb") or []
+        depth_frames_memory = data.get("depth") or []
+        eyetrack_memory = data.get("eyetrack") or []
+        
         return {
             "status": "running" if collector.running else "stopped",
             "queue_length": data.get("queue_length", 0),
-            "rgb_samples": len(data.get("rgb") or []),
-            "depth_samples": len(data.get("depth") or []),
-            "eyetrack_samples": len(data.get("eyetrack") or []),
-            "latest_timestamp": (data.get("timestamps") or [None])[-1],
-            "fatigue_score": fatigue_score,
-            "elapsed_time": round(elapsed, 2),  # Include elapsed time in snapshot
-            "preview_jpeg": preview,
+            "rgb_samples": rgb_samples,
+            "depth_samples": depth_samples,
+            "eyetrack_samples": eyetrack_count,
+            "latest_timestamp": latest_timestamp,
+            # 注意: fatigue_score 已移除,前端应从 DETECTION_RESULT 事件获取真实推理结果
+            # 如需启用模拟评分,取消下面行的注释并恢复 _get_fatigue_score 方法
+            # "fatigue_score": self._get_fatigue_score(data, elapsed),
+            "elapsed_time": round(elapsed, 2),
+            
+            # 内存模式（优先）：直接传递numpy数组，避免文件I/O
+            "memory_mode": True,
+            "rgb_frames_memory": rgb_frames_memory,
+            "depth_frames_memory": depth_frames_memory,
+            "eyetrack_memory": eyetrack_memory,
+            
+            # 文件路径模式（备用）：用于存档和备份推理
+            "file_mode": True,
+            "rgb_video_path": rgb_video_path,
+            "depth_video_path": depth_video_path,
+            "eyetrack_json_path": eyetrack_json_path,
+            
+            # 推理元数据
+            "timestamp": latest_timestamp,
+            "frame_count": rgb_samples,
         }
 
-    def _encode_preview(self, frame: Any) -> Optional[str]:
-        if frame is None or np is None or cv2 is None:
-            return None
-        try:
-            frame_array = np.ascontiguousarray(frame)  # type: ignore[arg-type]
-            height, width = frame_array.shape[:2]
-            if max(height, width) > 640:
-                scale = 640.0 / float(max(height, width))
-                new_size = (int(width * scale), int(height * scale))
-                frame_array = cv2.resize(frame_array, new_size, interpolation=cv2.INTER_AREA)
-            ok, buffer = cv2.imencode(".jpg", frame_array, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ok:
-                return None
-            return base64.b64encode(buffer).decode("ascii")
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug("Failed to encode multimodal preview: %s", exc)
-            return None
+    # 文件模式: 不再需要预览编码
+    # def _encode_preview(self, frame: Any) -> Optional[str]:
+    #     """已弃用 - 文件模式下不通过WebSocket发送图像"""
+    #     pass
 
 
 __all__ = ["MultimodalService"]

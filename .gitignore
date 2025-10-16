@@ -59,7 +59,7 @@ data/
 *.sqlite3
 
 # AI Debug Files
-aidebug/
+debug/
 .aidebug/
 
 # Compressed Files
@@ -90,6 +90,9 @@ desktop.ini
 *.pickle
 *.joblib
 
+# Large Models and Training Data Directory
+models_data/
+
 # Configuration Files with Secrets (if any)
 .env
 .env.local
@@ -111,9 +114,12 @@ htmlcov/
 tests/
 scripts/
 docs/
-model_backends/emotion_fatigue_infer/
+examples/
+
+pyproject.toml
 
 .gitignore
 
 AGENTS.MD
 
+*DEBUGE

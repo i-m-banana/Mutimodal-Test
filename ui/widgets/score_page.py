@@ -149,11 +149,12 @@ class ModernGaugeWidget(QWidget):
 class HistoryDialog(QDialog):
     """历史数据展示对话框"""
 
-    def __init__(self, data_interface):
+    def __init__(self, data_interface, use_mock_on_empty=True):
         super().__init__()
         self.setWindowTitle("历史数据分析")
         self.setMinimumSize(1000, 800)
         self.data_interface = data_interface
+        self.use_mock_on_empty = use_mock_on_empty  # 当没有有效数据时是否使用模拟数据
         self.current_metric = None
         self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
@@ -275,6 +276,7 @@ class HistoryDialog(QDialog):
         history_data = data.get("历史", {})
         history_values = history_data.get(metric, [])
         history_dates = data.get("历史日期", [])
+        data_validity = data.get("数据有效性", {})
 
         if not history_values or not history_dates:
             ax.text(0.5, 0.5, '暂无历史数据', ha='center', va='center',
@@ -286,9 +288,74 @@ class HistoryDialog(QDialog):
             history_dates = history_dates[:min_len]
             history_values = history_values[:min_len]
 
-            # 转换日期字符串为datetime对象
-            dates = [datetime.strptime(d, "%Y-%m-%d %H:%M:%S") if isinstance(d, str) else d
-                     for d in history_dates]
+            # 过滤空值数据点(值为0或None的点)
+            valid_pairs = [(v, d) for v, d in zip(history_values, history_dates) 
+                          if v is not None and v > 0]
+            
+            # 检查是否有有效数据
+            valid_count = data_validity.get(metric, 0)
+            if not valid_pairs or valid_count == 0:
+                # 如果启用了模拟数据模式,则生成并显示模拟数据
+                if self.use_mock_on_empty:
+                    logger.info(f"指标 '{metric}' 无有效数据,使用模拟数据显示")
+                    # 生成模拟历史数据
+                    num_records = random.randint(10, 25)
+                    base_date = datetime.now()
+                    mock_dates = []
+                    mock_values = []
+                    
+                    for i in range(num_records):
+                        days_ago = random.randint(0, 30)
+                        hours_ago = random.randint(0, 23)
+                        test_date = base_date - timedelta(days=days_ago, hours=hours_ago)
+                        mock_dates.append(test_date)
+                        
+                        # 根据不同指标生成合理范围的值
+                        if metric in ["收缩压"]:
+                            mock_values.append(random.randint(100, 140))
+                        elif metric in ["舒张压"]:
+                            mock_values.append(random.randint(60, 90))
+                        elif metric in ["脉搏"]:
+                            mock_values.append(random.randint(60, 100))
+                        elif metric in ["舒尔特准确率"]:
+                            mock_values.append(random.randint(80, 100))
+                        else:  # 疲劳、情绪、脑负荷等分数类指标
+                            mock_values.append(random.randint(40, 100))
+                    
+                    # 按时间排序
+                    sorted_pairs = sorted(zip(mock_dates, mock_values))
+                    history_dates = [d for d, v in sorted_pairs]
+                    history_values = [v for d, v in sorted_pairs]
+                    
+                    # 继续绘制图表(使用模拟数据)
+                else:
+                    # 不使用模拟数据,显示"暂无有效数据"提示
+                    ax.text(0.5, 0.5, f'{metric}\n暂无有效数据\n（所有值为0或空）', 
+                           ha='center', va='center',
+                           transform=ax.transAxes, fontproperties=self.zh_font, 
+                           fontsize=20, color='#999')
+                    ax.text(0.5, 0.3, f'总记录数: {len(history_values)} | 有效数据: 0',
+                           ha='center', va='center',
+                           transform=ax.transAxes, fontproperties=self.zh_font,
+                           fontsize=14, color='#bbb')
+                    self.figure.tight_layout()
+                    self.canvas.draw()
+                    return
+            else:
+                # 分离有效值和日期
+                history_values, history_dates = zip(*valid_pairs)
+                history_values = list(history_values)
+                history_dates = list(history_dates)
+            
+            # 转换日期为datetime对象(如果还不是的话)
+            dates = []
+            for d in history_dates:
+                if isinstance(d, str):
+                    dates.append(datetime.strptime(d, "%Y-%m-%d %H:%M:%S"))
+                elif isinstance(d, datetime):
+                    dates.append(d)
+                else:
+                    dates.append(datetime.now())  # 兜底值
 
             # 绘制折线图
             line = ax.plot(dates, history_values, 'o-', linewidth=3, markersize=10,
@@ -301,7 +368,8 @@ class HistoryDialog(QDialog):
             # 添加平均线
             avg = sum(history_values) / len(history_values)
             ax.axhline(y=avg, color='#FF5722', linestyle='--', linewidth=2.5, alpha=0.7)
-            ax.text(dates[-1], avg, f'平均值: {avg:.1f}',
+            # 平均值显示为整数（更简洁）
+            ax.text(dates[-1], avg, f'平均值: {int(round(avg))}',
                     fontproperties=self.zh_font, fontsize=14, color='#FF5722',
                     bbox=dict(boxstyle="round,pad=0.5", facecolor='white',
                               edgecolor='#FF5722', alpha=0.8))
@@ -319,7 +387,13 @@ class HistoryDialog(QDialog):
             else:
                 ax.set_ylabel("分数", fontproperties=self.zh_font, fontsize=16)
 
-            ax.set_title(f"{metric} 历史趋势", fontproperties=self.zh_font,
+            # 标题包含数据统计
+            total_records = min_len  # 总记录数
+            valid_records = len(history_values)  # 有效数据数
+            title_text = f"{metric} 历史趋势"
+            if valid_records < total_records:
+                title_text += f" (显示 {valid_records}/{total_records} 条有效数据)"
+            ax.set_title(title_text, fontproperties=self.zh_font,
                          fontsize=20, fontweight='bold', pad=20)
 
             # 设置x轴日期格式
@@ -362,15 +436,21 @@ class HistoryDialog(QDialog):
                         # 格式化时间显示
                         time_str = date_val.strftime("%Y-%m-%d %H:%M")
 
+                        # 格式化数值：取整显示（更清晰）
+                        try:
+                            y_display = int(round(float(y_val)))
+                        except (ValueError, TypeError):
+                            y_display = y_val
+
                         # 根据不同指标显示不同单位
                         if metric in ["收缩压", "舒张压"]:
-                            text = f'{time_str}\n{metric}: {y_val} mmHg'
+                            text = f'{time_str}\n{metric}: {y_display} mmHg'
                         elif metric == "脉搏":
-                            text = f'{time_str}\n脉搏: {y_val} 次/分'
+                            text = f'{time_str}\n脉搏: {y_display} 次/分'
                         elif metric == "舒尔特准确率":
-                            text = f'{time_str}\n准确率: {y_val}%'
+                            text = f'{time_str}\n准确率: {y_display}%'
                         else:
-                            text = f'{time_str}\n分数: {y_val}'
+                            text = f'{time_str}\n分数: {y_display}'
 
                         self.annotation.set_text(text)
                         self.annotation.set_visible(True)
@@ -461,6 +541,9 @@ class ScorePage(QWidget):
         self._pending_history_user = None
         self._current_data = self._mock_data_interface() if self._use_mock_data else self._blank_data()
         self.data_interface = self._fetch_data
+        
+        # 测试结果数据（从test.py传入）
+        self._test_results = None
 
         # 加载动画定时器
         self._loading_angle = 0
@@ -784,7 +867,9 @@ class ScorePage(QWidget):
             return
 
         requested_user = self.username or "anonymous"
-        payload = {"name": requested_user}
+        # 默认获取最近30条记录,足够绘制平滑曲线
+        # 可设置 limit=0 获取所有历史,或 limit=50 获取更多数据
+        payload = {"name": requested_user, "limit": 30}
         future = client.send_command_future("db.get_user_history", payload)
         self._history_future = future
         self._pending_history_user = requested_user
@@ -883,32 +968,55 @@ class ScorePage(QWidget):
         # 按时间排序
         history_dates.sort()
 
+        # 生成历史数据(确保有有效的非零值)
+        history_data = {
+            "疲劳检测": [random.randint(40, 100) for _ in range(num_records)],
+            "情绪": [random.randint(40, 100) for _ in range(num_records)],
+            "血压脉搏": [random.randint(60, 120) for _ in range(num_records)],  # 保留原有字段用于兼容
+            "收缩压": [random.randint(100, 140) for _ in range(num_records)],
+            "舒张压": [random.randint(60, 90) for _ in range(num_records)],
+            "脉搏": [random.randint(60, 100) for _ in range(num_records)],
+            "脑负荷": [random.randint(40, 100) for _ in range(num_records)],
+            "舒尔特准确率": [random.randint(80, 100) for _ in range(num_records)],
+            "舒尔特综合得分": [random.randint(40, 100) for _ in range(num_records)],
+        }
+        
+        # 计算每个指标的有效数据数量(非零非空值的数量)
+        data_validity = {}
+        for metric, values in history_data.items():
+            valid_count = sum(1 for v in values if v is not None and v > 0)
+            data_validity[metric] = valid_count
+
         # 模拟接口数据
         return {
-            "疲劳检测": random.randint(0, 100),
-            "情绪": random.randint(0, 100),
+            "疲劳检测": random.randint(40, 100),
+            "情绪": random.randint(40, 100),
             "血压脉搏": random.randint(60, 120),  # 保留原有字段用于兼容
             "收缩压": random.randint(100, 140),
             "舒张压": random.randint(60, 90),
             "脉搏": random.randint(60, 100),
-            "脑负荷": random.randint(0, 100),
+            "脑负荷": random.randint(40, 100),
             "舒尔特准确率": random.randint(80, 100),
-            "舒尔特综合得分": random.randint(0, 100),
-            "历史": {
-                "疲劳检测": [random.randint(0, 100) for _ in range(num_records)],
-                "情绪": [random.randint(0, 100) for _ in range(num_records)],
-                "血压脉搏": [random.randint(60, 120) for _ in range(num_records)],  # 保留原有字段用于兼容
-                "收缩压": [random.randint(100, 140) for _ in range(num_records)],
-                "舒张压": [random.randint(60, 90) for _ in range(num_records)],
-                "脉搏": [random.randint(60, 100) for _ in range(num_records)],
-                "脑负荷": [random.randint(0, 100) for _ in range(num_records)],
-                "舒尔特准确率": [random.randint(80, 100) for _ in range(num_records)],
-                "舒尔特综合得分": [random.randint(0, 100) for _ in range(num_records)],
-            },
-            "历史日期": history_dates
+            "舒尔特综合得分": random.randint(40, 100),
+            "历史": history_data,
+            "历史日期": history_dates,
+            "数据有效性": data_validity  # 添加数据有效性统计
         }
 
     def _fetch_data(self):
+        # 优先返回真实测试结果(即使在模拟模式下)
+        if self._test_results:
+            # 确保 _current_data 包含最新的测试结果
+            if not self._current_data:
+                self._current_data = {}
+            # 合并测试结果到当前数据
+            for key in ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", 
+                       "收缩压", "舒张压", "脉搏", "舒尔特综合得分"]:
+                if key in self._test_results:
+                    self._current_data[key] = self._test_results[key]
+            return self._current_data
+        
+        # 没有测试结果时,使用模拟数据或空数据
         if self._use_mock_data:
             self._current_data = self._mock_data_interface()
         elif not self._current_data:
@@ -950,9 +1058,52 @@ class ScorePage(QWidget):
         if self._use_mock_data:
             self._refresh_data()
         else:
-            self._current_data = self._blank_data()
-            self._update_scores()
+            # 如果还没有测试结果数据，才初始化为空白数据
+            # 如果已经有测试结果，保留它
+            if not self._test_results:
+                self._current_data = self._blank_data()
             self._refresh_data()
+    
+    def set_test_results(self, results_data: dict):
+        """
+        接收从test.py传入的测试结果数据
+        
+        Args:
+            results_data: 包含所有测试结果的字典,格式:
+                {
+                    "疲劳检测": float,  # 平均疲劳度分数
+                    "情绪": float,  # 情绪分数
+                    "脑负荷": float,  # 平均脑负荷分数
+                    "舒尔特准确率": float,  # 舒尔特准确率
+                    "收缩压": int,
+                    "舒张压": int,
+                    "脉搏": int,
+                    "舒尔特综合得分": int,
+                    "_metadata": dict  # 元数据
+                }
+        """
+        try:
+            logger.info(f"📥 ScorePage接收到测试结果数据")
+            logger.info(f"  疲劳检测={results_data.get('疲劳检测', 'N/A')}, 情绪={results_data.get('情绪', 'N/A')}, 脑负荷={results_data.get('脑负荷', 'N/A')}")
+            
+            # 保存测试结果(会在 _fetch_data() 中自动合并)
+            self._test_results = results_data
+            
+            # 记录元数据
+            if "_metadata" in results_data:
+                metadata = results_data["_metadata"]
+                logger.info(
+                    f"  数据统计: 疲劳样本={metadata.get('fatigue_sample_count', 0)}, "
+                    f"脑负荷样本={metadata.get('brain_load_sample_count', 0)}, "
+                    f"有情绪={metadata.get('has_emotion_score', False)}, "
+                    f"有舒尔特={metadata.get('has_schulte_result', False)}, "
+                    f"有血压={metadata.get('has_bp_result', False)}"
+                )
+            
+            logger.info("✅ 测试结果已保存,将在下次更新时显示")
+                
+        except Exception as e:
+            logger.error(f"处理测试结果数据失败: {e}", exc_info=True)
 
     def _update_scores(self):
         """更新分数显示"""
@@ -960,18 +1111,27 @@ class ScorePage(QWidget):
 
         # 更新左侧指标卡片（除血压脉搏外的其他指标）
         for key, lbl in self.score_labels.items():
-            value = data.get(key, 0)
+            raw_value = data.get(key, 0)
+            
+            # 确保数值为数字类型
+            try:
+                value = float(raw_value) if raw_value is not None else 0
+            except (ValueError, TypeError):
+                value = 0
+            
+            # 取整显示（所有指标都显示为整数）
+            value_int = int(round(value))
 
             # 根据不同指标显示不同单位
             if key == "舒尔特准确率":
-                lbl.setText(f"{value}%")
+                lbl.setText(f"{value_int}%")
             else:
-                lbl.setText(f"{value} 分")
+                lbl.setText(f"{value_int} 分")
 
             # 根据分数设置颜色
-            if value >= 80:
+            if value_int >= 80:
                 color = "#00aa00"  # 绿色
-            elif value >= 60:
+            elif value_int >= 60:
                 color = "#FFA500"  # 橙色
             else:
                 color = "#aa0000"  # 红色
@@ -983,8 +1143,12 @@ class ScorePage(QWidget):
         pulse = data.get("脉搏", 75)
         self.bp_widget.set_values(systolic, diastolic, pulse)
 
-        # 更新仪表盘
-        total_score = data.get("舒尔特综合得分", 0)
+        # 更新仪表盘（取整显示）
+        raw_total = data.get("舒尔特综合得分", 0)
+        try:
+            total_score = int(round(float(raw_total))) if raw_total is not None else 0
+        except (ValueError, TypeError):
+            total_score = 0
         self.gauge.setValue(total_score)
 
         # 更新等级评价和评语

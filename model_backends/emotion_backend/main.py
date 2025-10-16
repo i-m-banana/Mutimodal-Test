@@ -58,10 +58,13 @@ class EmotionBackend(BaseModelBackend):
         """加载情绪模型"""
         self.logger.info("正在加载情绪模型...")
         
-        # 确定模型路径
-        model_dir = Path(__file__).parent.parent / "emotion_fatigue_infer" / "emotion"
-        self.model_path = model_dir / "best_model.pt"
-        self.model_dir = model_dir / "model"
+        # 确定模型路径 - 从根目录的models_data文件夹加载
+        project_root = Path(__file__).parent.parent.parent
+        models_dir = project_root / "models_data" / "emotion_models"
+        self.model_path = models_dir / "best_model.pt"
+        # 预训练模型也移到models_data
+        pretrained_models_dir = project_root / "models_data" / "emotion_pretrained_models"
+        self.model_dir = pretrained_models_dir
         
         if not self.model_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {self.model_path}")

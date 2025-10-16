@@ -49,9 +49,12 @@ class EmotionModel(BaseInferenceModel):
         if not HAS_DEPS:
             raise RuntimeError(f"无法加载依赖: {_import_error}")
         
-        # 确定模型路径
-        model_path = _EMOTION_PATH / "best_model.pt"
-        model_dir = _EMOTION_PATH / "model"
+        # 确定模型路径 - 从根目录的models_data文件夹加载
+        project_root = Path(__file__).parent.parent.parent
+        models_dir = project_root / "models_data" / "emotion_models"
+        model_path = models_dir / "best_model.pt"
+        # 预训练模型也在models_data
+        pretrained_models_dir = project_root / "models_data" / "emotion_pretrained_models"
         
         if not model_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
@@ -62,30 +65,28 @@ class EmotionModel(BaseInferenceModel):
         
         # 加载预处理器
         self.logger.info("加载预训练模型...")
-        self.vision_processor = VivitImageProcessor.from_pretrained(str(model_dir / "TIMESFORMER"))
-        self.audio_processor = Wav2Vec2Processor.from_pretrained(str(model_dir / "WAV2VEC2"))
-        self.text_tokenizer = AutoTokenizer.from_pretrained(str(model_dir / "ROBBERTA"))
+        self.vision_processor = VivitImageProcessor.from_pretrained(str(pretrained_models_dir / "TIMESFORMER"))
+        self.audio_processor = Wav2Vec2Processor.from_pretrained(str(pretrained_models_dir / "WAV2VEC2"))
+        self.text_tokenizer = AutoTokenizer.from_pretrained(str(pretrained_models_dir / "ROBBERTA"))
         
         # 加载特征提取模型
         self.vision_model = AutoModel.from_pretrained(
-            str(model_dir / "TIMESFORMER"), 
+            str(pretrained_models_dir / "TIMESFORMER"), 
             ignore_mismatched_sizes=True
         ).to(self.device)
         self.vision_model.eval()
         
         self.audio_model = Wav2Vec2Model.from_pretrained(
-            str(model_dir / "WAV2VEC2"), 
+            str(pretrained_models_dir / "WAV2VEC2"),
             ignore_mismatched_sizes=True
         ).to(self.device)
         self.audio_model.eval()
         
         self.text_model = AutoModel.from_pretrained(
-            str(model_dir / "ROBBERTA"), 
+            str(pretrained_models_dir / "ROBBERTA"),
             ignore_mismatched_sizes=True
         ).to(self.device)
-        self.text_model.eval()
-        
-        # 预热并获取特征维度
+        self.text_model.eval()        # 预热并获取特征维度
         self.logger.info("预热模型...")
         dummy_video = np.zeros((224, 224, 3), dtype=np.uint8)
         dummy_audio = np.zeros(16000, dtype=np.float32)
@@ -132,15 +133,21 @@ class EmotionModel(BaseInferenceModel):
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """执行推理
         
-        支持两种输入模式：
+        支持三种输入模式：
         1. base64 数据模式（原有）：
            - samples: List[Dict] - 包含video_b64, audio_b64, text的样本列表
            
-        2. 文件路径模式（新增）：
+        2. 文件路径模式（单样本）：
            - file_mode: bool = True
            - video_path: str - 视频文件路径
            - audio_path: str - 音频文件路径
            - text: str = "" - 文本内容（可选）
+           
+        3. 多样本文件模式（新增）：
+           - multi_sample_mode: bool = True
+           - video_paths: List[str] - 视频文件路径列表
+           - audio_paths: List[str] - 音频文件路径列表
+           - text_list: List[str] - 文本内容列表
         
         Args:
             data: 输入数据字典
@@ -150,15 +157,136 @@ class EmotionModel(BaseInferenceModel):
                 - emotion_score: 情绪分数 (0-100)
                 - sample_results: 每个样本的结果（如果是多样本）
         """
-        # 检查是否为文件路径模式
-        if data.get("file_mode") == True:
+        # 检查推理模式
+        if data.get("multi_sample_mode") == True:
+            return self._infer_from_multiple_files(data)
+        elif data.get("file_mode") == True:
             return self._infer_from_files(data)
         else:
             return self._infer_from_base64(data)
     
-    def _infer_from_files(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从文件路径读取数据并推理"""
+    def _infer_from_multiple_files(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """从多个文件路径读取数据并推理（多样本模式）"""
+        import time
         from pathlib import Path
+        
+        start_time = time.time()
+        
+        video_paths = data.get("video_paths", [])
+        audio_paths = data.get("audio_paths", [])
+        text_list = data.get("text_list", [])
+        
+        if not video_paths or not audio_paths:
+            return {
+                "status": "error",
+                "error": "缺少必需的视频或音频文件路径列表",
+                "emotion_score": 0.0
+            }
+        
+        num_samples = min(len(video_paths), len(audio_paths))
+        if num_samples == 0:
+            return {
+                "status": "error",
+                "error": "样本数量为0",
+                "emotion_score": 0.0
+            }
+        
+        try:
+            logits_list = []
+            sample_results = []
+            
+            for idx in range(num_samples):
+                video_path = video_paths[idx]
+                audio_path = audio_paths[idx]
+                text = text_list[idx] if idx < len(text_list) else ""
+                
+                # 验证文件存在
+                if not Path(video_path).exists():
+                    self.logger.warning(f"❌ 视频文件不存在: {video_path}")
+                    continue
+                
+                if not Path(audio_path).exists():
+                    self.logger.warning(f"❌ 音频文件不存在: {audio_path}")
+                    continue
+                
+                # 提取特征
+                sample_start = time.time()
+                v_feat = extract_vision_feature(str(video_path), self.vision_processor, self.vision_model, self.device)
+                a_feat = extract_audio_feature(str(audio_path), self.audio_processor, self.audio_model, self.device)
+                t_feat = extract_text_feature(text, self.text_tokenizer, self.text_model, self.device)
+                
+                # 推理
+                with torch.no_grad():
+                    logits = self.model(v_feat.unsqueeze(0), a_feat.unsqueeze(0), t_feat.unsqueeze(0))
+                    probs = torch.softmax(logits, dim=1)
+                    logits_list.append(logits.squeeze(0).cpu().numpy())
+                    pred = torch.argmax(logits, dim=1).item()
+                    prob_values = probs.squeeze(0).cpu().numpy()
+                
+                sample_time = (time.time() - sample_start) * 1000
+                
+                sample_results.append({
+                    "sample_index": idx + 1,
+                    "prediction": pred,
+                    "probabilities": prob_values.tolist(),
+                    "text": text,
+                    "video_file": Path(video_path).name,
+                    "audio_file": Path(audio_path).name
+                })
+            
+            if not logits_list:
+                return {
+                    "status": "error",
+                    "error": "所有样本推理失败",
+                    "emotion_score": 0.0
+                }
+            
+            # 计算最终分数（与base64模式相同的逻辑）
+            logits_arr = np.array(logits_list)
+            probs = torch.softmax(torch.tensor(logits_arr), dim=1).numpy()
+            pos_probs = probs[:, 1]
+            
+            min_prob, max_prob = pos_probs.min(), pos_probs.max()
+            if max_prob - min_prob < 1e-6:
+                scores = np.full_like(pos_probs, 50.0)
+            else:
+                scores = (pos_probs - min_prob) / (max_prob - min_prob) * 100
+            
+            final_score = float(np.mean(scores))
+            
+            inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
+            
+            # 单行输出最终结果
+            emotion_label = "积极😊" if final_score >= 50 else "消极😔"
+            self.logger.info(
+                f"😊 情绪: {round(final_score, 2)} ({emotion_label}, "
+                f"{len(logits_list)}样本, {round(inference_time, 1)}ms)"
+            )
+            
+            return {
+                "status": "success",
+                "emotion_score": round(final_score, 2),
+                "sample_scores": scores.tolist(),
+                "sample_results": sample_results,
+                "num_samples": len(logits_list),
+                "inference_time_ms": round(inference_time, 1),
+                "inference_mode": "multi_file"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"多样本推理失败: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "emotion_score": 0.0
+            }
+    
+    def _infer_from_files(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """从文件路径读取数据并推理（单样本模式）"""
+        import time
+        from pathlib import Path
+        
+        start_time = time.time()
         
         video_path = data.get("video_path")
         audio_path = data.get("audio_path")
@@ -187,7 +315,12 @@ class EmotionModel(BaseInferenceModel):
             }
         
         try:
-            self.logger.info(f"📂 从文件读取: video={video_path}, audio={audio_path}")
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"🎬 单样本情绪分析")
+            self.logger.info(f"{'='*60}")
+            self.logger.info(f"📹 视频: {Path(video_path).name}")
+            self.logger.info(f"🎵 音频: {Path(audio_path).name}")
+            self.logger.info(f"📝 文本: '{text}'")
             
             # 提取特征
             v_feat = extract_vision_feature(str(video_path), self.vision_processor, self.vision_model, self.device)
@@ -204,18 +337,26 @@ class EmotionModel(BaseInferenceModel):
             # 计算分数（0-100）
             score = float(prob_values[1] * 100) if len(prob_values) > 1 else float(prob_values[0] * 100)
             
+            inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
+            
             # 记录推理结果
-            self.logger.info(
-                f"情绪推理完成: 分数={round(score, 2)}, 类别={pred}, "
-                f"文本='{text[:50]}{'...' if len(text) > 50 else ''}'"
-            )
+            emotion_label = "积极😊" if pred == 1 else "消极😔"
+            confidence = float(prob_values[pred]) * 100
+            self.logger.info(f"✅ 推理完成:")
+            self.logger.info(f"   分数: {round(score, 2)}")
+            self.logger.info(f"   类别: {pred} ({emotion_label})")
+            self.logger.info(f"   置信度: {confidence:.1f}%")
+            self.logger.info(f"   耗时: {round(inference_time, 1)}ms")
+            self.logger.info(f"{'='*60}\n")
             
             return {
                 "status": "success",
                 "emotion_score": round(score, 2),
                 "prediction": pred,
                 "probabilities": prob_values.tolist(),
-                "text_input": text
+                "text_input": text,
+                "inference_time_ms": round(inference_time, 1),
+                "inference_mode": "file"
             }
             
         except Exception as e:
@@ -228,18 +369,9 @@ class EmotionModel(BaseInferenceModel):
     
     def _infer_from_base64(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """从base64数据推理（原有逻辑）"""
-        samples = data.get("samples", [])
-        """执行情绪推理
+        import time
+        start_time = time.time()
         
-        Args:
-            data: 输入数据，包含:
-                - samples: 样本列表，每个包含 video_b64, audio_b64, text
-        
-        Returns:
-            推理结果:
-                - emotion_score: 情绪分数 (0-100)
-                - sample_results: 每个样本的结果
-        """
         samples = data.get("samples", [])
         
         if not samples:
@@ -306,12 +438,20 @@ class EmotionModel(BaseInferenceModel):
             
             final_score = float(np.mean(scores))
             
+            inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
+            
+            self.logger.info(
+                f"✅ 情绪推理完成(Base64): 分数={round(final_score, 2)}, 样本数={len(samples)}, 耗时={round(inference_time, 1)}ms"
+            )
+            
             return {
                 "status": "success",
                 "emotion_score": round(final_score, 2),
                 "sample_scores": scores.tolist(),
                 "sample_results": sample_results,
-                "num_samples": len(samples)
+                "num_samples": len(samples),
+                "inference_time_ms": round(inference_time, 1),
+                "inference_mode": "base64"
             }
             
         except Exception as e:

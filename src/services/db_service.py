@@ -39,6 +39,9 @@ class DatabaseService:
         "ptime",
         "accuracy",
         "elapsed",
+        "fatigue_score",
+        "brain_load_score",
+        "emotion_score",
     }
     _UPDATE_FIELDS = {
         "audio",
@@ -54,6 +57,9 @@ class DatabaseService:
         "accuracy",
         "elapsed",
         "score",
+        "fatigue_score",
+        "brain_load_score",
+        "emotion_score",
     }
 
     def __init__(self, logger: Optional[logging.Logger] = None) -> None:
@@ -123,8 +129,14 @@ class DatabaseService:
         username = payload.get("name") or payload.get("username")
         if not username:
             raise ValueError("'name' is required to fetch user history")
+        
+        # Get limit parameter (default: 30, 0 for all)
+        limit = payload.get("limit", 30)
+        if not isinstance(limit, int) or limit < 0:
+            limit = 30
+        
         try:
-            history = store.get_user_history_data(username)
+            history = store.get_user_history_data(username, limit=limit)
             return {"history": history}
         except Exception:
             self.logger.exception("Fetching history for %s failed", username)
