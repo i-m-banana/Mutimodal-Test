@@ -1,0 +1,125 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+ui/logs/
+*.log
+
+# Recordings and Generated Data
+recordings/
+data/
+*.npy
+*.avi
+*.mp4
+
+# CSV Data Files
+*.csv
+!requirements.txt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# AI Debug Files
+debug/
+.aidebug/
+
+# Compressed Files
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.bz2
+
+# Temporary Files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS Files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Model Files (if large)
+*.pth
+*.pt
+*.h5
+*.pkl
+*.pickle
+*.joblib
+
+# Large Models and Training Data Directory
+models_data/
+
+# Configuration Files with Secrets (if any)
+.env
+.env.local
+secrets.yaml
+secrets.json
+
+# Test Output
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter Notebooks Checkpoints
+.ipynb_checkpoints/
+
+# Historical Versions
+历史版本/
+
+tests/
+scripts/
+docs/
+examples/
+
+pyproject.toml
+
+.gitignore
+
+AGENTS.MD
+
+*DEBUGE

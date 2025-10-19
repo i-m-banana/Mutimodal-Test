@@ -1,0 +1,22 @@
+collectors:
+  - name: camera
+    class: collectors.camera_collector.CameraCollector
+    enabled: true
+    options:
+      mode: simulator
+      interval: 0.5
+      width: 320
+      height: 240
+  - name: biosensor
+    class: collectors.sensor_collector.SensorCollector
+    enabled: true
+    options:
+      interval: 1.0
+      seed: 42
+  - name: file_watcher
+    class: collectors.file_collector.FileCollector
+    enabled: true
+    options:
+      watch_dir: data/raw
+      pattern: "*.json"
+      interval: 2.0

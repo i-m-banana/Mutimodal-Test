@@ -1,0 +1,116 @@
+models:
+  - name: vision
+    class: models.torch_model.TorchModel
+    enabled: false
+    options:
+      jit: true
+  - name: text_ocr
+    class: models.onnx_model.ONNXModel
+    enabled: false
+    path: null
+    options:
+      providers:
+        - CPUExecutionProvider
+
+# === 推理模型配置 ===
+# 支持两种模式:
+# 1. integrated: 模型直接集成在后端进程中（更快，但共享资源）
+# 2. remote: 模型运行在独立进程中，通过WebSocket通信（隔离性好，但有网络开销）
+inference_models:
+  # 疲劳度检测模型
+  - name: fatigue
+    type: fatigue
+    mode: integrated  # integrated 或 remote
+    enabled: true
+    # integrated 模式配置
+    integrated:
+      class: models.fatigue_model.FatigueModel
+      options:
+        device: auto  # auto, cuda, cpu
+    # remote 模式配置
+    remote:
+      host: 127.0.0.1
+      port: 8767
+      reconnect: true
+      reconnect_interval: 5
+      timeout: 10.0
+  
+  # 情绪识别模型
+  - name: emotion
+    type: emotion
+    mode: integrated  # integrated 或 remote
+    enabled: true
+    # integrated 模式配置
+    integrated:
+      class: models.emotion_model.EmotionModel
+      options:
+        device: auto
+    # remote 模式配置
+    remote:
+      host: 127.0.0.1
+      port: 8768
+      reconnect: true
+      reconnect_interval: 5
+      timeout: 10.0
+  
+  # 脑电分析模型
+  - name: eeg
+    type: eeg
+    mode: integrated  # integrated 或 remote
+    enabled: true
+    # integrated 模式配置
+    integrated:
+      class: models.eeg_model.EEGModel
+      options:
+        device: auto  # EEG模型不使用GPU,但保持统一接口
+    # remote 模式配置
+    remote:
+      host: 127.0.0.1
+      port: 8769
+      reconnect: true
+      reconnect_interval: 5
+      timeout: 10.0
+
+# === 旧的配置格式（向后兼容，已弃用）===
+# 多模型后端配置 (独立Python进程)
+# 每个模型后端运行在独立的Python环境中,通过WebSocket与主后端通信
+model_backends:
+  # 疲劳度检测模型后端
+  - name: fatigue_backend
+    type: fatigue
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8767
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      timeout: 10.0
+      batch_size: 1
+  
+  # 情绪识别模型后端
+  - name: emotion_backend
+    type: emotion
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8768
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      confidence_threshold: 0.7
+      timeout: 10.0
+  
+  # 脑电分析模型后端
+  - name: eeg_backend
+    type: eeg
+    enabled: false  # 默认禁用,需要时手动启用
+    connection:
+      host: 127.0.0.1
+      port: 8769
+      reconnect: true
+      reconnect_interval: 5
+    options:
+      sampling_rate: 250
+      channels: 8
+      timeout: 5.0
