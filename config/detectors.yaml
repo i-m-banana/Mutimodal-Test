@@ -1,0 +1,19 @@
+detectors:
+  - name: vision_detector
+    class: detectors.object_detector.ObjectDetector
+    enabled: true
+    options:
+      model: vision
+  - name: health_detector
+    class: detectors.anomaly_detector.AnomalyDetector
+    enabled: true
+    options:
+      systolic_warn: 135
+      systolic_error: 150
+      stress_warn: 0.7
+      stress_error: 0.85
+  - name: ocr_detector
+    class: detectors.ocr_detector.OCRDetector
+    enabled: true
+    options:
+      summary_length: 60
