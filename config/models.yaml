@@ -1,0 +1,46 @@
+models:
+  - name: vision
+    class: models.torch_model.TorchModel
+    enabled: false
+    options:
+      jit: true
+  - name: text_ocr
+    class: models.onnx_model.ONNXModel
+    enabled: false
+    path: null
+    options:
+      providers:
+        - CPUExecutionProvider
+
+# === 推理模型配置（集成模式）===
+# 所有模型直接集成在后端进程中运行（高性能，共享资源）
+inference_models:
+  # 疲劳度检测模型
+  - name: fatigue
+    type: fatigue
+    mode: integrated
+    enabled: true
+    integrated:
+      class: models.fatigue_model.FatigueModel
+      options:
+        device: auto  # auto, cuda, cpu
+  
+  # 情绪识别模型
+  - name: emotion
+    type: emotion
+    mode: integrated
+    enabled: true
+    integrated:
+      class: models.emotion_model.EmotionModel
+      options:
+        device: auto
+  
+  # 脑电分析模型
+  - name: eeg
+    type: eeg
+    mode: integrated
+    enabled: true
+    integrated:
+      class: models.eeg_model.EEGModel
+      options:
+        device: auto  # EEG模型不使用GPU，但保持统一接口
