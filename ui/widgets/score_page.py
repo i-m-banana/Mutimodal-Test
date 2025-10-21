@@ -149,12 +149,14 @@ class ModernGaugeWidget(QWidget):
 class HistoryDialog(QDialog):
     """历史数据展示对话框"""
 
-    def __init__(self, data_interface, use_mock_on_empty=True):
+    def __init__(self, data_interface, use_mock_on_empty=True, source_hint: str | None = None):
         super().__init__()
         self.setWindowTitle("历史数据分析")
         self.setMinimumSize(1000, 800)
         self.data_interface = data_interface
         self.use_mock_on_empty = use_mock_on_empty  # 当没有有效数据时是否使用模拟数据
+        # 数据来源提示："真实" | "模拟" | "自动"
+        self.source_hint = source_hint or "自动"
         self.current_metric = None
         self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
@@ -170,6 +172,16 @@ class HistoryDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size:28px; font-weight:bold; margin-bottom:20px;")
         layout.addWidget(title)
+
+        # 数据来源提示条（右上角）
+        source_row = QHBoxLayout()
+        source_row.addStretch(1)
+        self.source_label = QLabel("")
+        self._update_source_label(self.source_hint)
+        self.source_label.setAlignment(Qt.AlignRight)
+        self.source_label.setStyleSheet("color:#777; font-size:12px; margin-top:-10px;")
+        source_row.addWidget(self.source_label)
+        layout.addLayout(source_row)
 
         # 指标选择按钮
         btn_layout = QHBoxLayout()
@@ -297,6 +309,11 @@ class HistoryDialog(QDialog):
             if not valid_pairs or valid_count == 0:
                 # 如果启用了模拟数据模式,则生成并显示模拟数据
                 if self.use_mock_on_empty:
+                    # 动态提示：本次使用模拟数据
+                    try:
+                        self._update_source_label("模拟（无有效历史，已生成示例）")
+                    except Exception:
+                        pass
                     logger.info(f"指标 '{metric}' 无有效数据,使用模拟数据显示")
                     # 生成模拟历史数据
                     num_records = random.randint(10, 25)
@@ -464,6 +481,14 @@ class HistoryDialog(QDialog):
         # 调整布局
         self.figure.tight_layout()
         self.canvas.draw()
+
+    def _update_source_label(self, mode: str):
+        mode_text = str(mode).strip()
+        if mode_text in ("真实", "模拟", "自动") or mode_text.startswith("模拟"):
+            text = f"数据来源：{mode_text}"
+        else:
+            text = f"数据来源：{mode_text}"
+        self.source_label.setText(text)
 
 
 class BloodPressureWidget(QWidget):
@@ -1159,7 +1184,28 @@ class ScorePage(QWidget):
 
     def _show_history(self):
         """显示历史数据对话框"""
-        dlg = HistoryDialog(self.data_interface)
+        # 优先尝试同步获取一次真实历史数据（不依赖全局模拟开关），
+        # 若获取失败或无有效数据，则交给弹窗在空数据时自动使用模拟数据。
+        def _try_fetch_history_once():
+            try:
+                client = get_backend_client()
+                payload = {"name": self.username or "anonymous", "limit": 30}
+                resp = client.send_command_sync("db.get_user_history", payload, timeout=5.0)
+                history = resp.get("history") if isinstance(resp, dict) else None
+                # 返回符合 HistoryDialog 期望的数据结构（包含“历史”“历史日期”等键）
+                if isinstance(history, dict) and history:
+                    return history
+            except Exception as e:
+                logger.debug(f"同步获取历史数据失败，将使用现有数据/模拟数据: {e}")
+            return None
+
+        history_for_dialog = _try_fetch_history_once()
+
+        # 为弹窗提供数据接口：优先使用实时获取的历史数据；否则回落到当前页面的数据接口
+        data_provider = (lambda: history_for_dialog) if history_for_dialog else self.data_interface
+
+        source_hint = "真实" if history_for_dialog else "自动"
+        dlg = HistoryDialog(data_provider, use_mock_on_empty=True, source_hint=source_hint)
         dlg.exec_()
 
 
