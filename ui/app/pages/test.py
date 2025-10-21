@@ -978,6 +978,7 @@ class TestPage(QWidget):
         )
 
     def _queue_db_update(self, update_payload: dict, context: str) -> None:
+        """排队数据库更新（无回调）"""
         if self._db_disabled:
             return
 
@@ -985,6 +986,22 @@ class TestPage(QWidget):
             payload = dict(update_payload)
             payload["row_id"] = row_id
             self._send_db_command("db.update_test_record", payload, context=context)
+
+        if self.row_id:
+            _dispatch(self.row_id)
+        else:
+            self._pending_db_updates.append(_dispatch)
+            self._ensure_db_row()
+    
+    def _queue_db_update_with_callback(self, update_payload: dict, context: str, on_success=None) -> None:
+        """排队数据库更新（带成功回调）"""
+        if self._db_disabled:
+            return
+
+        def _dispatch(row_id: int) -> None:
+            payload = dict(update_payload)
+            payload["row_id"] = row_id
+            self._send_db_command("db.update_test_record", payload, context=context, on_success=on_success)
 
         if self.row_id:
             _dispatch(self.row_id)
@@ -2653,7 +2670,7 @@ class TestPage(QWidget):
             # 获取EEG文件路径并保存到数据库
             eeg_paths = eeg_get_file_paths()
             if eeg_paths:
-                logger.info(f"✅ 获取到EEG文件路径: {eeg_paths}")
+                # logger.info(f"✅ 获取到EEG文件路径: {eeg_paths}")
                 self._persist_eeg_paths_to_db(eeg_paths)
             else:
                 logger.warning("未获取到EEG文件路径")
@@ -2681,17 +2698,17 @@ class TestPage(QWidget):
             finally:
                 self._stop_multimodal_monitoring()
         
-        # 停止EEG采集并保存文件路径
-        try:
-            eeg_stop_collection()
-            logger.info("EEG采集已完全停止")
-            # 获取EEG文件路径并保存到数据库
-            eeg_paths = eeg_get_file_paths()
-            if eeg_paths:
-                logger.info(f"获取到EEG文件路径: {eeg_paths}")
-                self._persist_eeg_paths_to_db(eeg_paths)
-        except Exception as e:
-            logger.error(f"停止EEG采集或保存路径时出错: {e}")
+        # # 停止EEG采集并保存文件路径
+        # try:
+        #     eeg_stop_collection()
+        #     logger.info("EEG采集已完全停止")
+        #     # 获取EEG文件路径并保存到数据库
+        #     eeg_paths = eeg_get_file_paths()
+        #     if eeg_paths:
+        #         logger.info(f"获取到EEG文件路径: {eeg_paths}")
+        #         self._persist_eeg_paths_to_db(eeg_paths)
+        # except Exception as e:
+        #     logger.error(f"停止EEG采集或保存路径时出错: {e}")
         
         call_timestamp = time.time()
         self.part_timestamps.append(call_timestamp)
@@ -2908,7 +2925,7 @@ class TestPage(QWidget):
                 logger.warning(f"⚠️ EEG 路径为空或格式不支持: {eeg_paths}")
                 return
             
-            logger.info(f"准备保存 EEG 路径: {update_payload}")
+            # logger.info(f"准备保存 EEG 路径: {update_payload}")
             
             # 如果数据库行还未创建，同步等待最多 3 秒
             if not self.row_id:
@@ -3132,13 +3149,23 @@ class TestPage(QWidget):
                 logger.debug("没有有效的推理结果需要保存到数据库")
                 return
             
-            # 更新数据库记录
-            self._queue_db_update(
-                update_payload,
-                "保存推理结果到数据库失败"
-            )
+            # 定义成功回调，在数据库更新完成后刷新ScorePage
+            def _on_saved(result: dict):
+                logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
+                # 数据库更新完成后，通知ScorePage刷新历史数据
+                if hasattr(self, 'score_page') and hasattr(self.score_page, '_refresh_data'):
+                    try:
+                        self.score_page._refresh_data()
+                        logger.debug("✅ 已通知ScorePage刷新历史数据")
+                    except Exception as e:
+                        logger.warning(f"刷新ScorePage历史数据失败: {e}")
             
-            logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
+            # 更新数据库记录，并在成功后执行回调
+            self._queue_db_update_with_callback(
+                update_payload,
+                "保存推理结果到数据库失败",
+                on_success=_on_saved
+            )
             
         except Exception as e:
             logger.error(f"保存推理结果到数据库失败: {e}", exc_info=True)

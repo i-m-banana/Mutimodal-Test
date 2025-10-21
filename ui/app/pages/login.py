@@ -51,7 +51,7 @@ class LoginPage(QWidget):
 
         layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
-        self.username_input = QLineEdit('admin')
+        self.username_input = QLineEdit('')
         self.username_input.setPlaceholderText('用户名')
         self.username_input.setObjectName("loginInput")
         # 不设置 textMargins，让 CSS 的 padding 来控制
