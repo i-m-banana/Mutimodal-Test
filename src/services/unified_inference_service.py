@@ -180,7 +180,6 @@ class UnifiedInferenceService:
             
             # 内存模式不需要文件路径
             rgb_video_path = None
-            depth_video_path = None
             eyetrack_json_path = None
             rgb_frames_b64 = []
             depth_frames_b64 = []
@@ -189,7 +188,7 @@ class UnifiedInferenceService:
         elif file_mode:
             # 文件模式:检查文件路径是否存在
             rgb_video_path = payload.get("rgb_video_path")
-            depth_video_path = payload.get("depth_video_path")
+            depth_npy_directory = payload.get("depth_npy_directory")
             eyetrack_json_path = payload.get("eyetrack_json_path")
             
             if not rgb_video_path:
@@ -209,7 +208,6 @@ class UnifiedInferenceService:
             depth_frames_b64 = payload.get("depth_frames_b64", [])
             eyetrack_samples = payload.get("eyetrack_samples", [])
             rgb_video_path = None
-            depth_video_path = None
             eyetrack_json_path = None
             rgb_frames_memory = []
             depth_frames_memory = []
@@ -267,7 +265,7 @@ class UnifiedInferenceService:
                 inference_data.update({
                     "file_mode": True,
                     "rgb_video_path": rgb_video_path,
-                    "depth_video_path": depth_video_path,
+                    "depth_npy_directory": depth_npy_directory,
                     "eyetrack_json_path": eyetrack_json_path,
                 })
             else:

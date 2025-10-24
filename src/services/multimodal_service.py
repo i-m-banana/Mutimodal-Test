@@ -1001,7 +1001,6 @@ class MultimodalService:
             # 文件路径模式（备用）：用于存档和备份推理
             "file_mode": True,
             "rgb_video_path": rgb_video_path,
-            "depth_video_path": None,
             "depth_npy_directory": depth_dir_path,
             "eyetrack_json_path": eyetrack_json_path,
             
