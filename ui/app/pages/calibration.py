@@ -91,6 +91,7 @@ class CalibrationPage(QWidget):
         layout.addWidget(self.camera_preview, alignment=Qt.AlignCenter)
 
         self.finish_button = QPushButton("  校准完成")
+        self.finish_button.setObjectName("finishButton")  # 设置对象名以应用QSS样式
         self.finish_button.setMinimumHeight(scale(50))
         self.finish_button.setFixedWidth(scale(220))
         self.finish_button.clicked.connect(self._on_finish_calibration)

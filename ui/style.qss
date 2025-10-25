@@ -6,6 +6,16 @@
         color: #333;
     }
 
+    /* --- 基线校准和SART实验页面样式 --- */
+    /* 保持默认白色背景，确保文字和数字是黑色 */
+    #baselinePage QLabel,
+    #sartPage QLabel,
+    QWidget[page_type="baseline"] QLabel,
+    QWidget[page_type="sart"] QLabel {
+        color: #000000 !important;
+        background-color: transparent !important;
+    }
+
     /* --- 卡片式容器 --- */
     #card, #loginForm, #cameraContainer {
         background-color: white;

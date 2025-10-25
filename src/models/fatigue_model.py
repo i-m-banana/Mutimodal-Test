@@ -72,12 +72,12 @@ class FatigueModel(BaseInferenceModel):
            - depth_frames_memory: List[np.ndarray] - 深度图像numpy数组
            - eyetrack_memory: List[List[float]] - 眼动特征数据
            
-          2. 文件路径模式（存档备份）：
-              - file_mode: bool = True
-              - rgb_video_path: str - RGB视频文件路径
-              - depth_npy_directory: str - 深度帧NPY文件目录（保存为多帧堆叠 *.npy）
-              - eyetrack_json_path: str - 眼动数据JSON文件路径
-              - max_frames: int = 30 - 最大读取帧数
+        2. 文件路径模式（存档备份）：
+           - file_mode: bool = True
+           - rgb_video_path: str - RGB视频文件路径
+           - depth_video_path: str - 深度视频文件路径
+           - eyetrack_json_path: str - 眼动数据JSON文件路径
+           - max_frames: int = 30 - 最大读取帧数
            
         3. base64 数据模式（兼容旧接口）：
            - rgb_frames: List[str] - base64编码的RGB图像
@@ -173,19 +173,18 @@ class FatigueModel(BaseInferenceModel):
         import json
         import time
         from pathlib import Path
-        import glob
         
         start_time = time.time()
         
         rgb_video_path = data.get("rgb_video_path")
-        depth_npy_directory = data.get("depth_npy_directory")
+        depth_video_path = data.get("depth_video_path")
         eyetrack_json_path = data.get("eyetrack_json_path")
         max_frames = data.get("max_frames", 30)
         
-        if not rgb_video_path or not depth_npy_directory:
+        if not rgb_video_path or not depth_video_path:
             return {
                 "status": "error",
-                "error": "缺少必需的文件路径（RGB视频或深度NPY目录）",
+                "error": "缺少必需的视频文件路径",
                 "fatigue_score": 0.0,
                 "prediction_class": 0
             }
@@ -199,24 +198,13 @@ class FatigueModel(BaseInferenceModel):
                 "prediction_class": 0
             }
         
-        # 查找深度目录下最新的 .npy 堆叠文件
-        depth_dir_path = Path(depth_npy_directory)
-        if not depth_dir_path.exists() or not depth_dir_path.is_dir():
+        if not Path(depth_video_path).exists():
             return {
                 "status": "error",
-                "error": f"深度NPY目录不存在: {depth_dir_path}",
+                "error": f"深度视频文件不存在: {depth_video_path}",
                 "fatigue_score": 0.0,
                 "prediction_class": 0
             }
-        npy_files = sorted(glob.glob(str(depth_dir_path / "*.npy")))
-        if not npy_files:
-            return {
-                "status": "error",
-                "error": f"深度NPY目录为空: {depth_dir_path}",
-                "fatigue_score": 0.0,
-                "prediction_class": 0
-            }
-        latest_npy = npy_files[-1]
         
         try:
             # 1. 读取RGB视频
@@ -231,14 +219,20 @@ class FatigueModel(BaseInferenceModel):
                 frame_count += 1
             cap.release()
             
-            # 2. 读取深度NPY堆叠
-            stack = np.load(latest_npy)
-            # stack 形状应为 (N, H, W)，dtype 可为 uint16/float；直接使用原始深度
-            if stack.ndim == 3:
-                total = min(stack.shape[0], int(max_frames))
-                depth_frames = [stack[i] for i in range(total)]
-            else:
-                depth_frames = []
+            # 2. 读取深度视频
+            depth_frames = []
+            cap = cv2.VideoCapture(str(depth_video_path))
+            frame_count = 0
+            while frame_count < max_frames:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                # 转换为灰度图
+                if len(frame.shape) == 3:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                depth_frames.append(frame)
+                frame_count += 1
+            cap.release()
             
             # 3. 读取眼动数据（支持JSONL格式）
             eyetrack_samples = []
@@ -273,7 +267,7 @@ class FatigueModel(BaseInferenceModel):
             self.logger.info(f"   眼动样本数: {len(eyetrack_samples)}")
             self.logger.info(f"📂 文件路径:")
             self.logger.info(f"   RGB视频: {Path(rgb_video_path).name}")
-            self.logger.info(f"   深度NPY: {Path(latest_npy).name}")
+            self.logger.info(f"   深度视频: {Path(depth_video_path).name}")
             if eyetrack_json_path:
                 self.logger.info(f"   眼动数据: {Path(eyetrack_json_path).name}")
             
