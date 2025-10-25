@@ -180,10 +180,6 @@ class MultiModalDataCollector:
         self._eyetrack_queue: list[Any] = []
         self._timestamp_queue: list[str] = []
         self._data_lock = threading.Lock()
-        self._depth_buffer: list[Any] = []
-        self._depth_flush_interval = 60.0  # seconds
-        self._last_depth_flush = time.time()
-        self._depth_dir: Optional[Path] = None
 
         # Runtime state
         self._cycle_count = 0
@@ -251,7 +247,7 @@ class MultiModalDataCollector:
         self.rs_pipeline = rs.pipeline()
         self.rs_config = rs.config()
         color_width, color_height = self.rgb_resolution
-        depth_width, depth_height = 1280, 720
+        depth_width, depth_height = 640, 480
         self.rs_config.enable_stream(rs.stream.color, color_width, color_height, rs.format.bgr8, 30)
         self.rs_config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, 30)
         self.rs_profile = self.rs_pipeline.start(self.rs_config)
@@ -278,7 +274,6 @@ class MultiModalDataCollector:
         self.running = True
         self._start_time = time.time()  # Record start time for fatigue scoring
         self._stop_event.clear()
-        self._last_depth_flush = time.time()
         thread = self._thread_pool.register_managed_thread(
             self._thread_name,
             self._collection_loop,
@@ -321,12 +316,15 @@ class MultiModalDataCollector:
                 self.logger.warning("Failed to open RGB video writer at %s", rgb_path)
                 self.rgb_writer = None
             self._rgb_path = str(rgb_path)
-        # Depth frames directory (store raw depth stacks as .npy)
-        depth_dir = base_dir / f"depth{part_suffix}"
-        depth_dir.mkdir(parents=True, exist_ok=True)
-        self._depth_dir = depth_dir
-        self._depth_path = str(depth_dir)
-        self._depth_buffer.clear()
+        # Depth video
+        if cv2 is not None:
+            depth_path = base_dir / f"depth{part_suffix}.avi"
+            fourcc = cv2.VideoWriter_fourcc(*"XVID")
+            self.depth_writer = cv2.VideoWriter(str(depth_path), fourcc, 15.0, self.depth_resolution)
+            if not self.depth_writer or not self.depth_writer.isOpened():  # pragma: no cover
+                self.logger.warning("Failed to open depth video writer at %s", depth_path)
+                self.depth_writer = None
+            self._depth_path = str(depth_path)
         # Eye tracking log
         eyetrack_path = base_dir / f"eyetrack{part_suffix}.json"
         self._eyetrack_path = str(eyetrack_path)
@@ -381,7 +379,6 @@ class MultiModalDataCollector:
                 self._depth_queue.append(depth_data)
                 self._trim_queue(self._depth_queue, self.queue_length)
         self._persist_sample(rgb_data, depth_data, eyetrack_raw, timestamp)
-        self._buffer_depth_frame(depth_data)
         if self._frame_callback and rgb_data is not None:
             try:
                 self._frame_callback(rgb_data, timestamp)
@@ -425,6 +422,8 @@ class MultiModalDataCollector:
         try:
             if self.rgb_writer is not None and rgb_data is not None and cv2 is not None:
                 self.rgb_writer.write(rgb_data)
+            if self.depth_writer is not None and depth_data is not None and cv2 is not None:
+                self.depth_writer.write(self._depth_to_bgr(depth_data))
             if eyetrack_data is not None and self._eyetrack_path:
                 serializable = self._prepare_eyetrack_for_json(eyetrack_data)
                 serializable["timestamp"] = timestamp
@@ -432,57 +431,6 @@ class MultiModalDataCollector:
                     handle.write(json.dumps(serializable, ensure_ascii=False) + "\n")
         except Exception as exc:  # pragma: no cover - file IO issues
             self.logger.debug("Persist sample failed: %s", exc)
-
-    def _buffer_depth_frame(self, depth_frame: Optional[Any]) -> None:
-        """Accumulate raw depth frames in memory for periodic .npy dumps."""
-        if depth_frame is None or np is None:
-            return
-        if self._depth_dir is None:
-            # Directory is initialised in _create_data_files; skip if not ready yet.
-            return
-        try:
-            array = np.asanyarray(depth_frame)
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug("Depth frame conversion failed: %s", exc)
-            return
-
-        with self._data_lock:
-            try:
-                self._depth_buffer.append(np.array(array, copy=True))
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.debug("Depth frame buffer append failed: %s", exc)
-                return
-
-        if time.time() - self._last_depth_flush >= self._depth_flush_interval:
-            self._flush_depth_buffer()
-
-    def _flush_depth_buffer(self, *, force: bool = False) -> None:
-        """Write buffered depth frames to disk as a timestamped .npy stack."""
-        if np is None:
-            return
-        target_dir = self._depth_dir
-        if target_dir is None:
-            return
-
-        with self._data_lock:
-            if not self._depth_buffer:
-                if force:
-                    self._last_depth_flush = time.time()
-                return
-            frames = self._depth_buffer
-            self._depth_buffer = []
-
-        try:
-            stack = np.stack(frames, axis=0)
-            target_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            file_path = target_dir / f"{timestamp}.npy"
-            np.save(file_path, stack)
-            self.logger.debug("Saved %d depth frames to %s", stack.shape[0], file_path)
-        except Exception as exc:  # pragma: no cover - file IO issues
-            self.logger.warning("Failed to save depth frames: %s", exc)
-        finally:
-            self._last_depth_flush = time.time()
 
     # ------------------------------------------------------------------
     def _generate_mock_rgb(self):  # pragma: no cover - exercised in simulation
@@ -566,7 +514,6 @@ class MultiModalDataCollector:
             del queue[:excess]
 
     def _save_remaining_data(self) -> None:
-        self._flush_depth_buffer(force=True)
         try:
             if self.rgb_writer is not None and cv2 is not None:
                 self.rgb_writer.release()
@@ -963,7 +910,7 @@ class MultimodalService:
         part_suffix = f"{collector.part}"
         save_dir = collector.save_dir if collector.save_dir else None
         rgb_video_path = str(Path(save_dir) / f"rgb{part_suffix}.avi") if save_dir else None
-        depth_dir_path = str(Path(save_dir) / f"depth{part_suffix}") if save_dir else None
+        depth_video_path = str(Path(save_dir) / f"depth{part_suffix}.avi") if save_dir else None
         eyetrack_json_path = str(Path(save_dir) / f"eyetrack{part_suffix}.json") if save_dir else None
         
         # 获取时间戳和帧计数
@@ -1001,7 +948,7 @@ class MultimodalService:
             # 文件路径模式（备用）：用于存档和备份推理
             "file_mode": True,
             "rgb_video_path": rgb_video_path,
-            "depth_npy_directory": depth_dir_path,
+            "depth_video_path": depth_video_path,
             "eyetrack_json_path": eyetrack_json_path,
             
             # 推理元数据
