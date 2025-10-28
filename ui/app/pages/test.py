@@ -32,6 +32,7 @@ from ..qt import (
     QShortcut,
     QSpacerItem,
     QStackedWidget,
+    QTextEdit,
     QTimer,
     QVBoxLayout,
     QWidget,
@@ -111,37 +112,43 @@ class TestPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        questionnaire_file = config.QUESTIONNAIRE_YAML_FILE
-        with open(questionnaire_file, encoding="utf-8") as handle:
-            all_questions = yaml.load(handle, Loader=FullLoader)
+        # 🔄 改为加载朗读文本配置（而不是问答题目）
+        reading_texts_file = config.BASE_DIR/ "data" / "text" / "reading_texts.yaml"
+        try:
+            with open(reading_texts_file, encoding="utf-8") as handle:
+                reading_config = yaml.load(handle, Loader=FullLoader)
+            
+            # 获取默认文本
+            default_index = reading_config.get('default_text_index', 0)
+            texts_list = reading_config.get('texts', [])
+            
+            if texts_list and 0 <= default_index < len(texts_list):
+                selected_text = texts_list[default_index]
+                self.reading_text_title = selected_text.get('title', '朗读文本')
+                self.reading_text_content = selected_text.get('content', '').strip()
+            else:
+                raise ValueError("配置文件中没有可用文本")
+        except Exception as e:
+            logger.warning(f"加载朗读文本配置失败: {e}，使用默认文本")
+            # 默认文本（如果配置文件读取失败）
+            self.reading_text_title = "航空安全规范"
+            self.reading_text_content = """乘员应在进入航空器前，接受安检并配合现场工作人员的引导。严禁携带易燃易爆、有毒、腐蚀性等危险品登机。
 
-        questions_num = 5
-        self.questions = []
-        for _ in range(questions_num):
-            self.questions.append(
-                all_questions.pop(random.randint(0, len(all_questions) - 1))
-            )
-        # TTS队列
-        # 记录已经朗读的题目
-        self.spoken_questions = set()
+登机后，请对号入座，并系好安全带。飞行过程中，须遵守"系好安全带"信号指示，未经允许不得离开座位。
 
-        # 初始化 TTS 配置（实际引擎在后台线程内创建，避免跨线程的 COM 问题）
-        self.tts_queue = Queue()
-        self._tts_rate = 150
-        self._tts_volume = 1.0
-        self._tts_voice = os.getenv("UI_TTS_VOICE", "").strip()
-        default_backend = "powershell" if sys.platform.startswith("win") else "pyttsx3"
-        backend_pref = os.getenv("UI_TTS_BACKEND", default_backend).strip().lower()
-        self._tts_backend = backend_pref or default_backend
+发现可疑人员或物品，应及时报告机组成员。不得传播虚假信息、制造恐慌。
 
-        # 后台线程处理朗读
+请勿携带或在机上使用禁止类电子设备，遵守所有安全广播和公告要求。"""
+        # 兼容旧语音识别接口：保留 questions 列表结构
+        self.questions = [self.reading_text_content]
+        
+        # 朗读状态标志
+        self.reading_completed = False
+        
+        # ❌ 不再需要 TTS 功能（用户自己朗读，不需要机器播放）
         self.thread_manager = get_thread_manager()
-        self.tts_task_id = self.thread_manager.submit_data_task(
-            self._tts_loop,
-            task_name="TTS朗读处理"
-        )
-
-        self.current_question = 0
+        
+        self.current_question = 0  # 保留变量名兼容性，实际已无多个问题
         self.current_step = 0
 
         self.setAutoFillBackground(True)
@@ -162,64 +169,11 @@ class TestPage(QWidget):
         logger.info("TestPage 初始化完成。")
         self._is_shutting_down = False
 
-    def _tts_loop(self):
-        backend_pref = getattr(self, "_tts_backend", "pyttsx3") or "pyttsx3"
-        backend_pref = backend_pref.lower()
-        client = None
-
-        while True:
-            text = self.tts_queue.get()
-            if text is None:
-                break
-
-            preview = text if len(text) <= 20 else text[:20] + "..."
-            logger.info(f"开始朗读：{preview}")
-
-            if client is None:
-                try:
-                    client = get_backend_client()
-                except Exception as exc:
-                    logger.error("获取后端 TTS 客户端失败: %s", exc)
-                    self.tts_queue.task_done()
-                    client = None
-                    continue
-
-            timeout_seconds = max(12.0, min(200.0, len(text) / 3.5 + 15.0))
-            payload = {
-                "text": text,
-                "voice": self._tts_voice or None,
-                "rate": self._tts_rate,
-                "volume": self._tts_volume,
-                "backend": backend_pref,
-                "timeout": timeout_seconds,
-            }
-
-            future = client.send_command_future("tts.speak", payload)
-            try:
-                result = future.result(timeout=timeout_seconds + 5.0)
-                backend_used = result.get("backend", backend_pref)
-                elapsed = result.get("elapsed")
-                if isinstance(elapsed, (int, float)):
-                    logger.info("朗读完成（%s），用时 %.2f 秒", backend_used, elapsed)
-                    expected = max(len(text) / 5.0, 1.0)
-                    if elapsed < expected * 0.35:
-                        logger.warning(
-                            "朗读用时异常偏短（%.2fs），文本长度 %d，请检查系统音量或语音包是否可用。",
-                            elapsed,
-                            len(text)
-                        )
-                else:
-                    logger.info("朗读完成（%s）", backend_used)
-            except Exception as exc:
-                logger.error("TTS 后端朗读失败: %s", exc)
-            finally:
-                self.tts_queue.task_done()
-
     def _setup_properties(self):
         """初始化测试页面的所有状态变量。"""
-        self.steps = ['语音答题', '血压测试', '舒特格测试', '分数展示']
+        self.steps = ['朗读录音', '血压测试', '舒特格测试', '分数展示']  # 🔄 改为朗读录音
         self.current_step = 0
-        self.current_question = 0
+        self.current_question = 0  # 保留兼容性，但不再有多个问题
         self.is_recording = False
         self.score = None  # 将在舒尔特测试完成后计算
         self.history_scores = []
@@ -236,6 +190,10 @@ class TestPage(QWidget):
         self._current_video_target = None
         # 当前登录用户名（默认匿名）
         self.current_user = 'anonymous'
+        
+        # SART模式配置（从命令行参数读取）
+        self.sart_mode = "short"  # 默认短时模式
+        self.sart_duration = 300  # 默认5分钟
 
         # 多模态数据采集相关（不再使用独立预览窗口）
         self.multimodal_collector = None
@@ -978,6 +936,7 @@ class TestPage(QWidget):
         )
 
     def _queue_db_update(self, update_payload: dict, context: str) -> None:
+        """排队数据库更新（无回调）"""
         if self._db_disabled:
             return
 
@@ -985,6 +944,22 @@ class TestPage(QWidget):
             payload = dict(update_payload)
             payload["row_id"] = row_id
             self._send_db_command("db.update_test_record", payload, context=context)
+
+        if self.row_id:
+            _dispatch(self.row_id)
+        else:
+            self._pending_db_updates.append(_dispatch)
+            self._ensure_db_row()
+    
+    def _queue_db_update_with_callback(self, update_payload: dict, context: str, on_success=None) -> None:
+        """排队数据库更新（带成功回调）"""
+        if self._db_disabled:
+            return
+
+        def _dispatch(row_id: int) -> None:
+            payload = dict(update_payload)
+            payload["row_id"] = row_id
+            self._send_db_command("db.update_test_record", payload, context=context, on_success=on_success)
 
         if self.row_id:
             _dispatch(self.row_id)
@@ -1025,19 +1000,14 @@ class TestPage(QWidget):
         return container
 
     def _create_question_progress_bar(self):
+        """创建问题进度条（朗读模式下不显示，返回空容器）"""
         container = QWidget()
         container.setObjectName("card")
+        container.setVisible(False)  # 🔄 朗读模式下隐藏进度条
         layout = QHBoxLayout(container)
         layout.setContentsMargins(scale(12), scale(8), scale(12), scale(8))
 
-        self.question_dots = []
-        for i in range(len(self.questions)):
-            dot = QLabel()
-            dot.setFixedSize(24, 24)
-            # 初始黑点
-            dot.setPixmap(qta.icon('fa5s.circle', color='#212121').pixmap(20, 20))
-            self.question_dots.append(dot)
-            layout.addWidget(dot, 0, Qt.AlignCenter)
+        self.question_dots = []  # 保留空列表以避免其他代码报错
         return container
 
     def mark_question_done(self, index: int):
@@ -1103,62 +1073,13 @@ class TestPage(QWidget):
         )
         vlayout.addWidget(self.camera_preview, 0, Qt.AlignCenter)
 
-        # 疲劳度信息容器 - 调整尺寸和间距
-        fatigue_container = QFrame()
-        fatigue_container.setObjectName("fatigueContainer")
-        fatigue_container.setFixedWidth(cam_width)
-        fatigue_container.setStyleSheet("""
-                  QFrame#fatigueContainer {
-                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                          stop:0 #ffffff, stop:1 #f8f9fa);
-                      border: 2px solid #e0e0e0;
-                      border-radius: 10px;
-                      padding: 10px;
-                  }
-              """)
-
-        fatigue_layout = QVBoxLayout(fatigue_container)
-        fatigue_layout.setSpacing(scale(6))
-        margin = scale(6)
-        fatigue_layout.setContentsMargins(margin, margin, margin, margin)
-
-        # 疲劳度标题
-        title_label = QLabel("🧠 疲劳度监测")
-        title_font = QFont()
-        title_font.setPointSize(scale_font(11))
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
-        fatigue_layout.addWidget(title_label)
-
-        # 分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        separator.setStyleSheet("background-color: #bdc3c7;")
-        fatigue_layout.addWidget(separator)
-
-        # 疲劳度显示（大号）
+        # ❌ 疲劳度信息容器已移除（仅后台记录数据）
+        # 创建隐藏的疲劳度标签以保持代码兼容性
         self.fatigue_info_label = QLabel("疲劳度: --")
-        info_font = QFont()
-        info_font.setPointSize(scale_font(13))
-        info_font.setBold(True)
-        self.fatigue_info_label.setFont(info_font)
-        self.fatigue_info_label.setAlignment(Qt.AlignCenter)
-        self.fatigue_info_label.setStyleSheet("""
-                  QLabel {
-                      color: #7f8c8d;
-                      padding: 8px;
-                      background-color: #ecf0f1;
-                      border-radius: 8px;
-                  }
-              """)
-        fatigue_layout.addWidget(self.fatigue_info_label)
+        self.fatigue_info_label.setVisible(False)  # 隐藏不显示
+        margin = scale(6)
 
-        vlayout.addWidget(fatigue_container, 0, Qt.AlignCenter)
-
-        # 脑负荷信息容器 - 与疲劳度信息容器相同
+        # ✅ 脑负荷信息容器 - 保留显示
         brain_load_container = QFrame()
         brain_load_container.setObjectName("brainLoadContainer")
         brain_load_container.setFixedWidth(cam_width)
@@ -1210,16 +1131,16 @@ class TestPage(QWidget):
               """)
         brain_load_layout.addWidget(self.brain_load_info_label)
 
-        vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
-
-        # 实时监测中... 提示放在疲劳度和脑负荷显示下方
+        # 提示信息（放在脑负荷容器内部，与舒尔特页面保持一致）
         tip_label = QLabel("实时监测中...")
         tip_font = QFont()
         tip_font.setPointSize(scale_font(8))
         tip_label.setFont(tip_font)
         tip_label.setAlignment(Qt.AlignCenter)
         tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
-        vlayout.addWidget(tip_label)
+        brain_load_layout.addWidget(tip_label)
+
+        vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
 
         vlayout.addStretch(1)
 
@@ -1260,58 +1181,10 @@ class TestPage(QWidget):
         )
         vlayout.addWidget(self.schulte_camera_preview, 0, Qt.AlignCenter)
 
-        # 疲劳度信息容器（与第一页相同样式）- 调整尺寸和间距
-        fatigue_container = QFrame()
-        fatigue_container.setObjectName("schulteFatigueContainer")
-        fatigue_container.setFixedWidth(cam_width)
-        fatigue_container.setStyleSheet("""
-                QFrame#schulteFatigueContainer {
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 #ffffff, stop:1 #f8f9fa);
-                    border: 2px solid #e0e0e0;
-                    border-radius: 10px;
-                    padding: 10px;
-                }
-            """)
-
-        fatigue_layout = QVBoxLayout(fatigue_container)
-        fatigue_layout.setSpacing(scale(6))
-        margin = scale(6)
-        fatigue_layout.setContentsMargins(margin, margin, margin, margin)
-
-        # 疲劳度标题
-        title_label = QLabel("🧠 疲劳度监测")
-        title_font = QFont()
-        title_font.setPointSize(scale_font(11))
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
-        fatigue_layout.addWidget(title_label)
-
-        # 分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        separator.setStyleSheet("background-color: #bdc3c7;")
-        fatigue_layout.addWidget(separator)
-
-        # 疲劳度显示（大号）
-        self.schulte_fatigue_label = QLabel("疲劳度: --")
-        info_font = QFont()
-        info_font.setPointSize(scale_font(13))
-        info_font.setBold(True)
-        self.schulte_fatigue_label.setFont(info_font)
-        self.schulte_fatigue_label.setAlignment(Qt.AlignCenter)
-        self.schulte_fatigue_label.setStyleSheet("""
-                  QLabel {
-                      color: #7f8c8d;
-                      padding: 8px;
-                      background-color: #ecf0f1;
-                      border-radius: 8px;
-                  }
-              """)
-        fatigue_layout.addWidget(self.schulte_fatigue_label)
+        # ======================== 疲劳度信息(隐藏,仅后台记录) ========================
+        # 创建隐藏的标签以维持代码兼容性
+        self.schulte_fatigue_label = QLabel("--")
+        self.schulte_fatigue_label.hide()  # 隐藏显示
 
         # 脑负荷信息容器 - 与疲劳度信息容器相同
         brain_load_container = QFrame()
@@ -1329,6 +1202,7 @@ class TestPage(QWidget):
 
         brain_load_layout = QVBoxLayout(brain_load_container)
         brain_load_layout.setSpacing(scale(6))
+        margin = scale(6)
         brain_load_layout.setContentsMargins(margin, margin, margin, margin)
 
         # 脑负荷标题
@@ -1374,8 +1248,7 @@ class TestPage(QWidget):
         tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
         brain_load_layout.addWidget(tip_label)
 
-        # 将疲劳度和脑负荷容器添加到布局
-        vlayout.addWidget(fatigue_container, 0, Qt.AlignCenter)
+        # 将脑负荷容器添加到布局(疲劳度已隐藏)
         vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
 
         vlayout.addStretch(1)
@@ -1391,21 +1264,60 @@ class TestPage(QWidget):
         return outer_widget
 
     def _create_answer_area_widgets(self):
-        # 语音答题页面
+        # 🔄 朗读录音页面（改为显示完整文本供用户朗读）
         page_qna = QWidget()
         layout_qna = QVBoxLayout(page_qna)
-        layout_qna.setAlignment(Qt.AlignCenter)
+        layout_qna.setAlignment(Qt.AlignCenter)  # 改为垂直居中，与左侧摄像头对齐
         layout_qna.setSpacing(scale(15))
+        layout_qna.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
 
-        # 题目标签
-        self.lbl_question = QLabel("Question Text")
-        self.lbl_question.setObjectName("questionLabel")
-        self.lbl_question.setWordWrap(True)
-        self.lbl_question.setAlignment(Qt.AlignCenter)
-        font = QFont()
-        font.setPointSize(20)
-        font.setBold(True)
-        self.lbl_question.setFont(font)
+        # 添加顶部弹性空间
+        layout_qna.addStretch(1)
+
+        # 标题：朗读文本
+        title_label = QLabel("📖 请朗读以下文本")
+        title_label.setObjectName("h1")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout_qna.addWidget(title_label)
+
+        # 文本显示区域（可滚动的文本框）- 调整尺寸
+        self.lbl_reading_text = QTextEdit()
+        self.lbl_reading_text.setReadOnly(True)
+        self.lbl_reading_text.setObjectName("readingTextDisplay")
+        self.lbl_reading_text.setFixedWidth(scale(700))  # 增加宽度
+        self.lbl_reading_text.setMinimumHeight(scale(320))  # 增加最小高度
+        self.lbl_reading_text.setMaximumHeight(scale(420))  # 增加最大高度
+        
+        # 设置文本样式
+        text_font = QFont()
+        text_font.setPointSize(16)  # 增大字体
+        self.lbl_reading_text.setFont(text_font)
+        self.lbl_reading_text.setStyleSheet("""
+            QTextEdit#readingTextDisplay {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                padding: 15px;
+                line-height: 1.8;
+                color: #212529;
+            }
+        """)
+        
+        # 设置文本内容并垂直居中（将在 start_test 或 update_step_ui 中填充）
+        self.lbl_reading_text.setPlainText(self.reading_text_content)
+        self.lbl_reading_text.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)  # 垂直居中，水平左对齐
+        
+        layout_qna.addWidget(self.lbl_reading_text, 0, Qt.AlignCenter)
+
+        # 麦克风按钮和音量显示的容器
+        control_container = QWidget()
+        control_layout = QVBoxLayout(control_container)
+        control_layout.setSpacing(scale(15))
+        control_layout.setAlignment(Qt.AlignCenter)
 
         # 麦克风按钮
         self.btn_mic = QPushButton()
@@ -1420,18 +1332,16 @@ class TestPage(QWidget):
         self.audio_level.setFixedWidth(350)
 
         # 录音状态标签
-        self.lbl_recording_status = QLabel("请点击上方按钮开始录音")
+        self.lbl_recording_status = QLabel("点击录音按钮开始朗读并录音")
         self.lbl_recording_status.setObjectName("statusLabel")
         self.lbl_recording_status.setAlignment(Qt.AlignCenter)
 
-        # 布局顺序
-        layout_qna.addStretch(2)
-        layout_qna.addWidget(self.lbl_question)
+        control_layout.addWidget(self.btn_mic, 0, Qt.AlignCenter)
+        control_layout.addWidget(self.audio_level, 0, Qt.AlignCenter)
+        control_layout.addWidget(self.lbl_recording_status, 0, Qt.AlignCenter)
+
+        layout_qna.addWidget(control_container)
         layout_qna.addStretch(1)
-        layout_qna.addWidget(self.btn_mic, 0, Qt.AlignCenter)
-        layout_qna.addWidget(self.audio_level, 0, Qt.AlignCenter)
-        layout_qna.addWidget(self.lbl_recording_status, 0, Qt.AlignCenter)
-        layout_qna.addStretch(2)
 
         self.answer_stack.addWidget(page_qna)
 
@@ -1982,6 +1892,13 @@ class TestPage(QWidget):
             if self.current_step == 0:
                 logger.info("🔧 测试后门触发：按下 Q，语音问答视为完成")
                 
+                # 📍 确保文本问答开始时间戳已记录（如果还没记录则补记录）
+                if not getattr(self, '_text_qa_start_timestamp_recorded', False):
+                    call_timestamp = time.time()
+                    self.part_timestamps.append(call_timestamp)
+                    logger.info(f"📍 补记录文本问答开始时间戳(Q键跳过，页面未真正开始): {call_timestamp}")
+                    self._text_qa_start_timestamp_recorded = True
+                
                 # 停止音视频录制并获取路径
                 try:
                     logger.info("📹 正在停止音视频录制...")
@@ -1997,6 +1914,11 @@ class TestPage(QWidget):
                     if not hasattr(self, '_video_paths'):
                         self._video_paths = []
                 
+                # 📍 记录文本问答结束时间戳
+                call_timestamp = time.time()
+                self.part_timestamps.append(call_timestamp)
+                logger.info(f"📍 已记录文本问答结束时间戳(Q键跳过): {call_timestamp}")
+                
                 # 保存音视频路径到数据库
                 self._persist_av_paths_to_db()
                 
@@ -2007,6 +1929,22 @@ class TestPage(QWidget):
 
             if self.current_step == 1:
                 logger.info("测试后门触发：按下 Q，血压测试视为完成")
+                
+                # 📍 记录血压测试开始时间戳（如果还没进入血压页面就跳过）
+                # 正常流程：文本QA结束 → 血压开始 → 血压结束 → 舒尔特开始
+                # 跳过场景：可能在血压页面加载时就按Q,需要补开始时间戳
+                expected_timestamps_before_bp = 7  # 系统+设备校准+基线+SART+文本QA = 7个
+                if len(self.part_timestamps) < expected_timestamps_before_bp + 1:
+                    # 缺少血压开始时间戳，补记录
+                    call_timestamp = time.time()
+                    self.part_timestamps.append(call_timestamp)
+                    logger.info(f"📍 补记录血压测试开始时间戳(Q键跳过): {call_timestamp}")
+                
+                # 📍 记录血压测试结束时间戳
+                call_timestamp = time.time()
+                self.part_timestamps.append(call_timestamp)
+                logger.info(f"📍 已记录血压测试结束时间戳(Q键跳过): {call_timestamp}")
+                
                 self.bp_results = {
                     'systolic': 120,
                     'diastolic': 80,
@@ -2020,6 +1958,16 @@ class TestPage(QWidget):
 
             if self.current_step == 2:
                 logger.info("测试后门触发：按下 Q，舒尔特测试视为完成")
+                
+                # 📍 检查是否已记录舒尔特开始时间戳（通过时间戳数量判断）
+                # 如果舒尔特还没开始（刚进入页面就按Q），需要先记录开始时间戳
+                expected_timestamps_before_schulte = 9  # 系统+设备校准+基线+SART+文本QA+血压 = 9个
+                if len(self.part_timestamps) < expected_timestamps_before_schulte + 1:
+                    # 缺少舒尔特开始时间戳，补记录
+                    call_timestamp = time.time()
+                    self.part_timestamps.append(call_timestamp)
+                    logger.info(f"📍 补记录舒尔特测试开始时间戳: {call_timestamp}")
+                
                 self._on_schulte_result(30.0, 85.0)
                 self._on_schulte_completed()
                 return True
@@ -2163,16 +2111,21 @@ class TestPage(QWidget):
                 self.audio_level.set_level(0)
 
         if self.current_step == 0:
+            # 🔄 朗读录音阶段
             self.answer_stack.setCurrentIndex(0)
-            self.lbl_question.setText(self.questions[self.current_question])
-            self.btn_next.setText(
-                "下一题" if self.current_question < len(self.questions) - 1 else "完成答题"
-            )
+            
+            # 显示朗读文本（已在 _create_answer_area_widgets 中设置）
+            if hasattr(self, 'lbl_reading_text'):
+                self.lbl_reading_text.setPlainText(self.reading_text_content)
+            
+            self.btn_next.setText("完成录音")
             self.btn_next.setVisible(True)
-            self.btn_next.setEnabled(False)
+            self.btn_next.setEnabled(False)  # 初始禁用，录音完成后启用
             self.btn_finish.setVisible(False)
-            if self.test_started:
-                self._speak_current_question()
+            
+            # ❌ 不再需要 TTS 朗读
+            # if self.test_started:
+            #     self._speak_current_question()
 
         elif self.current_step == 1:
             self.answer_stack.setCurrentIndex(1)
@@ -2184,10 +2137,7 @@ class TestPage(QWidget):
                 self.btn_next.setEnabled(False)
             if self.mic_anim.state() == QPropertyAnimation.Running:
                 self.mic_anim.stop()
-            
-            # 📍 在切换到血压测试时，先保存语音识别结果，再触发情绪分析
-            self._save_speech_recognition_results()
-            self._trigger_emotion_analysis()
+
         elif self.current_step == 2:
             self.answer_stack.setCurrentIndex(2)
             self.btn_next.setVisible(False)
@@ -2236,7 +2186,8 @@ class TestPage(QWidget):
         self.current_question = 0
         self.btn_finish.setVisible(False)
 
-        self.spoken_questions = set()
+        # 🔄 重置朗读录音状态
+        self.reading_completed = False
         
         # 重置分数累积列表
         self._fatigue_scores_list = []
@@ -2245,24 +2196,25 @@ class TestPage(QWidget):
         self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
         logger.info("已重置分数累积列表和情绪分析标志")
 
-        if HAS_SPEECH_RECOGNITION:
-            try:
-                stop_recognition()
-                clear_recognition_results()
-            except Exception as exc:
-                logger.warning("重置语音识别队列失败: %s", exc)
+        # ❌ 不再需要语音识别功能（用户自己朗读，不需要识别）
+        # if HAS_SPEECH_RECOGNITION:
+        #     stop_recognition()
 
-        call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        # 📍 记录朗读录音开始时间戳
+        self._text_qa_start_timestamp_recorded = False
 
         try:
-            self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            base_dir = 'recordings'
-            user_dir = self.current_user or 'anonymous'
-            self.session_dir = _build_session_dir(base_dir, user_dir, self.session_timestamp)
-            logger.info(f"语音答题会话目录: {self.session_dir}")
+            # 如果 session_dir 已经存在（由 SART 页面创建），则直接使用
+            if not self.session_dir or not hasattr(self, 'session_timestamp'):
+                self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                base_dir = 'recordings'
+                user_dir = self.current_user or 'anonymous'
+                self.session_dir = _build_session_dir(base_dir, user_dir, self.session_timestamp)
+                logger.info(f"创建新的会话目录: {self.session_dir}")
+            else:
+                logger.info(f"使用已有会话目录: {self.session_dir}")
         except Exception as e:
-            logger.error(f"创建会话目录失败: {e}")
+            logger.error(f"处理会话目录失败: {e}")
             self.session_dir = 'recordings'
             os.makedirs(self.session_dir, exist_ok=True)
 
@@ -2274,9 +2226,20 @@ class TestPage(QWidget):
         self.test_started = True
         self.update_step_ui()
 
-        # 确保多模态监控在语音问答阶段就已启动
+        # ✅ 疲劳度监控已在基线校准阶段启动，这里只需确保轮询继续运行
         if HAS_MULTIMODAL:
-            self._start_multimodal_monitoring()
+            # 检查监控是否已在运行，如果没有则启动
+            timer_active = False
+            try:
+                timer_active = self._multimodal_poll_timer.isActive()
+            except Exception:
+                timer_active = False
+            
+            if not self._multimodal_poll_active or not timer_active:
+                config.logger.info("疲劳度监控未运行，启动监控轮询")
+                self._start_multimodal_monitoring()
+            else:
+                config.logger.info("✅ 疲劳度监控已在运行（从基线阶段继续）")
 
         # 使用线程异步启动AV采集，完成后启动摄像头更新（非阻塞）
         def start_av_async():
@@ -2365,11 +2328,15 @@ class TestPage(QWidget):
             )
         
         # EEG采集也使用异步方式（非阻塞），由后端统一管理硬件连接
+        # ⚠️ 注意：如果EEG已经在基线/SART阶段启动，这里会返回 "already-running"，这是正常的
         def start_eeg_async():
             try:
                 from ...services.backend_proxy import eeg_start
-                eeg_start(username=self.current_user, save_dir=self.session_dir, part=1)
-                logger.info(f"EEG采集已启动，保存目录: {self.session_dir}\\eeg")
+                result = eeg_start(username=self.current_user, save_dir=self.session_dir, part=1)
+                if result.get('status') == 'already-running':
+                    logger.info(f"✅ EEG采集已在运行中，继续使用现有连接: {result.get('save_dir')}")
+                else:
+                    logger.info(f"✅ EEG采集已启动，保存目录: {self.session_dir}\\eeg")
             except Exception as e:
                 logger.error(f"启动EEG采集失败: {e}")
                 logger.info("UI将继续运行，但EEG功能不可用")
@@ -2482,8 +2449,15 @@ class TestPage(QWidget):
         self.btn_mic.style().unpolish(self.btn_mic)
         self.btn_mic.style().polish(self.btn_mic)
 
-        self.lbl_recording_status.setText("正在录音...")
-        logger.info("开始音视频录制...")
+        self.lbl_recording_status.setText("正在录音，请朗读上方文本...")
+        logger.info("开始朗读录音...")
+
+        # 📍 记录朗读录音开始时间戳（第一次录音时）
+        if not self._text_qa_start_timestamp_recorded:
+            call_timestamp = time.time()
+            self.part_timestamps.append(call_timestamp)
+            logger.info(f"📍 已记录朗读录音开始时间戳: {call_timestamp}")
+            self._text_qa_start_timestamp_recorded = True
 
         self.audio_timer.start(50)
 
@@ -2503,8 +2477,8 @@ class TestPage(QWidget):
         self.mic_shadow.setEnabled(False)
 
         self.btn_next.setEnabled(True)
-        self.lbl_recording_status.setText("录制已完成，请进入下一题")
-        logger.info("音视频录制完毕。")
+        self.lbl_recording_status.setText("录制已完成，点击「完成录音」进入下一步")
+        logger.info("朗读录音完毕。")
         self.audio_level.set_level(0)
 
         def restore_button():
@@ -2527,124 +2501,92 @@ class TestPage(QWidget):
             logger.warning(f"获取音频电平时发生错误: {e}")
             self.audio_level.set_level(0)
 
-    def _speak_current_question(self):
-        if not self.test_started:
-            return
-        idx = self.current_question
-        if idx in self.spoken_questions:
-            return
-        try:
-            text = self.questions[idx]
-        except Exception as exc:
-            logger.warning(f"获取题目文本失败: {exc}")
-            return
-        self.spoken_questions.add(idx)
-        try:
-            self.tts_queue.put(text)
-            preview = text if len(text) <= 20 else text[:20] + "..."
-            logger.info(f"已提交朗读任务：第 {idx + 1} 题 -> {preview}")
-        except Exception as exc:
-            logger.warning(f"提交朗读任务失败: {exc}")
+    # ❌ 不再需要 _speak_current_question（用户自己朗读）
+    # def _speak_current_question(self):
+    #     已删除 TTS 朗读相关代码
 
     def _next_step_or_question(self):
         if self.current_step == 0:
-            if self.current_question < len(self.questions) - 1:
-                self.current_question += 1
-                self.update_step_ui()
-                if self.test_started:
-                    self._speak_current_question()
-            else:
-                self.current_step += 1
-                call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)
-                try:
-                    self._close_camera()
-                except Exception as e:
-                    logger.warning(f"关闭摄像头失败: {e}")
-                
-                # 停止音视频录制并获取路径
-                try:
-                    logger.info("📹 正在停止音视频录制...")
-                    av_stop_recording()
-                    self._audio_paths = av_get_audio_paths()
-                    self._video_paths = av_get_video_paths()
-                    logger.info(f"✅ 音视频录制已停止: {len(self._audio_paths)} 个音频, {len(self._video_paths)} 个视频")
-                except Exception as e:
-                    logger.error(f"停止音视频录制失败: {e}")
-                    # 初始化为空列表,避免后续错误
-                    if not hasattr(self, '_audio_paths'):
-                        self._audio_paths = []
-                    if not hasattr(self, '_video_paths'):
-                        self._video_paths = []
-                
-                try:
-                    # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
-                    multidata_stop_collection()
-                except Exception as stop_exc:
-                    logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
-                # 修复: 保持脑负荷/疲劳度轮询持续到舒特格测试结束
-                self.update_step_ui()
-                
-                # 保存音视频路径到数据库
-                self._persist_av_paths_to_db()
-        elif self.current_step == 1:
+            # 🔄 朗读录音阶段，不再有多个问题，直接进入下一步
+            # 📍 记录朗读录音结束时间戳
             call_timestamp = time.time()
             self.part_timestamps.append(call_timestamp)
+            logger.info(f"📍 已记录朗读录音结束时间戳: {call_timestamp}")
             
-            # ⚠️ 注释掉重新初始化逻辑，避免在切换到舒尔特阶段时重启多模态采集
-            # 原因: 重启会导致疲劳度分数重新从初始值开始，影响连续性
-            # 改进: 保持多模态采集持续运行，从答题阶段到舒尔特阶段无缝过渡
+            self.reading_completed = True
+            self.current_step += 1
+            
+            try:
+                self._close_camera()
+            except Exception as e:
+                logger.warning(f"关闭摄像头失败: {e}")
+            
+            # 停止音视频录制并获取路径
+            try:
+                logger.info("📹 正在停止音视频录制...")
+                av_stop_recording()
+                self._audio_paths = av_get_audio_paths()
+                self._video_paths = av_get_video_paths()
+                logger.info(f"✅ 音视频录制已停止: {len(self._audio_paths)} 个音频, {len(self._video_paths)} 个视频")
+            except Exception as e:
+                logger.error(f"停止音视频录制失败: {e}")
+                # 初始化为空列表,避免后续错误
+                if not hasattr(self, '_audio_paths'):
+                    self._audio_paths = []
+                if not hasattr(self, '_video_paths'):
+                    self._video_paths = []
+            
+            # 📍 记录血压测试开始时间戳
+            call_timestamp = time.time()
+            self.part_timestamps.append(call_timestamp)
+            logger.info(f"📍 已记录血压测试开始时间戳: {call_timestamp}")
+            
+            # ✅ 疲劳度检测已结束，后续阶段不再进行疲劳度监控
+            self.update_step_ui()
+            
+            # 保存音视频路径到数据库
+            self._persist_av_paths_to_db()
+        elif self.current_step == 1:
+            # 📍 记录血压测试结束时间戳
+            call_timestamp = time.time()
+            self.part_timestamps.append(call_timestamp)
+            logger.info(f"📍 已记录血压测试结束时间戳: {call_timestamp}")
+            
+            # ✅ 确保多模态监控在舒尔特阶段仍然运行（保持脑负荷推理）
             if HAS_MULTIMODAL:
                 try:
-                    # try:
-                    #     # 在切换至舒特格阶段前，短暂停止上一阶段采集以重新编号
-                    #     multidata_stop_collection()
-                    # except Exception as stop_exc:
-                    #     logger.warning(f"收尾 part=1 多模态采集失败: {stop_exc}")
-                    result = multidata_start_collection(
-                        self.current_user,
-                        part=2,
-                        save_dir=self.session_dir,
-                    )
-                    self.multimodal_collector = result
-                    status = (result or {}).get("status", "").lower()
-                    if status in {"running", "already-running"}:
-                        logger.info("多模态数据采集 part=2 已启动，用户: %s", self.current_user)
-                        logger.info("多模态数据保存目录: %s", self.session_dir)
+                    self._start_multimodal_monitoring(force=True)
+                    logger.info("✅ 舒尔特阶段继续更新脑负荷推理")
+                except Exception as restart_exc:
+                    logger.error(f"舒尔特阶段刷新疲劳度监控失败: {restart_exc}")
             
-                        timer_active = False
-                        try:
-                            timer_active = self._multimodal_poll_timer.isActive()
-                        except Exception:
-                            timer_active = False
+            # 📍 记录舒尔特测试开始时间戳
+            call_timestamp = time.time()
+            self.part_timestamps.append(call_timestamp)
+            logger.info(f"📍 已记录舒尔特测试开始时间戳: {call_timestamp}")
+                        
+            # 📍 在切换到舒尔特测试时，先保存语音识别结果，再触发情绪分析
+            self._save_speech_recognition_results()
+            self._trigger_emotion_analysis()
             
-                        if not self._multimodal_poll_active or not timer_active:
-                            if self._multimodal_poll_active and not timer_active:
-                                logger.warning("多模态监控定时器未运行，将强制重新启动监控")
-                            else:
-                                logger.info("启动多模态监控（从舒尔特方格开始）")
-                            self._start_multimodal_monitoring(force=True)
-                        else:
-                            logger.info("✅ 多模态监控已在运行，无需重复启动")
-                    else:
-                        logger.warning("多模态数据采集启动失败: %s", result)
-                except Exception as e:
-                    logger.error(f"启动多模态数据采集时出错: {e}")
-                
-                logger.info("✅ 保持多模态采集持续运行（从答题阶段到舒尔特阶段无缝过渡）")
-                self.current_step += 1
-                self.update_step_ui()
+            self.current_step += 1
+            self.update_step_ui()
 
     def _on_schulte_completed(self):
         logger.info("舒特格测试完成，自动进入分数展示页面")
+        
+        # 📍 记录舒尔特测试结束时间戳
         call_timestamp = time.time()
         self.part_timestamps.append(call_timestamp)
+        logger.info(f"📍 已记录舒尔特测试结束时间戳: {call_timestamp}")
+        
+        # ✅ 舒尔特阶段结束，停止疲劳度监控
         try:
-            multidata_stop_collection()
-        except Exception as e:
-            logger.warning(f"停止多模态采集器失败: {e}")
-        finally:
             self._stop_multimodal_monitoring()
+            multidata_stop_collection()
+            logger.info("舒尔特测试完成，已停止疲劳度监控与多模态采集")
+        except Exception as e:
+            logger.warning(f"舒尔特阶段停止疲劳度监控或采集失败: {e}")
         
         # 停止EEG采集并保存路径到数据库
         try:
@@ -2653,7 +2595,7 @@ class TestPage(QWidget):
             # 获取EEG文件路径并保存到数据库
             eeg_paths = eeg_get_file_paths()
             if eeg_paths:
-                logger.info(f"✅ 获取到EEG文件路径: {eeg_paths}")
+                # logger.info(f"✅ 获取到EEG文件路径: {eeg_paths}")
                 self._persist_eeg_paths_to_db(eeg_paths)
             else:
                 logger.warning("未获取到EEG文件路径")
@@ -2681,17 +2623,17 @@ class TestPage(QWidget):
             finally:
                 self._stop_multimodal_monitoring()
         
-        # 停止EEG采集并保存文件路径
-        try:
-            eeg_stop_collection()
-            logger.info("EEG采集已完全停止")
-            # 获取EEG文件路径并保存到数据库
-            eeg_paths = eeg_get_file_paths()
-            if eeg_paths:
-                logger.info(f"获取到EEG文件路径: {eeg_paths}")
-                self._persist_eeg_paths_to_db(eeg_paths)
-        except Exception as e:
-            logger.error(f"停止EEG采集或保存路径时出错: {e}")
+        # # 停止EEG采集并保存文件路径
+        # try:
+        #     eeg_stop_collection()
+        #     logger.info("EEG采集已完全停止")
+        #     # 获取EEG文件路径并保存到数据库
+        #     eeg_paths = eeg_get_file_paths()
+        #     if eeg_paths:
+        #         logger.info(f"获取到EEG文件路径: {eeg_paths}")
+        #         self._persist_eeg_paths_to_db(eeg_paths)
+        # except Exception as e:
+        #     logger.error(f"停止EEG采集或保存路径时出错: {e}")
         
         call_timestamp = time.time()
         self.part_timestamps.append(call_timestamp)
@@ -2908,7 +2850,7 @@ class TestPage(QWidget):
                 logger.warning(f"⚠️ EEG 路径为空或格式不支持: {eeg_paths}")
                 return
             
-            logger.info(f"准备保存 EEG 路径: {update_payload}")
+            # logger.info(f"准备保存 EEG 路径: {update_payload}")
             
             # 如果数据库行还未创建，同步等待最多 3 秒
             if not self.row_id:
@@ -2995,6 +2937,12 @@ class TestPage(QWidget):
     def _calculate_average_scores(self) -> Dict[str, Optional[float]]:
         """
         计算疲劳度和脑负荷的平均分数
+        
+        ✅ 注意：疲劳度数据收集范围
+        - 开始：基线校准开始时
+        - 结束：文本朗读完成时
+        - 包含阶段：基线校准 + SART实验 + 文本朗读
+        - 不包含：舒尔特方格阶段
         
         Returns:
             包含平均分数的字典:
@@ -3132,13 +3080,23 @@ class TestPage(QWidget):
                 logger.debug("没有有效的推理结果需要保存到数据库")
                 return
             
-            # 更新数据库记录
-            self._queue_db_update(
-                update_payload,
-                "保存推理结果到数据库失败"
-            )
+            # 定义成功回调，在数据库更新完成后刷新ScorePage
+            def _on_saved(result: dict):
+                logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
+                # 数据库更新完成后，通知ScorePage刷新历史数据
+                if hasattr(self, 'score_page') and hasattr(self.score_page, '_refresh_data'):
+                    try:
+                        self.score_page._refresh_data()
+                        logger.debug("✅ 已通知ScorePage刷新历史数据")
+                    except Exception as e:
+                        logger.warning(f"刷新ScorePage历史数据失败: {e}")
             
-            logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
+            # 更新数据库记录，并在成功后执行回调
+            self._queue_db_update_with_callback(
+                update_payload,
+                "保存推理结果到数据库失败",
+                on_success=_on_saved
+            )
             
         except Exception as e:
             logger.error(f"保存推理结果到数据库失败: {e}", exc_info=True)

@@ -25,6 +25,7 @@ from .qt import (
     QKeySequence,
     QMainWindow,
     QShortcut,
+    QTimer,
     Qt,
     QVBoxLayout,
     QWidget,
@@ -34,6 +35,8 @@ from .utils.widgets import FadingStackedWidget
 from .utils.responsive import get_scaler, scale, scale_size
 from .pages.calibration import CalibrationPage
 from .pages.login import LoginPage
+from .pages.baseline import BaselineCalibrationPage
+from .pages.sart import SARTPage
 from .pages.test import TestPage
 from ..widgets.brain_load_bar import BrainLoadBar
 from ..widgets.schulte_grid import SchulteGridWidget
@@ -55,6 +58,10 @@ class MainWindow(QMainWindow):
         self.current_user = "debug"
         self._debug_shortcuts: list[QShortcut] = []
         self.camera_preloaded = False
+        
+        # SART 模式配置
+        self.sart_mode = "short"  # 默认短时模式
+        self.sart_duration = 300  # 默认5分钟（300秒）
 
         self._setup_main_window()
         self._create_pages()
@@ -66,6 +73,26 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(800, self._preload_camera)
 
         logger.info("应用程序主窗口初始化完成。")
+    
+    def set_sart_mode(self, mode: str) -> None:
+        """
+        设置 SART 实验模式
+        
+        Args:
+            mode: "short" (5分钟) 或 "long" (25分钟)
+        """
+        if mode not in ["short", "long"]:
+            logger.warning(f"无效的 SART 模式: {mode}，使用默认短时模式")
+            mode = "short"
+        
+        self.sart_mode = mode
+        self.sart_duration = 300 if mode == "short" else 1500
+        
+        logger.info(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
+        
+        # 如果 SART 页面已创建，更新其配置
+        if hasattr(self, 'sart_page'):
+            self.sart_page.set_mode(mode, self.sart_duration)
 
     def _setup_main_window(self) -> None:
         self.setWindowTitle('非接触人员状态评估系统')
@@ -97,13 +124,19 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(side_margin, top_margin, side_margin, bottom_margin)
         main_layout.setSpacing(spacing)
 
+        # 创建所有页面
         self.login_page = LoginPage(self.show_calibration_page)
         self.calibration_page = CalibrationPage()
+        self.baseline_page = BaselineCalibrationPage()
+        self.sart_page = SARTPage(mode=self.sart_mode, duration=self.sart_duration)
         self.test_page = TestPage()
 
-        self.stack.addWidget(self.login_page)
-        self.stack.addWidget(self.calibration_page)
-        self.stack.addWidget(self.test_page)
+        # 按顺序添加到堆栈
+        self.stack.addWidget(self.login_page)           # 0: 登录
+        self.stack.addWidget(self.calibration_page)     # 1: 设备校准
+        self.stack.addWidget(self.baseline_page)        # 2: 基线校准
+        self.stack.addWidget(self.sart_page)            # 3: SART实验
+        self.stack.addWidget(self.test_page)            # 4: 测试主流程
 
         main_layout.addWidget(self.stack, 1)
 
@@ -119,7 +152,9 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.login_page)
 
     def _connect_signals(self) -> None:
-        self.calibration_page.calibration_finished.connect(self.show_test_page)
+        self.calibration_page.calibration_finished.connect(self.show_baseline_page)
+        self.baseline_page.baseline_finished.connect(self.show_sart_page)
+        self.sart_page.sart_finished.connect(self.show_test_page)
 
     def _setup_debug_shortcuts(self) -> None:
         def bind(sequence: str, handler, description: str) -> None:
@@ -155,9 +190,10 @@ class MainWindow(QMainWindow):
             self.current_user = "debug"
         try:
             self.test_page.set_current_user(self.current_user)
+            self.sart_page.set_session_dir(self.test_page.session_dir if hasattr(self.test_page, 'session_dir') else 'recordings')
         except Exception as exc:  # noqa: BLE001
             logger.debug("同步调试用户名失败: %s", exc)
-        self.stack.fade_to_index(2)
+        self.stack.fade_to_index(4)  # 跳到测试页面（索引4）
         self.brain_load_tip.setVisible(False)
         try:
             self.test_page.start_test()
@@ -173,9 +209,110 @@ class MainWindow(QMainWindow):
             logger.warning("同步用户名到测试页失败: %s", exc)
         self.stack.fade_to_index(1)
 
-    def show_test_page(self) -> None:
-        logger.info("正在切换到测试页面...")
+    def show_baseline_page(self) -> None:
+        """切换到基线校准页面"""
+        logger.info("正在切换到基线校准页面...")
+        
+        # 为基线创建会话目录（因为基线在 TestPage 的 start_test 之前运行）
+        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
+            from datetime import datetime
+            import os
+            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            user_dir = self.current_user or 'anonymous'
+            
+            # 🐛 修复：使用项目根目录的绝对路径，而不是相对路径
+            # 项目根目录 = ui/ 的父目录
+            project_root = Path(__file__).parent.parent.parent
+            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
+            
+            # 保存到 test_page 以便后续使用
+            self.test_page.session_timestamp = session_timestamp
+            self.test_page.session_dir = session_dir
+            
+            logger.info(f"为基线创建会话目录: {session_dir}")
+        
+        # 传递时间戳列表和会话信息
+        if hasattr(self.test_page, 'part_timestamps'):
+            self.baseline_page.set_part_timestamps(self.test_page.part_timestamps)
+        
+        # 传递会话信息（用于EEG采集）
+        self.baseline_page.set_session_info(
+            self.test_page.session_dir,
+            self.current_user
+        )
+        
+        # 🔥 关键修改：在进入基线页面前启动EEG采集，保持整个流程连续
+        self._start_eeg_collection_for_session()
+        
         self.stack.fade_to_index(2)
+        self.brain_load_tip.setVisible(False)  # 基线页面隐藏脑电提示
+        # 基线页面有自己的开始按钮，不需要自动启动
+    
+    def _start_eeg_collection_for_session(self) -> None:
+        """为整个测试会话启动EEG采集（异步，非阻塞）"""
+        from ..utils_common.thread_process_manager import get_thread_manager
+        thread_manager = get_thread_manager()
+        
+        def start_eeg():
+            try:
+                from ..services.backend_proxy import eeg_start
+                result = eeg_start(
+                    username=self.current_user or 'anonymous',
+                    save_dir=self.test_page.session_dir,
+                    part=1
+                )
+                logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
+                logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+            except Exception as e:
+                logger.error(f"❌ 启动测试会话EEG采集失败: {e}")
+                logger.info("测试将继续运行，但不会记录EEG数据")
+        
+        thread_manager.submit_data_task(
+            start_eeg,
+            task_name="测试会话EEG采集启动"
+        )
+    
+    def show_sart_page(self) -> None:
+        """切换到SART实验页面"""
+        logger.info("正在切换到SART实验页面...")
+        
+        # 同步时间戳列表
+        if hasattr(self.test_page, 'part_timestamps'):
+            self.sart_page.set_part_timestamps(self.test_page.part_timestamps)
+        
+        # 确保会话目录已创建（可能已在基线阶段创建）
+        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
+            from datetime import datetime
+            import os
+            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            user_dir = self.current_user or 'anonymous'
+            
+            # 🐛 修复：使用项目根目录的绝对路径，而不是相对路径
+            project_root = Path(__file__).parent.parent.parent
+            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
+            
+            # 保存到 test_page 以便后续使用
+            self.test_page.session_timestamp = session_timestamp
+            self.test_page.session_dir = session_dir
+            
+            logger.info(f"为 SART 创建会话目录: {session_dir}")
+        
+        # 传递会话信息（用于EEG采集和结果保存）
+        self.sart_page.set_session_info(
+            self.test_page.session_dir,
+            self.current_user
+        )
+        
+        self.stack.fade_to_index(3)
+        self.brain_load_tip.setVisible(False)  # SART页面隐藏脑电提示
+        
+        # SART有按空格开始的说明，不自动启动
+        # 用户需要按空格来开始测试
+    
+    def show_test_page(self) -> None:
+        """切换到测试主流程页面"""
+        logger.info("正在切换到测试页面（文本问答、血压、舒尔特）...")
+        self.stack.fade_to_index(4)
         self.brain_load_tip.setVisible(False)
         self.test_page.start_test()
 
@@ -282,6 +419,23 @@ def create_application(argv: Sequence[str] | None = None) -> tuple[QApplication,
     _apply_style(app)
 
     window = MainWindow()
+    
+    # 📍 解析命令行参数以设置 SART 模式
+    import argparse
+    parser = argparse.ArgumentParser(description='非接触人员状态评估系统')
+    parser.add_argument('--sart-mode', 
+                       choices=['short', 'long'], 
+                       default='short',
+                       help='SART实验模式: short(5分钟/低负荷) 或 long(25分钟/疲劳诱发), 默认short')
+    
+    # 解析已有的参数（去掉Qt自己的参数）
+    known_args, _ = parser.parse_known_args(args[1:])  # 跳过程序名
+    
+    # 设置 SART 模式
+    if known_args.sart_mode:
+        window.set_sart_mode(known_args.sart_mode)
+        logger.info(f"✅ 从命令行参数设置 SART 模式: {known_args.sart_mode}")
+    
     return app, window
 
 

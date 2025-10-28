@@ -247,7 +247,7 @@ class MultiModalDataCollector:
         self.rs_pipeline = rs.pipeline()
         self.rs_config = rs.config()
         color_width, color_height = self.rgb_resolution
-        depth_width, depth_height = 640, 480
+        depth_width, depth_height = 1280, 720
         self.rs_config.enable_stream(rs.stream.color, color_width, color_height, rs.format.bgr8, 30)
         self.rs_config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, 30)
         self.rs_profile = self.rs_pipeline.start(self.rs_config)
@@ -473,12 +473,45 @@ class MultiModalDataCollector:
 
     # ------------------------------------------------------------------
     def _depth_to_bgr(self, depth_image):  # pragma: no cover - depends on cv2
+        """Convert depth frame to BGR image with range clipping for face detection.
+        
+        Applies depth range filtering to preserve facial details:
+        - Sets lower bound (min_range) to filter background
+        - Sets upper bound (max_range) to filter too-close noise
+        - Only keeps depth values within [min_range, max_range]
+        - Values outside this range are set to 0 (black)
+        """
         if cv2 is None:
             return depth_image
-        depth_8u = cv2.convertScaleAbs(depth_image, alpha=0.03)
+        
+        # Convert to float32 for processing
+        depth_array = depth_image.astype(np.float32)
+        
+        # Define depth range for optimal face detection
+        min_range = 400.0  # millimetres - filter out too close objects
+        max_range = 700.0  # millimetres - filter out background
+        
+        # Clip to valid range [min_range, max_range]
+        depth_clipped = np.clip(depth_array, min_range, max_range)
+        
+        # Filter out values outside the range (set to 0)
+        # This creates a "depth window" focused on face distance
+        mask = (depth_array >= min_range) & (depth_array <= max_range)
+        depth_clipped = depth_clipped * mask
+        
+        # Normalize to use full 8-bit range for better contrast
+        # Map [min_range, max_range] to [0, 255]
+        depth_normalized = (depth_clipped - min_range) / (max_range - min_range)
+        depth_normalized = np.clip(depth_normalized, 0.0, 1.0)
+        depth_8u = (depth_normalized * 255).astype(np.uint8)
+        
+        # Convert grayscale to BGR
         gray_bgr = cv2.cvtColor(depth_8u, cv2.COLOR_GRAY2BGR)
+        
+        # Resize if needed
         if gray_bgr.shape[:2] != (self.depth_resolution[1], self.depth_resolution[0]):
             gray_bgr = cv2.resize(gray_bgr, self.depth_resolution, interpolation=cv2.INTER_LINEAR)
+        
         return gray_bgr
 
     def _prepare_eyetrack_for_json(self, data: Dict[str, Any]) -> Dict[str, Any]:

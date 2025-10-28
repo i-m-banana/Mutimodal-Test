@@ -149,12 +149,14 @@ class ModernGaugeWidget(QWidget):
 class HistoryDialog(QDialog):
     """历史数据展示对话框"""
 
-    def __init__(self, data_interface, use_mock_on_empty=True):
+    def __init__(self, data_interface, use_mock_on_empty=True, source_hint: str | None = None):
         super().__init__()
         self.setWindowTitle("历史数据分析")
         self.setMinimumSize(1000, 800)
         self.data_interface = data_interface
         self.use_mock_on_empty = use_mock_on_empty  # 当没有有效数据时是否使用模拟数据
+        # 数据来源提示："真实" | "模拟" | "自动"
+        self.source_hint = source_hint or "自动"
         self.current_metric = None
         self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
@@ -170,6 +172,16 @@ class HistoryDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size:28px; font-weight:bold; margin-bottom:20px;")
         layout.addWidget(title)
+
+        # 数据来源提示条（右上角）
+        source_row = QHBoxLayout()
+        source_row.addStretch(1)
+        self.source_label = QLabel("")
+        self._update_source_label(self.source_hint)
+        self.source_label.setAlignment(Qt.AlignRight)
+        self.source_label.setStyleSheet("color:#777; font-size:12px; margin-top:-10px;")
+        source_row.addWidget(self.source_label)
+        layout.addLayout(source_row)
 
         # 指标选择按钮
         btn_layout = QHBoxLayout()
@@ -276,7 +288,6 @@ class HistoryDialog(QDialog):
         history_data = data.get("历史", {})
         history_values = history_data.get(metric, [])
         history_dates = data.get("历史日期", [])
-        data_validity = data.get("数据有效性", {})
 
         if not history_values or not history_dates:
             ax.text(0.5, 0.5, '暂无历史数据', ha='center', va='center',
@@ -292,11 +303,15 @@ class HistoryDialog(QDialog):
             valid_pairs = [(v, d) for v, d in zip(history_values, history_dates) 
                           if v is not None and v > 0]
             
-            # 检查是否有有效数据
-            valid_count = data_validity.get(metric, 0)
-            if not valid_pairs or valid_count == 0:
+            # 检查是否有有效数据（直接使用 valid_pairs，不依赖 data_validity 字段）
+            if not valid_pairs:
                 # 如果启用了模拟数据模式,则生成并显示模拟数据
                 if self.use_mock_on_empty:
+                    # 动态提示：本次使用模拟数据
+                    try:
+                        self._update_source_label("模拟（无有效历史，已生成示例）")
+                    except Exception:
+                        pass
                     logger.info(f"指标 '{metric}' 无有效数据,使用模拟数据显示")
                     # 生成模拟历史数据
                     num_records = random.randint(10, 25)
@@ -465,6 +480,14 @@ class HistoryDialog(QDialog):
         self.figure.tight_layout()
         self.canvas.draw()
 
+    def _update_source_label(self, mode: str):
+        mode_text = str(mode).strip()
+        if mode_text in ("真实", "模拟", "自动") or mode_text.startswith("模拟"):
+            text = f"数据来源：{mode_text}"
+        else:
+            text = f"数据来源：{mode_text}"
+        self.source_label.setText(text)
+
 
 class BloodPressureWidget(QWidget):
     """血压脉搏显示组件"""
@@ -537,22 +560,27 @@ class ScorePage(QWidget):
         self._external_data_interface = data_interface
         self._use_mock_data = SKIP_DATABASE
         self._db_error_logged = False
-        self._history_future = None
-        self._pending_history_user = None
         self._current_data = self._mock_data_interface() if self._use_mock_data else self._blank_data()
         self.data_interface = self._fetch_data
         
         # 测试结果数据（从test.py传入）
         self._test_results = None
+        
+        # 基准值数据（用户最佳状态）
+        self._baseline_data = {}
 
         # 加载动画定时器
         self._loading_angle = 0
         self._loading_timer = QTimer(self)
         self._loading_timer.timeout.connect(self._update_loading_animation)
         self._is_loading = False
+        
+        # 中文字体
+        self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
         self._init_ui()
-        self._update_scores()
+        # 不在初始化时更新分数，等待数据加载完成后再更新
+        # self._update_scores()  # ← 删除此行，避免重复调用
         QTimer.singleShot(0, self._refresh_data)
 
     def _init_ui(self):
@@ -568,7 +596,7 @@ class ScorePage(QWidget):
         content_layout = QHBoxLayout()
         content_layout.setSpacing(30)
 
-        # 左侧分数卡片容器
+        # 左侧雷达图容器
         left_container = QWidget()
         left_container.setStyleSheet("""
             QWidget {
@@ -583,13 +611,12 @@ class ScorePage(QWidget):
         left_shadow.setOffset(0, 5)
         left_container.setGraphicsEffect(left_shadow)
 
-        self.score_labels = {}
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(30, 30, 30, 30)
         left_layout.setSpacing(20)
 
         # 左侧标题
-        left_title = QLabel("各项指标得分")
+        left_title = QLabel("各项指标对比")
         left_title.setAlignment(Qt.AlignCenter)
         left_title.setStyleSheet("font-size:28px; font-weight:bold; color:#333;")
         left_layout.addWidget(left_title)
@@ -601,88 +628,31 @@ class ScorePage(QWidget):
         line1.setStyleSheet("background-color: #e0e0e0;")
         left_layout.addWidget(line1)
 
-        # 指标卡片 - 简化设计
-        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率"]
-        icons = ["👁", "😊", "🧠", "🎯"]  # 简单的图标
+        # 雷达图容器
+        radar_widget = QWidget()
+        radar_widget.setStyleSheet("background-color: white;")
+        radar_layout = QVBoxLayout(radar_widget)
+        radar_layout.setContentsMargins(10, 10, 10, 10)
 
-        for m, icon in zip(metrics, icons):
-            # 创建水平布局
-            h_layout = QHBoxLayout()
-            h_layout.setSpacing(15)
+        # matplotlib雷达图
+        self.radar_figure = Figure(facecolor='white', figsize=(7, 7))
+        self.radar_canvas = FigureCanvas(self.radar_figure)
+        self.radar_canvas.setStyleSheet("background-color: transparent;")
+        radar_layout.addWidget(self.radar_canvas)
 
-            # 图标
-            icon_label = QLabel(icon)
-            icon_label.setFixedSize(30, 30)
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setStyleSheet("font-size:20px;")
-            h_layout.addWidget(icon_label)
-
-            # 指标名称
-            name_label = QLabel(m)
-            name_label.setStyleSheet("font-size:18px; color:#333; font-weight:500;")
-            h_layout.addWidget(name_label)
-
-            h_layout.addStretch()
-
-            # 数值
-            value_label = QLabel("0")
-            value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value_label.setStyleSheet("font-size:24px; font-weight:bold;")
-            h_layout.addWidget(value_label)
-
-            # 添加到布局
-            left_layout.addLayout(h_layout)
-            self.score_labels[m] = value_label
-
-            # 添加分隔线（除了最后一个）
-            if m != metrics[-1]:
-                separator = QFrame()
-                separator.setFrameShape(QFrame.HLine)
-                separator.setFrameShadow(QFrame.Plain)
-                separator.setStyleSheet("background-color: #f0f0f0;")
-                left_layout.addWidget(separator)
-
-        # 血压脉搏区域
-        bp_separator = QFrame()
-        bp_separator.setFrameShape(QFrame.HLine)
-        bp_separator.setFrameShadow(QFrame.Plain)
-        bp_separator.setStyleSheet("background-color: #f0f0f0;")
-        left_layout.addWidget(bp_separator)
-
-        # 血压脉搏标题
-        bp_title_layout = QHBoxLayout()
-        bp_icon = QLabel("❤")
-        bp_icon.setFixedSize(30, 30)
-        bp_icon.setAlignment(Qt.AlignCenter)
-        bp_icon.setStyleSheet("font-size:20px;")
-        bp_title_layout.addWidget(bp_icon)
-
-        bp_title = QLabel("血压脉搏")
-        bp_title.setStyleSheet("font-size:18px; color:#333; font-weight:500;")
-        bp_title_layout.addWidget(bp_title)
-        bp_title_layout.addStretch()
-
-        left_layout.addLayout(bp_title_layout)
-
-        # 血压脉搏组件
-        self.bp_widget = BloodPressureWidget()
-        self.bp_widget.setStyleSheet("""
-            BloodPressureWidget {
-                background-color: #f8f9fa;
-                border-radius: 10px;
-                border: 1px solid #e9ecef;
-            }
-        """)
-        left_layout.addWidget(self.bp_widget)
-
-        # 添加空间
-        left_layout.addSpacing(20)
+        left_layout.addWidget(radar_widget, 1)
 
         # 底部说明
-        info_label = QLabel("* 数值越高表示状态越好")
+        info_label = QLabel("🔵 蓝色=本次测试 | 🔴 红色虚线=理想基准 (80分)")
         info_label.setAlignment(Qt.AlignCenter)
-        info_label.setStyleSheet("font-size:14px; color:#999;")
+        info_label.setStyleSheet("font-size:13px; color:#666; font-weight:500;")
         left_layout.addWidget(info_label)
+        
+        # 指标说明
+        metric_info = QLabel("※ 得分相对于首次测试换算，蓝色区域越接近红色正七边形表示状态越好")
+        metric_info.setAlignment(Qt.AlignCenter)
+        metric_info.setStyleSheet("font-size:11px; color:#999;")
+        left_layout.addWidget(metric_info)
 
         content_layout.addWidget(left_container, 5)
 
@@ -837,12 +807,13 @@ class ScorePage(QWidget):
         return base
 
     def _refresh_data(self) -> None:
+        """刷新数据 - 统一使用同步获取逻辑（与历史数据弹窗保持一致）"""
         if self._external_data_interface:
             try:
                 dataset = self._external_data_interface(self.username)
             except Exception as exc:
-                self._handle_db_error(exc, "外部数据接口调用失败")
-                return
+                logger.error(f"外部数据接口调用失败: {exc}")
+                dataset = {}
             self._apply_real_data(dataset or {})
             return
 
@@ -853,52 +824,29 @@ class ScorePage(QWidget):
 
         # 显示加载动画
         self._show_loading()
-        self._request_history_from_backend()
-
-    def _request_history_from_backend(self) -> None:
-        if self._history_future and not self._history_future.done():
-            if self._pending_history_user == (self.username or "anonymous"):
-                return
-
+        
+        # 使用与 _show_history() 完全相同的同步获取逻辑
         try:
             client = get_backend_client()
-        except Exception as exc:
-            self._handle_db_error(exc, "连接后端失败")
-            return
-
-        requested_user = self.username or "anonymous"
-        # 默认获取最近30条记录,足够绘制平滑曲线
-        # 可设置 limit=0 获取所有历史,或 limit=50 获取更多数据
-        payload = {"name": requested_user, "limit": 30}
-        future = client.send_command_future("db.get_user_history", payload)
-        self._history_future = future
-        self._pending_history_user = requested_user
-
-        def _dispatch_result(fut):
-            def _apply():
-                if requested_user != (self.username or "anonymous"):
-                    return
-                if fut is self._history_future:
-                    self._history_future = None
-                    self._pending_history_user = None
-                try:
-                    result = fut.result()
-                except Exception as exc:
-                    self._handle_db_error(exc, "获取历史数据失败")
-                    return
-                self._handle_history_result(result or {})
-
-            QTimer.singleShot(0, _apply)
-
-        future.add_done_callback(_dispatch_result)
-
-    def _handle_history_result(self, response: Dict[str, Any]) -> None:
-        history = response.get("history") if isinstance(response, dict) else None
-        if history is None:
-            history = {}
-        self._apply_real_data(history)
-        # 隐藏加载动画
-        self._hide_loading()
+            payload = {"name": self.username or "anonymous", "limit": 30}
+            logger.debug(f"同步获取用户 '{payload['name']}' 的历史数据...")
+            resp = client.send_command_sync("db.get_user_history", payload, timeout=5.0)
+            history = resp.get("history") if isinstance(resp, dict) else None
+            
+            if isinstance(history, dict) and history:
+                logger.info(f"✅ 成功获取用户 '{payload['name']}' 的历史数据，记录数: {len(history.get('历史日期', []))}")
+                self._apply_real_data(history)
+            else:
+                logger.warning(f"用户 '{payload['name']}' 无历史数据或数据格式错误")
+                self._apply_real_data({})
+                
+        except Exception as e:
+            logger.error(f"同步获取历史数据失败: {e}")
+            # 失败时使用空数据，不生成模拟数据
+            self._apply_real_data({})
+        finally:
+            # 隐藏加载动画
+            self._hide_loading()
 
     def _apply_real_data(self, data: Dict[str, Any]) -> None:
         normalized = self._merge_real_data(data)
@@ -937,19 +885,6 @@ class ScorePage(QWidget):
             base["历史日期"] = history_dates
 
         return base
-
-    def _handle_db_error(self, exc: Exception, context: str) -> None:
-        if not self._db_error_logged:
-            logger.error(f"{context}: {exc}")
-            logger.warning("分数页将切换为模拟数据以避免界面卡顿。")
-        self._db_error_logged = True
-        self._use_mock_data = True
-        self._history_future = None
-        self._pending_history_user = None
-        self._current_data = self._mock_data_interface()
-        self._update_scores()
-        # 隐藏加载动画
-        self._hide_loading()
 
     def _mock_data_interface(self):
         # 生成最多30条历史数据
@@ -1050,19 +985,27 @@ class ScorePage(QWidget):
         self._update_scores()
         self._refresh_data()
 
-    def _set_user(self, username):
-        """设置用户名"""
+    def set_user(self, username):
+        """
+        设置当前用户名（公开方法）
+        当用户切换时，会清空之前用户的历史数据缓存，重新获取新用户的数据
+        """
+        old_username = self.username
         self.username = username or 'anonymous'
-        self._history_future = None
-        self._pending_history_user = None
-        if self._use_mock_data:
-            self._refresh_data()
-        else:
-            # 如果还没有测试结果数据，才初始化为空白数据
-            # 如果已经有测试结果，保留它
-            if not self._test_results:
-                self._current_data = self._blank_data()
-            self._refresh_data()
+        
+        # 如果用户名确实改变了，清空所有缓存数据
+        if old_username != self.username:
+            logger.info(f"用户切换: {old_username} → {self.username}，清空历史数据缓存")
+            self._current_data = self._blank_data()
+            # 注意：不清空 _test_results，因为那是本次测试的实时结果
+        
+        # 重新获取新用户的历史数据
+        self._refresh_data()
+    
+    # 保留私有方法作为别名，向后兼容
+    def _set_user(self, username):
+        """向后兼容的私有方法，调用公开方法"""
+        self.set_user(username)
     
     def set_test_results(self, results_data: dict):
         """
@@ -1109,39 +1052,8 @@ class ScorePage(QWidget):
         """更新分数显示"""
         data = self.data_interface()
 
-        # 更新左侧指标卡片（除血压脉搏外的其他指标）
-        for key, lbl in self.score_labels.items():
-            raw_value = data.get(key, 0)
-            
-            # 确保数值为数字类型
-            try:
-                value = float(raw_value) if raw_value is not None else 0
-            except (ValueError, TypeError):
-                value = 0
-            
-            # 取整显示（所有指标都显示为整数）
-            value_int = int(round(value))
-
-            # 根据不同指标显示不同单位
-            if key == "舒尔特准确率":
-                lbl.setText(f"{value_int}%")
-            else:
-                lbl.setText(f"{value_int} 分")
-
-            # 根据分数设置颜色
-            if value_int >= 80:
-                color = "#00aa00"  # 绿色
-            elif value_int >= 60:
-                color = "#FFA500"  # 橙色
-            else:
-                color = "#aa0000"  # 红色
-            lbl.setStyleSheet(f"font-size:24px; font-weight:bold; color:{color};")
-
-        # 更新血压脉搏组件
-        systolic = data.get("收缩压", 120)
-        diastolic = data.get("舒张压", 80)
-        pulse = data.get("脉搏", 75)
-        self.bp_widget.set_values(systolic, diastolic, pulse)
+        # 更新雷达图
+        self._draw_radar_chart(data)
 
         # 更新仪表盘（取整显示）
         raw_total = data.get("舒尔特综合得分", 0)
@@ -1156,10 +1068,258 @@ class ScorePage(QWidget):
         self.lbl_level.setText(f"{level}")
         self.lbl_level.setStyleSheet(f"font-size:36px; font-weight:bold; color:{color};")
         self.lbl_comment.setText(comment)
+    
+    def _calculate_baseline(self):
+        """
+        从历史数据中计算基准值（个人最佳状态）
+        策略：使用用户的第一次测试作为基准（假设第一次测试在最佳状态下进行）
+        
+        逻辑：
+        1. 优先使用【第一次测试】的完整数据（最早的历史记录）
+        2. 如果第一次数据不完整，使用【最近一次7维度都有效的测试】
+        3. 完全没有历史数据时，使用健康标准默认值
+        """
+        data = self.data_interface()
+        history = data.get("历史", {})
+        history_dates = data.get("历史日期", [])
+        
+        logger.debug(f"计算基准值 - 当前用户: {self.username}, 历史记录数: {len(history_dates)}")
+        
+        # 需要计算基准的指标
+        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", "收缩压", "舒张压", "脉搏"]
+        baseline = {}
+        
+        # 如果没有历史数据，返回健康标准默认值
+        if not history_dates or len(history_dates) == 0:
+            logger.info(f"用户 '{self.username}' 无历史数据，使用健康标准默认值作为基准")
+            return {
+                "疲劳检测": 30,      # 疲劳度低表示状态好
+                "情绪": 30,          # 情绪压力低表示状态好
+                "脑负荷": 30,        # 脑负荷低表示状态好
+                "舒尔特准确率": 95,  # 准确率高表示状态好
+                "收缩压": 120,
+                "舒张压": 80,
+                "脉搏": 75
+            }
+        
+        # 尝试获取第一次测试的数据（按时间排序，取最早的）
+        def get_record_at_index(idx):
+            """获取指定索引的测试记录（7个维度的值）"""
+            record = {}
+            for metric in metrics:
+                values = history.get(metric, [])
+                if idx < len(values):
+                    val = values[idx]
+                    # 检查是否为有效值
+                    if val is not None and val > 0:
+                        record[metric] = val
+            return record
+        
+        # 策略1: 尝试使用第一次测试（索引0）
+        first_record = get_record_at_index(0)
+        if len(first_record) == len(metrics):
+            logger.info(f"用户 '{self.username}' 使用第一次测试作为基准: {first_record}")
+            return first_record
+        else:
+            logger.info(f"用户 '{self.username}' 第一次测试数据不完整（仅{len(first_record)}/{len(metrics)}维度有效），搜索其他完整记录")
+        
+        # 策略2: 搜索最近一次7维度都完整的测试
+        for idx in range(len(history_dates) - 1, -1, -1):  # 从最新往前搜索
+            record = get_record_at_index(idx)
+            if len(record) == len(metrics):
+                logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
+                return record
+        
+        # 策略3: 如果所有记录都不完整，尝试拼凑（每个维度取最早的有效值）
+        logger.warning("所有测试记录都不完整，尝试拼凑基准值")
+        for metric in metrics:
+            values = history.get(metric, [])
+            # 找到该维度最早的有效值
+            for val in values:
+                if val is not None and val > 0:
+                    baseline[metric] = val
+                    break
+        
+        # 策略4: 如果某些维度仍然没有有效值，用默认值补齐
+        defaults = {
+            "疲劳检测": 30,
+            "情绪": 30,
+            "脑负荷": 30,
+            "舒尔特准确率": 95,
+            "收缩压": 120,
+            "舒张压": 80,
+            "脉搏": 75
+        }
+        for metric in metrics:
+            if metric not in baseline:
+                baseline[metric] = defaults[metric]
+                logger.warning(f"指标 '{metric}' 无历史数据，使用默认值 {defaults[metric]}")
+        
+        logger.info(f"最终拼凑的基准值: {baseline}")
+        return baseline
+    
+    def _draw_radar_chart(self, data):
+        """绘制雷达图对比本次测试值和基准值
+        
+        新设计：
+        - 基准线固定为 80 分（正七边形红色虚线）
+        - 本次测试值相对于首次测试表现进行换算
+        - 通常本次测试会在正七边形内（视觉上更美观）
+        """
+        self.radar_figure.clear()
+        
+        # 定义要展示的指标（不包括综合得分）
+        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", "收缩压", "舒张压", "脉搏"]
+        metric_labels = ["疲劳", "情绪", "脑负荷", "准确率", "收缩压", "舒张压", "脉搏"]
+        
+        # 获取本次测试值
+        current_values = []
+        for metric in metrics:
+            raw_value = data.get(metric, 0)
+            try:
+                value = float(raw_value) if raw_value is not None else 0
+            except (ValueError, TypeError):
+                value = 0
+            current_values.append(value)
+        
+        # 计算首次测试基准值（用于相对比较）
+        baseline = self._calculate_baseline()
+        baseline_values = [baseline.get(m, 0) for m in metrics]
+        
+        # 新换算逻辑：基准固定为 80 分，本次测试相对换算
+        BASELINE_SCORE = 80  # 基准线固定为 80 分
+        normalized_baseline = [BASELINE_SCORE] * len(metrics)  # 正七边形
+        normalized_current = []
+        
+        for i, metric in enumerate(metrics):
+            curr = current_values[i]
+            base = baseline_values[i]
+            
+            # 避免除以零
+            if base == 0:
+                base = 1
+            
+            if metric in ["疲劳检测", "情绪", "脑负荷"]:
+                # 这些指标越低越好：原始值越小，表现越好
+                # 换算逻辑：
+                # - 如果本次 <= 首次：表现更好或持平，得分 >= 80
+                # - 如果本次 > 首次：表现下降，得分 < 80
+                # 公式：80 * (2 - curr/base)，限制在 [0, 100]
+                ratio = curr / base
+                score = BASELINE_SCORE * (2 - ratio)
+                score = max(0, min(100, score))
+                
+            elif metric == "舒尔特准确率":
+                # 准确率越高越好：原始值越大，表现越好
+                # 换算逻辑：
+                # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
+                # - 如果本次 < 首次：表现下降，得分 < 80
+                # 公式：80 * (curr/base)，限制在 [0, 100]
+                ratio = curr / base
+                score = BASELINE_SCORE * ratio
+                score = max(0, min(100, score))
+                
+            elif metric in ["收缩压", "舒张压", "脉搏"]:
+                # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
+                # 不相对于首次测试，而是直接评估当前值的健康程度
+                ideal_values = {"收缩压": 120, "舒张压": 80, "脉搏": 75}
+                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}  # 最大可接受偏离
+                
+                ideal = ideal_values[metric]
+                max_dev = max_deviations[metric]
+                
+                # 计算本次测试的偏离度
+                deviation = abs(curr - ideal)
+                
+                # 换算逻辑：
+                # - 偏离度 = 0（完美）: 得分 = 80
+                # - 偏离度 = max_dev（极差）: 得分 = 0
+                # 公式：80 * (1 - deviation/max_dev)，限制在 [0, 80]
+                score = BASELINE_SCORE * (1 - deviation / max_dev)
+                score = max(0, min(BASELINE_SCORE, score))  # 最高不超过 80 分
+            else:
+                # 其他未定义指标，默认按比例换算
+                ratio = curr / base
+                score = BASELINE_SCORE * ratio
+                score = max(0, min(100, score))
+            
+            normalized_current.append(score)
+        
+        # 闭合雷达图
+        normalized_current += normalized_current[:1]
+        normalized_baseline += normalized_baseline[:1]
+        
+        # 计算角度
+        num_vars = len(metric_labels)
+        angles = [n / float(num_vars) * 2 * np.pi for n in range(num_vars)]
+        angles += angles[:1]
+        
+        # 创建极坐标子图
+        ax = self.radar_figure.add_subplot(111, projection='polar')
+        ax.set_facecolor('#fafafa')
+        
+        # 绘制基准线（红色虚线正七边形，固定为 80 分）
+        ax.plot(angles, normalized_baseline, 'r--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7)
+        ax.fill(angles, normalized_baseline, 'r', alpha=0.1)
+        
+        # 绘制本次测试值（蓝色实线）
+        ax.plot(angles, normalized_current, 'b-', linewidth=3, label='本次测试', marker='o', 
+                markersize=8, markerfacecolor='white', markeredgecolor='b', markeredgewidth=2)
+        ax.fill(angles, normalized_current, 'b', alpha=0.25)
+        
+        # 设置刻度标签
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
+        
+        # 设置Y轴范围和刻度
+        ax.set_ylim(0, 100)
+        ax.set_yticks([20, 40, 60, 80, 100])
+        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=10, color='#666')
+        
+        # 添加网格
+        ax.grid(True, linestyle=':', alpha=0.5)
+        
+        # 添加图例
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), 
+                prop=self.zh_font, fontsize=11, framealpha=0.9)
+        
+        # 在每个数据点旁边显示实际数值
+        for angle, curr_val, metric in zip(angles[:-1], current_values, metrics):
+            # 计算文本位置
+            x = angle
+            y = normalized_current[angles.index(angle)] + 8
+            
+            # 格式化显示文本
+            if metric in ["收缩压", "舒张压"]:
+                text = f"{int(curr_val)}mmHg"
+            elif metric == "脉搏":
+                text = f"{int(curr_val)}次/分"
+            elif metric == "舒尔特准确率":
+                text = f"{int(curr_val)}%"
+            elif metric in ["疲劳检测", "情绪", "脑负荷"]:
+                # 这些指标越低越好，但雷达图上显示的是反转后的值（越大越好）
+                # 标签显示原始值，便于理解
+                text = f"{int(curr_val)}分"
+            else:
+                text = f"{int(curr_val)}分"
+            
+            ax.text(x, y, text, ha='center', va='center', 
+                fontproperties=self.zh_font, fontsize=9, 
+                color='#2196F3', fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                            edgecolor='#2196F3', alpha=0.8))
+        
+        self.radar_figure.tight_layout()
+        self.radar_canvas.draw()
+        
+        # 保存zh_font供雷达图使用
+        if not hasattr(self, 'zh_font'):
+            self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
     def _show_history(self):
-        """显示历史数据对话框"""
-        dlg = HistoryDialog(self.data_interface)
+        """显示历史数据对话框 - 直接使用已缓存的历史数据（与主页面数据一致）"""
+        # 直接使用当前页面已加载的数据，确保与雷达图显示的数据完全一致
+        dlg = HistoryDialog(self.data_interface, use_mock_on_empty=True, source_hint="当前")
         dlg.exec_()
 
 

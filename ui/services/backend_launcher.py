@@ -45,10 +45,13 @@ class BackendLauncher:
             
             # 在Windows上需要CREATE_NO_WINDOW标志来避免弹出控制台窗口
             startupinfo = None
+            creation_flags = 0
             if sys.platform == "win32":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
+                # 添加 CREATE_NO_WINDOW 标志，完全隐藏控制台窗口
+                creation_flags = subprocess.CREATE_NO_WINDOW
             
             self._process = subprocess.Popen(
                 cmd,
@@ -56,6 +59,7 @@ class BackendLauncher:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 startupinfo=startupinfo,
+                creationflags=creation_flags,
                 text=True,
                 bufsize=1  # Line buffered
             )
