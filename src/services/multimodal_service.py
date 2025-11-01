@@ -623,7 +623,7 @@ class MultiModalDataCollector:
 class MultimodalService:
     """High-level service exposed to UI via the command router."""
 
-    def __init__(self, *, bus: Optional[EventBus] = None, logger: Optional[logging.Logger] = None, eeg_service=None) -> None:
+    def __init__(self, *, bus: Optional[EventBus] = None, logger: Optional[logging.Logger] = None) -> None:
         self.logger = logger or logging.getLogger("service.multimodal")
         self.bus = bus
         self._collector: Optional[MultiModalDataCollector] = None
@@ -635,13 +635,6 @@ class MultimodalService:
         self._snapshot_active = False
         self._snapshot_requested = False
         self._thread_pool = get_thread_pool()
-        
-        # EEG服务集成（用于轮询脑负荷数据）
-        self._eeg_service = eeg_service
-        self._eeg_poll_thread_name = "multimodal-eeg-poller"
-        self._eeg_poll_stop = threading.Event()
-        self._eeg_poll_interval = 3.0  # 每3秒轮询一次（降低频率，避免过于频繁）
-        self._eeg_poll_active = False
 
     # Internal helpers -------------------------------------------------
     def _handle_stream_frame(self, frame: Any, timestamp: str) -> None:
@@ -655,16 +648,13 @@ class MultimodalService:
         part = int(payload.get("part", 1))
         queue_duration = float(payload.get("queue_duration", 5.0))
         snapshot_interval = float(payload.get("snapshot_interval", 1.2))
-        eeg_poll_interval = float(payload.get("eeg_poll_interval", 3.0))  # EEG轮询间隔（默认3秒，降低频率）
         
         with self._lock:
             if self._collector and self._collector.running:
                 self.logger.info("Multimodal collector already running")
                 self._snapshot_interval = max(0.5, snapshot_interval)
-                self._eeg_poll_interval = max(0.5, eeg_poll_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
-                self._ensure_eeg_polling()  # 确保EEG轮询已启动
                 return {"status": "already-running", "save_dir": self._collector.save_dir}
             try:
                 self._collector = MultiModalDataCollector(
@@ -678,10 +668,8 @@ class MultimodalService:
                 self._stream_publisher.start()
                 self._collector.start()
                 self._snapshot_interval = max(0.5, snapshot_interval)
-                self._eeg_poll_interval = max(0.5, eeg_poll_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
-                self._ensure_eeg_polling()  # 启动EEG轮询
             except Exception as exc:
                 self.logger.error("Failed to start multimodal collector: %s", exc)
                 self._stream_publisher.stop()
@@ -696,7 +684,6 @@ class MultimodalService:
             self._collector.stop()
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
-            self._stop_eeg_polling()  # 停止EEG轮询
             self._snapshot_requested = False
         return {"status": "stopped"}
 
@@ -708,7 +695,6 @@ class MultimodalService:
             self._collector = None
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
-            self._stop_eeg_polling()  # 停止EEG轮询
             self._snapshot_requested = False
         return {"status": "released"}
 
@@ -735,100 +721,6 @@ class MultimodalService:
         self._thread_pool.unregister_managed_thread(self._snapshot_thread_name, timeout=2.0)
         self._snapshot_active = False
         self._snapshot_stop.clear()
-
-    def _ensure_eeg_polling(self) -> None:
-        """启动EEG数据轮询线程，定期获取脑负荷数据并发送推理请求"""
-        if self.bus is None or self._eeg_service is None:
-            self.logger.debug("EventBus或EEG服务不可用，EEG轮询已禁用")
-            return
-        if self._eeg_poll_active:
-            return
-        self._eeg_poll_stop.clear()
-        thread = self._thread_pool.register_managed_thread(
-            self._eeg_poll_thread_name,
-            self._eeg_polling_loop,
-            daemon=True
-        )
-        self._eeg_poll_active = True
-        thread.start()
-        self.logger.info("✅ EEG数据轮询已启动 (间隔=%.2fs)", self._eeg_poll_interval)
-
-    def _stop_eeg_polling(self) -> None:
-        """停止EEG数据轮询"""
-        if not self._eeg_poll_active:
-            return
-        self._eeg_poll_stop.set()
-        self._thread_pool.unregister_managed_thread(self._eeg_poll_thread_name, timeout=2.0)
-        self._eeg_poll_active = False
-        self._eeg_poll_stop.clear()
-        self.logger.info("⏹️ EEG数据轮询已停止")
-
-    def _eeg_polling_loop(self) -> None:
-        """EEG轮询主循环：定期获取2秒窗口数据并发送推理请求"""
-        self.logger.debug("EEG轮询线程已启动")
-        try:
-            while not self._eeg_poll_stop.is_set():
-                # 使用IO线程池提交轮询任务，避免阻塞
-                self._thread_pool.submit_io_task(self._poll_eeg_and_publish)
-                interval = self._eeg_poll_interval
-                if interval <= 0:
-                    interval = 1.0
-                if self._eeg_poll_stop.wait(interval):
-                    break
-        finally:
-            self._eeg_poll_active = False
-            self.logger.debug("EEG轮询线程已停止")
-
-    def _poll_eeg_and_publish(self) -> None:
-        """在IO线程中轮询EEG数据并发布推理请求"""
-        if self._eeg_service is None or self.bus is None:
-            return
-        
-        try:
-            # 获取最近2秒的窗口数据 (2秒 @ 500Hz采样率 = 1000样本)
-            # 注意: EEG采集是500Hz，但模型期望250Hz，所以我们获取2秒数据后可能需要降采样
-            window_data = self._eeg_service.get_recent_window(seconds=2.0, sample_rate=500.0)
-            
-            if not window_data:
-                return  # 静默跳过空数据
-            
-            # 提取双通道数据
-            ch1_data = window_data.get("ch1", [])
-            ch2_data = window_data.get("ch2", [])
-            
-            # 检查数据是否足够（至少500个样本用于推理）
-            sample_count = len(ch1_data)
-            
-            if sample_count < 500:
-                return  # 静默等待更多数据,避免频繁日志
-            
-            if not ch1_data or not ch2_data:
-                return  # 静默跳过空通道
-            
-            if len(ch1_data) != len(ch2_data):
-                self.logger.warning(f"⚠️EEG通道长度不匹配 {len(ch1_data)}≠{len(ch2_data)}")
-                return
-            
-            # 转换为 [n_samples, 2] 格式 (与EEG模型期望一致)
-            if np is not None:
-                eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
-            else:
-                eeg_signal = [[ch1_data[i], ch2_data[i]] for i in range(len(ch1_data))]
-            
-            # 发布EEG_REQUEST事件到EventBus，触发推理
-            payload = {
-                "mode": "memory",  # 内存模式
-                "eeg_signal": eeg_signal,
-                "sample_count": sample_count,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            
-            self.bus.publish(Event(EventTopic.EEG_REQUEST, payload))
-            # 压缩日志: 只输出样本数,不输出"已发送"等冗余信息
-            self.logger.debug(f"📤EEG {sample_count}样本")
-            
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug(f"⚠️EEG轮询: {exc}")
 
     def _snapshot_loop(self) -> None:
         self.logger.debug("Snapshot broadcaster loop running")

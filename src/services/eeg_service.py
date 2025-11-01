@@ -24,6 +24,7 @@ except ImportError:
 
 from ..constants import EventTopic
 from ..core.event_bus import Event, EventBus
+from ..core.thread_pool import get_thread_pool
 from ..devices import BleEEGDevice, HAS_EEG_HARDWARE, DeviceException
 
 
@@ -47,6 +48,21 @@ class EEGService:
         self._running = False
         self._save_dir: Optional[str] = None
 
+        self._thread_pool = get_thread_pool()
+        self._inference_thread_name = "eeg-inference-poller"
+        self._inference_stop = threading.Event()
+        self._inference_active = False
+        interval_env = os.getenv("BACKEND_EEG_POLL_INTERVAL")
+        self._inference_interval = 3.0
+        if interval_env:
+            try:
+                self._inference_interval = max(0.5, float(interval_env))
+            except ValueError:
+                self.logger.warning(
+                    "Invalid BACKEND_EEG_POLL_INTERVAL '%s', fallback to 3.0s",
+                    interval_env,
+                )
+
     def _ensure_loop_thread(self) -> None:
         """确保事件循环线程运行（后端在独立线程维护异步BLE连接）。"""
         if self._thread and self._thread.is_alive():
@@ -63,6 +79,7 @@ class EEGService:
     def start_recording(self, save_dir: str) -> Dict[str, Any]:
         """启动EEG采集"""
         if self._running:
+            self._ensure_inference_polling()
             return {"status": "already-running", "save_dir": self._save_dir}
 
         self._ensure_loop_thread()
@@ -82,6 +99,7 @@ class EEGService:
         try:
             fut.result(timeout=0.5)
             self.logger.info("EEG采集已启动，保存目录: %s", self._save_dir)
+            self._ensure_inference_polling()
             return {"status": "started", "save_dir": self._save_dir}
         except Exception as exc:
             self.logger.error("EEG采集启动失败: %s", exc)
@@ -102,12 +120,113 @@ class EEGService:
         try:
             fut.result(timeout=5.0)
             self._running = False
+            self._stop_inference_polling()
             file_paths = self.get_file_paths()
             self.logger.info("EEG采集已停止")
             return {"status": "stopped", "file_paths": file_paths}
         except Exception as exc:
             self.logger.error("停止EEG采集超时: %s", exc)
             return {"status": "error", "error": str(exc)}
+
+    def _ensure_inference_polling(self) -> None:
+        """启动后台线程，定期触发脑负荷推理请求。"""
+        if self.bus is None or not self._running:
+            return
+        if self._inference_active:
+            return
+
+        existing = self._thread_pool.get_managed_thread(self._inference_thread_name)
+        if existing and existing.is_alive():
+            self._inference_active = True
+            return
+
+        self._inference_stop.clear()
+        thread = self._thread_pool.register_managed_thread(
+            self._inference_thread_name,
+            self._inference_polling_loop,
+            daemon=True,
+        )
+        self._inference_active = True
+        thread.start()
+        self.logger.info("✅ EEG推理轮询已启动 (间隔=%.2fs)", self._inference_interval)
+
+    def _stop_inference_polling(self) -> None:
+        """停止脑负荷推理轮询。"""
+        if not self._inference_active:
+            return
+
+        self._inference_stop.set()
+        try:
+            self._thread_pool.unregister_managed_thread(
+                self._inference_thread_name,
+                timeout=2.0,
+            )
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            self.logger.debug("停止EEG推理轮询失败: %s", exc)
+        finally:
+            self._inference_active = False
+            self._inference_stop.clear()
+            self.logger.info("⏹️ EEG推理轮询已停止")
+
+    def _inference_polling_loop(self) -> None:
+        self.logger.debug("EEG推理轮询线程已启动")
+        try:
+            while not self._inference_stop.is_set():
+                if self._running:
+                    self._thread_pool.submit_io_task(self._publish_inference_request)
+                interval = self._inference_interval
+                if interval <= 0:
+                    interval = 1.0
+                if self._inference_stop.wait(interval):
+                    break
+        finally:
+            self._inference_active = False
+            self.logger.debug("EEG推理轮询线程已停止")
+
+    def _publish_inference_request(self) -> None:
+        if not self._running or self.bus is None:
+            return
+
+        try:
+            window_data = self.get_recent_window(seconds=2.0, sample_rate=500.0)
+            ch1_data = window_data.get("ch1", [])
+            ch2_data = window_data.get("ch2", [])
+            sample_count = len(ch1_data)
+
+            if sample_count < 500:
+                return
+
+            if not ch1_data or not ch2_data:
+                return
+
+            if len(ch1_data) != len(ch2_data):
+                self.logger.warning(
+                    "⚠️ EEG通道长度不匹配 %d≠%d",
+                    len(ch1_data),
+                    len(ch2_data),
+                )
+                return
+
+            if np is not None:
+                eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
+            else:
+                eeg_signal = [[ch1_data[i], ch2_data[i]] for i in range(sample_count)]
+
+            simulation_mode = bool(self._recorder.simulation_enabled) if self._recorder else bool(self.simulation_enabled)
+
+            payload = {
+                "mode": "memory",
+                "eeg_signal": eeg_signal,
+                "sample_count": sample_count,
+                "timestamp": datetime.utcnow().isoformat(),
+                "simulation_mode": simulation_mode,
+            }
+
+            self.bus.publish(Event(EventTopic.EEG_REQUEST, payload))
+            self.logger.debug("📤EEG %d样本", sample_count)
+
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.debug("EEG推理派发失败: %s", exc)
 
     def get_file_paths(self) -> Dict[str, str]:
         """获取采集的文件路径"""

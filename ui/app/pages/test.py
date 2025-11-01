@@ -2550,14 +2550,27 @@ class TestPage(QWidget):
                 if not hasattr(self, '_video_paths'):
                     self._video_paths = []
             
-            # ✅ 停止疲劳度推理监控（朗读阶段结束后不再需要疲劳度分数）
-            # ⚠️ 注意：只停止疲劳度推理，EEG采集继续运行直到整个测试结束
-            try:
-                if HAS_MULTIMODAL:
+            # ✅ 停止疲劳度推理与多模态数据采集（EEG 保持运行）
+            if HAS_MULTIMODAL:
+                try:
                     self._stop_multimodal_monitoring()
-                    logger.info("✅ 朗读阶段结束，已停止疲劳度推理监控（EEG采集继续运行）")
-            except Exception as e:
-                logger.warning(f"停止疲劳度监控失败: {e}")
+                    logger.info("✅ 朗读阶段结束，已停止疲劳度监控定时器")
+                except Exception as e:
+                    logger.warning(f"停止疲劳度监控失败: {e}")
+
+                try:
+                    stop_result = multidata_stop_collection()
+                    status = (stop_result or {}).get("status", "unknown")
+                    logger.info(f"✅ 朗读阶段结束，已停止多模态采集 (状态={status})")
+                    self.multimodal_collector = None
+
+                    try:
+                        self._persist_multimodal_paths_to_db(clear_recognition_cache=False)
+                        logger.info("💾 朗读阶段结束，多模态数据路径已写入数据库")
+                    except Exception as persist_exc:
+                        logger.warning(f"多模态数据路径写入数据库失败: {persist_exc}")
+                except Exception as stop_exc:
+                    logger.warning(f"停止多模态数据采集失败: {stop_exc}")
             
             # 📍 记录血压测试开始时间戳
             call_timestamp = time.time()
@@ -2790,10 +2803,12 @@ class TestPage(QWidget):
         except Exception as e:
             logger.exception(f"❌ 保存音视频路径时发生异常: {e}")
 
-    def _persist_multimodal_paths_to_db(self):
+    def _persist_multimodal_paths_to_db(self, *, clear_recognition_cache: bool = True):
         """保存多模态数据文件路径到数据库（RGB/Depth/Eyetrack）
         
-        注意：语音识别结果已在情绪分析前保存，这里不再重复保存
+        Args:
+            clear_recognition_cache: 是否在写入后清理语音识别缓存。
+                朗读阶段结束时需要保留语音识别结果用于后续情绪分析，因此允许调用方禁用缓存清理。
         """
         try:
             if not HAS_MULTIMODAL:
@@ -2808,12 +2823,13 @@ class TestPage(QWidget):
                 logger.warning("未获取到多模态数据文件路径")
                 return
 
-            # 清理语音识别结果（避免内存泄漏），结果已在 _save_speech_recognition_results 中保存
-            try:
-                clear_recognition_results()
-                logger.debug("已清理语音识别结果缓存")
-            except Exception as e:
-                logger.debug(f"清理语音识别结果失败: {e}")
+            # 根据需要清理语音识别结果缓存
+            if clear_recognition_cache:
+                try:
+                    clear_recognition_results()
+                    logger.debug("已清理语音识别结果缓存")
+                except Exception as e:
+                    logger.debug(f"清理语音识别结果失败: {e}")
 
             update_payload = {}
             if file_paths.get('rgb'):
