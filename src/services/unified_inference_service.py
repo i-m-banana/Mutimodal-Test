@@ -43,6 +43,9 @@ class UnifiedInferenceService:
         # 线程池用于异步处理
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="inference")
         
+        # EEG服务引用（通过EventBus获取，延迟初始化）
+        self._eeg_service = None
+        
         self._running = False
     
     def start(self) -> None:
@@ -177,6 +180,12 @@ class UnifiedInferenceService:
             if not rgb_frames_memory:
                 # 没有RGB帧数据时,静默跳过
                 return
+            
+            # 只取最后30帧用于推理(避免内存累积)
+            max_frames_for_inference = 30
+            rgb_frames_memory = rgb_frames_memory[-max_frames_for_inference:]
+            depth_frames_memory = depth_frames_memory[-max_frames_for_inference:]
+            eyetrack_memory = eyetrack_memory[-max_frames_for_inference:]
             
             # 内存模式不需要文件路径
             rgb_video_path = None
@@ -337,33 +346,97 @@ class UnifiedInferenceService:
             self._submit_inference("emotion", inference_data, metadata)
     
     def _on_eeg_request(self, event: Event) -> None:
-        """处理EEG脑负荷分析请求"""
+        """处理EEG脑负荷分析请求（优化：异步获取数据，避免阻塞EventBus）"""
         payload = event.payload or {}
         request_id = payload.get("request_id")
-        eeg_signal = payload.get("eeg_signal")
+        eeg_signal = payload.get("eeg_signal")  # 可能为None（内存模式）
         sampling_rate = payload.get("sampling_rate", 250)
         subject_id = payload.get("subject_id", "unknown")
         memory_mode = payload.get("memory_mode", True)
         
+        # 如果eeg_signal为None，需要从EEGService获取（在线程池中异步执行）
+        if eeg_signal is None and memory_mode:
+            # 延迟获取EEG服务引用
+            if self._eeg_service is None:
+                self._eeg_service = getattr(self.bus, '_eeg_service', None)
+            
+            if self._eeg_service is None:
+                self.logger.warning("EEG服务未注册，无法获取数据")
+                return
+            
+            # 异步获取数据并推理（避免阻塞EventBus的publish）
+            window_seconds = payload.get("window_seconds", 2.0)
+            
+            def _fetch_and_infer():
+                try:
+                    self.logger.debug(f"📥 开始获取EEG数据窗口 ({window_seconds}秒)")
+                    
+                    # 在线程池中获取数据
+                    import numpy as np
+                    window_data = self._eeg_service.get_recent_window(
+                        seconds=window_seconds, 
+                        sample_rate=500.0
+                    )
+                    
+                    ch1_data = window_data.get("ch1", [])
+                    ch2_data = window_data.get("ch2", [])
+                    
+                    self.logger.debug(f"📥 获取到EEG数据: ch1={len(ch1_data)}, ch2={len(ch2_data)}")
+                    
+                    if len(ch1_data) < 500:
+                        self.logger.debug(f"EEG数据不足500样本 (仅{len(ch1_data)})，跳过推理")
+                        return  # 静默跳过
+                    
+                    if len(ch1_data) != len(ch2_data):
+                        self.logger.warning(f"EEG通道长度不匹配 {len(ch1_data)}≠{len(ch2_data)}")
+                        return
+                    
+                    # 转换为 [n_samples, 2] 格式
+                    eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
+                    
+                    # 执行推理
+                    if "eeg" in self.integrated_models:
+                        self.logger.debug(f"🧠 开始EEG推理 ({len(ch1_data)}样本)")
+                        inference_data = {
+                            "memory_mode": memory_mode,
+                            "eeg_signal": eeg_signal,
+                            "sampling_rate": sampling_rate,
+                            "subject_id": subject_id
+                        }
+                        metadata = {
+                            "request_id": request_id,
+                            "timestamp": payload.get("timestamp")
+                        }
+                        # 直接调用推理（已经在线程池中）
+                        result = self._infer_integrated("eeg", inference_data)
+                        if result:
+                            self._publish_result("eeg", result, metadata)
+                    else:
+                        self.logger.warning("EEG模型未加载到integrated_models中")
+                    
+                except Exception as exc:
+                    self.logger.error(f"EEG推理失败: {exc}", exc_info=True)
+            
+            # 提交到线程池异步执行
+            self._executor.submit(_fetch_and_infer)
+            return
+        
+        # 如果已经有eeg_signal，直接推理
         if eeg_signal is None:
             self.logger.warning("EEG分析请求缺少信号数据")
             return
         
-        # 分发到EEG模型
         if "eeg" in self.integrated_models:
-            # 构建推理数据
             inference_data = {
                 "memory_mode": memory_mode,
                 "eeg_signal": eeg_signal,
                 "sampling_rate": sampling_rate,
                 "subject_id": subject_id
             }
-            
             metadata = {
                 "request_id": request_id,
                 "timestamp": payload.get("timestamp")
             }
-            
             self._submit_inference("eeg", inference_data, metadata)
     
     def _submit_inference(
@@ -388,6 +461,11 @@ class UnifiedInferenceService:
                     
             except Exception as e:
                 self.logger.error(f"推理任务失败 ({model_type}): {e}", exc_info=True)
+            finally:
+                # 显式清理推理数据,释放内存
+                data.clear()
+                import gc
+                gc.collect()
         
         self._executor.submit(_infer)
     

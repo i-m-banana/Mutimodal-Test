@@ -19,7 +19,7 @@ inference_models:
   - name: fatigue
     type: fatigue
     mode: integrated
-    enabled: true
+    enabled: false
     integrated:
       class: models.fatigue_model.FatigueModel
       options:

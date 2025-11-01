@@ -60,6 +60,10 @@ class FatigueModel(BaseInferenceModel):
         self.model.load_state_dict(torch.load(str(model_path), map_location=self.device))
         self.model.eval()
         
+        # 创建全局FaceDetector实例(避免每次推理都创建新实例)
+        from fatigue.facewap import FaceDetector
+        self._face_detector = FaceDetector()
+        
         self.logger.info("疲劳度模型初始化完成")
     
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,7 +105,7 @@ class FatigueModel(BaseInferenceModel):
             return self._infer_from_base64(data)
     
     def _infer_from_memory(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从内存中的numpy数组直接推理（零I/O开销）"""
+        """从内存中的numpy数组直接推理(零I/O开销)"""
         import time
         start_time = time.time()
         
@@ -118,13 +122,15 @@ class FatigueModel(BaseInferenceModel):
             }
         
         try:
-            # 直接使用numpy数组,无需解码或I/O
-            frames = min(len(rgb_frames), len(depth_frames))
+            # 只取最后30帧(避免处理过多数据)
+            max_frames = 30
+            rgb_frames = rgb_frames[-max_frames:] if len(rgb_frames) > max_frames else rgb_frames
+            depth_frames = depth_frames[-max_frames:] if len(depth_frames) > max_frames else depth_frames
+            eyetrack_samples = eyetrack_samples[-max_frames:] if len(eyetrack_samples) > max_frames else eyetrack_samples
             
-            # 提取特征
-            face_feat = extract_face_features_from_frames(
-                rgb_frames, depth_frames, frames=frames
-            ).to(self.device)
+            # 提取特征 - 使用全局FaceDetector实例
+            frames = min(len(rgb_frames), len(depth_frames))
+            face_feat = self._extract_face_features(rgb_frames, depth_frames, frames).to(self.device)
             
             eye_feat = extract_eye_features_from_samples(eyetrack_samples).to(self.device)
             
@@ -138,21 +144,26 @@ class FatigueModel(BaseInferenceModel):
                 score = float(np.dot(probs, scores))
                 pred = int(np.argmax(probs))
             
+            # 显式清理张量和临时变量,释放GPU内存
+            del face_feat, eye_feat, output, probs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
             
             # 单行输出推理结果
             fatigue_level = "正常😊" if score < 30 else "轻度疲劳😐" if score < 60 else "重度疲劳😴"
             self.logger.info(
                 f"😴 疲劳度: {round(score, 2)} ({fatigue_level}, "
-                f"RGB{len(rgb_frames)}+深度{len(depth_frames)}+眼动{len(eyetrack_samples)}, {round(inference_time, 1)}ms)"
+                f"RGB{frames}+深度{frames}+眼动{len(eyetrack_samples)}, {round(inference_time, 1)}ms)"
             )
             
             return {
                 "status": "success",
                 "fatigue_score": round(score, 2),
                 "prediction_class": pred,
-                "num_rgb_frames": len(rgb_frames),
-                "num_depth_frames": len(depth_frames),
+                "num_rgb_frames": frames,
+                "num_depth_frames": frames,
                 "num_eyetrack_samples": len(eyetrack_samples),
                 "inference_mode": "memory",
                 "inference_time_ms": round(inference_time, 1)
@@ -166,6 +177,30 @@ class FatigueModel(BaseInferenceModel):
                 "fatigue_score": 0.0,
                 "prediction_class": 0
             }
+        finally:
+            # 确保清理输入数据的引用
+            rgb_frames = None
+            depth_frames = None
+            eyetrack_samples = None
+            import gc
+            gc.collect()
+    
+    def _extract_face_features(self, rgb_frames, depth_frames, frames):
+        """使用全局FaceDetector提取面部特征(避免重复创建检测器)"""
+        features = []
+        for img, depth in zip(rgb_frames, depth_frames):
+            feat = self._face_detector.get_data(img, depth)
+            if not feat or len(feat) < 42:
+                feat = [0.0] * 42
+            features.append(feat[:42])
+        
+        while len(features) < frames:
+            features.append([0.0] * 42)
+        
+        features = np.array(features, dtype=np.float32)  # [T, 42]
+        features = features[:frames]
+        features = torch.tensor(features, dtype=torch.float32).transpose(0, 1).unsqueeze(0)
+        return features
     
     def _infer_from_files(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """从文件路径读取数据并推理"""
@@ -274,8 +309,8 @@ class FatigueModel(BaseInferenceModel):
             # 4. 提取特征
             self.logger.info(f"🔍 提取面部和眼动特征...")
             frames = min(len(rgb_frames), len(depth_frames))
-            face_feat = extract_face_features_from_frames(
-                rgb_frames, depth_frames, frames=frames
+            face_feat = self._extract_face_features(
+                rgb_frames, depth_frames, frames
             ).to(self.device)
             
             eye_feat = extract_eye_features_from_samples(eyetrack_samples).to(self.device)
@@ -289,6 +324,11 @@ class FatigueModel(BaseInferenceModel):
                 scores = np.linspace(0, 100, num_classes)
                 score = float(np.dot(probs, scores))
                 pred = int(np.argmax(probs))
+            
+            # 清理张量
+            del face_feat, eye_feat, output, probs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
             
@@ -359,8 +399,8 @@ class FatigueModel(BaseInferenceModel):
             
             # 2. 提取特征
             frames = min(len(rgb_frames), len(depth_frames))
-            face_feat = extract_face_features_from_frames(
-                rgb_frames, depth_frames, frames=frames
+            face_feat = self._extract_face_features(
+                rgb_frames, depth_frames, frames
             ).to(self.device)
             
             eye_feat = extract_eye_features_from_samples(eyetrack_samples).to(self.device)
@@ -375,6 +415,11 @@ class FatigueModel(BaseInferenceModel):
                 scores = np.linspace(0, 100, num_classes)
                 score = float(np.dot(probs, scores))
                 pred = int(np.argmax(probs))
+            
+            # 清理张量
+            del face_feat, eye_feat, output, probs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             inference_time = (time.time() - start_time) * 1000  # 转换为毫秒
             
@@ -408,11 +453,19 @@ class FatigueModel(BaseInferenceModel):
         if hasattr(self, 'model'):
             del self.model
         
+        # 清理FaceDetector
+        if hasattr(self, '_face_detector'):
+            if hasattr(self._face_detector, 'face_mesh'):
+                self._face_detector.face_mesh.close()
+            del self._face_detector
+        
         if HAS_TORCH and torch.cuda.is_available():
             torch.cuda.empty_cache()
         
         import gc
         gc.collect()
+        
+        self.logger.info("疲劳度模型资源已清理")
 
 
 __all__ = ["FatigueModel"]

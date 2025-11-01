@@ -74,7 +74,7 @@ class BaselineCalibrationPage(QWidget):
         )
         self.instruction_label.setAlignment(Qt.AlignCenter)
         self.instruction_label.setWordWrap(True)
-        instruction_font = QFont("Arial", 24)  # 固定24px字号
+        instruction_font = QFont("阿里健康体2.0 中文 45 R", 24)  # 固定24px字号
         self.instruction_label.setFont(instruction_font)
         self.instruction_label.setStyleSheet(
             "color: #000000 !important; line-height: 2.0; background-color: transparent !important; font-size: 24px !important;"
@@ -84,7 +84,7 @@ class BaselineCalibrationPage(QWidget):
         # 十字注视点（初始隐藏）- 占据主要空间
         self.fixation_cross = QLabel("+")
         self.fixation_cross.setAlignment(Qt.AlignCenter)
-        cross_font = QFont("Arial", 250, QFont.Bold)  # 固定250px超大字号
+        cross_font = QFont("阿里健康体2.0 中文 45 R", 250, QFont.Bold)  # 固定250px超大字号
         self.fixation_cross.setFont(cross_font)
         self.fixation_cross.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
@@ -95,7 +95,7 @@ class BaselineCalibrationPage(QWidget):
         # 完成提示标签（初始隐藏）- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("Arial", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, QFont.Bold)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"
@@ -109,7 +109,7 @@ class BaselineCalibrationPage(QWidget):
         # 倒计时显示（初始隐藏）
         self.countdown_label = QLabel(f"剩余 {self.BASELINE_DURATION} 秒")
         self.countdown_label.setAlignment(Qt.AlignCenter)
-        countdown_font = QFont("Arial", 20)  # 固定20px字号
+        countdown_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px字号
         self.countdown_label.setFont(countdown_font)
         self.countdown_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"
@@ -130,7 +130,7 @@ class BaselineCalibrationPage(QWidget):
         # 隐藏说明，显示十字和倒计时
         self.instruction_label.setVisible(False)
         self.fixation_cross.setVisible(True)
-        self.countdown_label.setVisible(True)
+        self.countdown_label.setVisible(False)
         
         # 重置倒计时
         self.remaining_time = self.BASELINE_DURATION
@@ -269,7 +269,7 @@ class BaselineCalibrationPage(QWidget):
         self.countdown_label.setText("")
         
         # 重置倒计时字体
-        countdown_font = QFont("Arial", 20)  # 固定20px
+        countdown_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px
         self.countdown_label.setFont(countdown_font)
         self.countdown_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"
