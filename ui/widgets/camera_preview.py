@@ -125,7 +125,7 @@ class CameraPreviewWidget(QWidget):
             placeholder.fill(QColor("#CCCCCC"))
             painter = QPainter(placeholder)
             painter.setPen(Qt.black)
-            painter.setFont(QFont("Arial", 18))
+            painter.setFont(QFont("阿里健康体2.0 中文 45 R", 18))
             painter.drawText(placeholder.rect(), Qt.AlignCenter, self._placeholder_text)
             painter.end()
             self.label.setPixmap(placeholder)

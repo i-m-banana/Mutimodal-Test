@@ -87,7 +87,7 @@ class SARTPage(QWidget):
         )
         self.instruction_label.setAlignment(Qt.AlignCenter)
         self.instruction_label.setWordWrap(True)
-        instruction_font = QFont("Arial", 24)  # 固定24px字号
+        instruction_font = QFont("阿里健康体2.0 中文 45 R", 24)  # 固定24px字号
         self.instruction_label.setFont(instruction_font)
         self.instruction_label.setStyleSheet(
             "color: #000000 !important; line-height: 2.0; background-color: transparent !important; font-size: 24px !important;"
@@ -97,7 +97,7 @@ class SARTPage(QWidget):
         # 数字刺激显示 - 中央
         self.digit_label = QLabel("")
         self.digit_label.setAlignment(Qt.AlignCenter)
-        digit_font = QFont("Arial", 250, QFont.Bold)  # 固定250px超大字号
+        digit_font = QFont("阿里健康体2.0 中文 45 R", 250, QFont.Bold)  # 固定250px超大字号
         self.digit_label.setFont(digit_font)
         self.digit_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
@@ -108,7 +108,7 @@ class SARTPage(QWidget):
         # 完成提示标签（初始隐藏）- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("Arial", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, QFont.Bold)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"
@@ -122,7 +122,7 @@ class SARTPage(QWidget):
         # 进度信息 - 底部
         self.progress_label = QLabel("")
         self.progress_label.setAlignment(Qt.AlignCenter)
-        progress_font = QFont("Arial", 20)  # 固定20px字号
+        progress_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px字号
         self.progress_label.setFont(progress_font)
         self.progress_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"
@@ -133,7 +133,7 @@ class SARTPage(QWidget):
         # 统计信息（调试用，初始隐藏）- 最底部
         self.stats_label = QLabel("")
         self.stats_label.setAlignment(Qt.AlignCenter)
-        stats_font = QFont("Arial", 16)  # 固定16px字号
+        stats_font = QFont("阿里健康体2.0 中文 45 R", 16)  # 固定16px字号
         self.stats_label.setFont(stats_font)
         self.stats_label.setStyleSheet(
             "color: #444444 !important; background-color: transparent !important; padding-bottom: 5px; font-size: 16px !important;"

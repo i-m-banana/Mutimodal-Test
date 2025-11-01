@@ -1,8 +1,8 @@
 
     /* --- 全局字体和颜色 --- */
     QWidget {
-        font-family: "Microsoft YaHei UI", "Segoe UI", Arial, sans-serif;
-        font-size: 15px;
+        font-family: "Alibaba Health 2.0 85 B", "阿里健康体2.0 中文 45 R", "阿里健康体2.0 中文 45 R", "Noto Sans CJK SC", "Microsoft YaHei", "Segoe UI", "Helvetica Neue", sans-serif;
+        font-size: 20px;
         color: #333;
     }
 

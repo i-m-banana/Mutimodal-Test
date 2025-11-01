@@ -5,11 +5,13 @@ from __future__ import annotations
 from .. import config
 from ..qt import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QSpacerItem, QSizePolicy, QFrame,
+    QLineEdit, QSpacerItem, QSizePolicy, QFrame, QDialog,
     Qt, QFont, qta, QPainter, QLinearGradient, QColor, QMessageBox
 )
 from ..utils.widgets import create_shadow_effect
 from ..utils.responsive import scale
+import csv
+from pathlib import Path
 
 
 class LoginPage(QWidget):
@@ -85,6 +87,14 @@ class LoginPage(QWidget):
         login_button.clicked.connect(self._perform_login)
         layout.addWidget(login_button)
 
+        # 添加注册按钮
+        register_button = QPushButton('注 册')
+        register_button.setObjectName("successButton")
+        register_button.setFixedHeight(50)
+        register_button.setCursor(Qt.PointingHandCursor)
+        register_button.clicked.connect(self._show_register_dialog)
+        layout.addWidget(register_button)
+
         layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
         copyright_label = QLabel("© 2025 智能评估系统. All Rights Reserved.")
@@ -125,6 +135,185 @@ class LoginPage(QWidget):
             msg.setInformativeText("用户名或密码错误，请重试。")
             msg.setWindowTitle("错误")
             msg.exec_()
+    
+    def _show_register_dialog(self) -> None:
+        """显示注册对话框"""
+        dialog = RegisterDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            # 注册成功后自动填充用户名
+            username = dialog.username_input.text()
+            self.username_input.setText(username)
+            self.password_input.setText("")
+            self.password_input.setFocus()
 
 
-__all__ = ["LoginPage"]
+class RegisterDialog(QDialog):
+    """注册对话框"""
+    
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("用户注册")
+        self.setModal(True)
+        self.setFixedSize(400, 450)
+        self._init_ui()
+    
+    def _init_ui(self) -> None:
+        """初始化UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
+        layout.setSpacing(scale(20))
+        
+        # 标题
+        title = QLabel("创建新账户")
+        title.setAlignment(Qt.AlignCenter)
+        title.setFont(QFont("阿里健康体2.0 中文 45 R", 18, QFont.Bold))
+        title.setStyleSheet("color: #1565C0; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # 提示文字
+        hint = QLabel("请填写以下信息完成注册")
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setStyleSheet("color: #666; font-size: 13px; margin-bottom: 10px;")
+        layout.addWidget(hint)
+        
+        layout.addSpacing(10)
+        
+        # 用户名输入
+        username_label = QLabel("用户名:")
+        username_label.setStyleSheet("color: #333; font-size: 14px; font-weight: bold;")
+        layout.addWidget(username_label)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("请输入用户名 (3-20个字符)")
+        self.username_input.setObjectName("loginInput")
+        self.username_input.setFixedHeight(45)
+        layout.addWidget(self.username_input)
+        
+        # 密码输入
+        password_label = QLabel("密码:")
+        password_label.setStyleSheet("color: #333; font-size: 14px; font-weight: bold;")
+        layout.addWidget(password_label)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("请输入密码 (6-20个字符)")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.password_input.setObjectName("loginInput")
+        self.password_input.setFixedHeight(45)
+        layout.addWidget(self.password_input)
+        
+        # 确认密码输入
+        confirm_label = QLabel("确认密码:")
+        confirm_label.setStyleSheet("color: #333; font-size: 14px; font-weight: bold;")
+        layout.addWidget(confirm_label)
+        
+        self.confirm_input = QLineEdit()
+        self.confirm_input.setPlaceholderText("请再次输入密码")
+        self.confirm_input.setEchoMode(QLineEdit.Password)
+        self.confirm_input.setObjectName("loginInput")
+        self.confirm_input.setFixedHeight(45)
+        layout.addWidget(self.confirm_input)
+        
+        layout.addSpacing(10)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(scale(15))
+        
+        # 取消按钮
+        cancel_button = QPushButton("取消")
+        cancel_button.setObjectName("finishButton")
+        cancel_button.setFixedHeight(45)
+        cancel_button.setCursor(Qt.PointingHandCursor)
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        # 注册按钮
+        register_button = QPushButton("注册")
+        register_button.setObjectName("successButton")
+        register_button.setFixedHeight(45)
+        register_button.setCursor(Qt.PointingHandCursor)
+        register_button.clicked.connect(self._perform_register)
+        button_layout.addWidget(register_button)
+        
+        layout.addLayout(button_layout)
+    
+    def _perform_register(self) -> None:
+        """执行注册操作"""
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        confirm = self.confirm_input.text()
+        
+        # 验证输入
+        if not username:
+            QMessageBox.warning(self, "注册失败", "用户名不能为空！")
+            return
+        
+        if len(username) < 3 or len(username) > 20:
+            QMessageBox.warning(self, "注册失败", "用户名长度必须在3-20个字符之间！")
+            return
+        
+        if not username.isalnum():
+            QMessageBox.warning(self, "注册失败", "用户名只能包含字母和数字！")
+            return
+        
+        if not password:
+            QMessageBox.warning(self, "注册失败", "密码不能为空！")
+            return
+        
+        if len(password) < 6 or len(password) > 20:
+            QMessageBox.warning(self, "注册失败", "密码长度必须在6-20个字符之间！")
+            return
+        
+        if password != confirm:
+            QMessageBox.warning(self, "注册失败", "两次输入的密码不一致！")
+            return
+        
+        # 检查用户名是否已存在
+        users = config.load_users_from_csv()
+        if username in users:
+            QMessageBox.warning(self, "注册失败", f"用户名 '{username}' 已存在，请选择其他用户名！")
+            return
+        
+        # 保存到CSV文件
+        try:
+            csv_path = config.BASE_DIR / "data" / "users" / "users.csv"
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 检查文件是否存在且不为空，确保最后一行有换行符
+            if csv_path.exists() and csv_path.stat().st_size > 0:
+                with open(csv_path, 'rb') as f:
+                    f.seek(-1, 2)  # 移到文件最后一个字节
+                    last_char = f.read(1)
+                    needs_newline = last_char not in (b'\n', b'\r')
+                
+                if needs_newline:
+                    # 如果最后没有换行符，先添加一个
+                    with open(csv_path, 'a', encoding='utf-8') as f:
+                        f.write('\n')
+            
+            # 追加新用户到CSV文件
+            with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([username, password])
+            
+            config.logger.info(f"新用户 '{username}' 注册成功")
+            
+            # 显示成功消息
+            QMessageBox.information(
+                self, 
+                "注册成功", 
+                f"用户 '{username}' 注册成功！\n\n请使用新账户登录。"
+            )
+            
+            self.accept()
+            
+        except Exception as e:
+            config.logger.error(f"注册失败: {e}")
+            QMessageBox.critical(
+                self, 
+                "注册失败", 
+                f"保存用户信息时发生错误：{e}\n\n请联系管理员。"
+            )
+
+
+__all__ = ["LoginPage", "RegisterDialog"]

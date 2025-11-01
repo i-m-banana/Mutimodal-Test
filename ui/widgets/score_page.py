@@ -117,18 +117,18 @@ class ModernGaugeWidget(QWidget):
 
         # 绘制分数
         painter.setPen(QPen(main_color, 3))
-        painter.setFont(QFont("Arial", 56, QFont.Bold))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 56, QFont.Bold))
         score_text = str(int(self.value))
         painter.drawText(-60, -20, 120, 60, Qt.AlignCenter, score_text)
 
         # 绘制"分"字
         painter.setPen(QPen(QColor(100, 100, 100), 2))
-        painter.setFont(QFont("Microsoft YaHei", 18))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 18))
         painter.drawText(-25, 30, 50, 30, Qt.AlignCenter, "分")
 
         # 绘制刻度
         painter.setPen(QPen(QColor(180, 180, 180), 1))
-        painter.setFont(QFont("Arial", 10))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 10))
         for i in range(0, 101, 20):
             angle = 225 - (i / 100.0 * 270)
             angle_rad = angle * np.pi / 180

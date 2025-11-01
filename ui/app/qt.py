@@ -2,6 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
@@ -54,6 +55,7 @@ import qtawesome as qta
 
 __all__ = [
     "QApplication",
+    "QDialog",
     "QFrame",
     "QGraphicsDropShadowEffect",
     "QGraphicsOpacityEffect",

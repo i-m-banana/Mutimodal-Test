@@ -85,6 +85,7 @@ av_get_current_audio_level = config.av_get_current_audio_level
 
 multidata_start_collection = config.multidata_start_collection
 multidata_stop_collection = config.multidata_stop_collection
+multidata_stop_video_only = config.multidata_stop_video_only
 multidata_get_snapshot = config.multidata_get_snapshot
 
 eeg_start_collection = config.eeg_start_collection
@@ -346,13 +347,28 @@ class TestPage(QWidget):
             
             logger.info(f"💾 保存 {len(record_payload)} 条语音识别结果")
             
-            # 写入到文件
+            # 写入到文件（使用JSON格式便于阅读和解析）
             try:
                 record_txt = os.path.join(self.session_dir, 'emotion', "record.txt")
+                record_json = os.path.join(self.session_dir, 'emotion', "record.json")
                 os.makedirs(os.path.dirname(record_txt), exist_ok=True)
+                
+                # 保存为纯文本格式（便于快速查看）
                 with open(record_txt, 'w', encoding='utf-8') as f:
-                    f.write(str(record_payload))
-                logger.info(f"✅ 语音识别结果已写入文件: {record_txt}")
+                    for item in record_payload:
+                        f.write(f"题目 {item.get('question_index', '?')}:\n")
+                        f.write(f"  原文: {item.get('question_text', '')}\n")
+                        f.write(f"  识别: {item.get('recognized_text', '')}\n")
+                        f.write(f"  音频: {item.get('audio_path', '')}\n")
+                        f.write(f"  时间: {item.get('timestamp', '')}\n")
+                        f.write("-" * 50 + "\n")
+                
+                # 保存为JSON格式（便于程序解析）
+                import json
+                with open(record_json, 'w', encoding='utf-8') as f:
+                    json.dump(record_payload, f, ensure_ascii=False, indent=2)
+                
+                logger.info(f"✅ 语音识别结果已写入文件: {record_txt} 和 {record_json}")
             except Exception as exc:
                 logger.warning(f"写入语音识别记录文本失败: {exc}")
             
@@ -1288,9 +1304,9 @@ class TestPage(QWidget):
         self.lbl_reading_text = QTextEdit()
         self.lbl_reading_text.setReadOnly(True)
         self.lbl_reading_text.setObjectName("readingTextDisplay")
-        self.lbl_reading_text.setFixedWidth(scale(700))  # 增加宽度
-        self.lbl_reading_text.setMinimumHeight(scale(320))  # 增加最小高度
-        self.lbl_reading_text.setMaximumHeight(scale(420))  # 增加最大高度
+        self.lbl_reading_text.setFixedWidth(scale(850))  # 从700增加到850
+        self.lbl_reading_text.setMinimumHeight(scale(400))  # 从320增加到400
+        self.lbl_reading_text.setMaximumHeight(scale(520))  # 从420增加到520
         
         # 设置文本样式
         text_font = QFont()
@@ -1390,6 +1406,7 @@ class TestPage(QWidget):
         title_label = QLabel("血压脉搏测试")
         title_label.setObjectName("h1")
         title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("font-size: 32px; font-weight: bold;")  # 增大标题字号
 
         # 说明文字
         description_label = QLabel(
@@ -1398,6 +1415,7 @@ class TestPage(QWidget):
         description_label.setObjectName("subtitle")
         description_label.setAlignment(Qt.AlignCenter)
         description_label.setWordWrap(True)
+        description_label.setStyleSheet("font-size: 20px; color: #666;")  # 增大说明文字字号
 
         # 设备状态区域
         status_container = QWidget()
@@ -1408,11 +1426,13 @@ class TestPage(QWidget):
         self.bp_status_label = QLabel("正在检测血压仪器连接...")
         self.bp_status_label.setObjectName("statusLabel")
         self.bp_status_label.setAlignment(Qt.AlignCenter)
+        self.bp_status_label.setStyleSheet("font-size: 22px; font-weight: bold;")  # 增大状态字号
 
         # 测试进度显示
         self.bp_progress_label = QLabel("等待开始测试")
         self.bp_progress_label.setObjectName("subtitle")
         self.bp_progress_label.setAlignment(Qt.AlignCenter)
+        self.bp_progress_label.setStyleSheet("font-size: 20px; color: #666;")  # 增大进度提示字号
 
         status_layout.addWidget(self.bp_status_label)
         status_layout.addWidget(self.bp_progress_label)
@@ -1425,21 +1445,22 @@ class TestPage(QWidget):
         # 开始/停止测试按钮
         self.bp_start_button = QPushButton("开始测试")
         self.bp_start_button.setObjectName("successButton")
-        self.bp_start_button.setFixedSize(150, 50)
+        self.bp_start_button.setFixedSize(180, 60)  # 从150x50增加到180x60
+        self.bp_start_button.setStyleSheet("font-size: 22px; font-weight: bold;")  # 增大按钮字号
         self.bp_start_button.clicked.connect(self._toggle_bp_test)
         self.bp_start_button.setEnabled(False)  # 初始禁用
 
         # 圆形进度指示器
         self.bp_progress_circle = QLabel()
-        self.bp_progress_circle.setFixedSize(80, 80)
+        self.bp_progress_circle.setFixedSize(100, 100)  # 从80x80增加到100x100
         self.bp_progress_circle.setAlignment(Qt.AlignCenter)
         self.bp_progress_circle.setStyleSheet("""
             QLabel {
                 border: 4px solid #E0E0E0;
-                border-radius: 40px;
+                border-radius: 50px;
                 background-color: #F5F5F5;
                 color: #666;
-                font-size: 12px;
+                font-size: 18px;
                 font-weight: bold;
             }
         """)
@@ -1458,11 +1479,12 @@ class TestPage(QWidget):
         result_title = QLabel("测试结果")
         result_title.setObjectName("h2")
         result_title.setAlignment(Qt.AlignCenter)
+        result_title.setStyleSheet("font-size: 28px; font-weight: bold;")  # 增大结果标题字号
 
         # 结果卡片
         self.result_card = QWidget()
         self.result_card.setObjectName("card")
-        self.result_card.setFixedSize(400, 200)
+        self.result_card.setFixedSize(480, 240)  # 从400x200增加到480x240
         result_card_layout = QVBoxLayout(self.result_card)
         result_card_layout.setSpacing(15)
 
@@ -1470,19 +1492,19 @@ class TestPage(QWidget):
         self.systolic_label = QLabel("收缩压: -- mmHg")
         self.systolic_label.setObjectName("statusLabel")
         self.systolic_label.setAlignment(Qt.AlignCenter)
-        self.systolic_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2;")
+        self.systolic_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976D2;")  # 从18px增加到24px
 
         # 舒张压
         self.diastolic_label = QLabel("舒张压: -- mmHg")
         self.diastolic_label.setObjectName("statusLabel")
         self.diastolic_label.setAlignment(Qt.AlignCenter)
-        self.diastolic_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2;")
+        self.diastolic_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976D2;")  # 从18px增加到24px
 
         # 脉搏
         self.pulse_label = QLabel("脉搏: -- 次/分")
         self.pulse_label.setObjectName("statusLabel")
         self.pulse_label.setAlignment(Qt.AlignCenter)
-        self.pulse_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4CAF50;")
+        self.pulse_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #4CAF50;")  # 从18px增加到24px
 
         result_card_layout.addWidget(self.systolic_label)
         result_card_layout.addWidget(self.diastolic_label)
@@ -1951,7 +1973,7 @@ class TestPage(QWidget):
                     'pulse': 75,
                 }
                 self._complete_bp_test()
-                # 立即推进到下一步，避免重复触发情绪分析
+                # 立即推进到下一步，update_step_ui() 会自动保存语音识别结果和触发情绪分析
                 self.current_step = 2
                 self.update_step_ui()
                 return True
@@ -1967,6 +1989,14 @@ class TestPage(QWidget):
                     call_timestamp = time.time()
                     self.part_timestamps.append(call_timestamp)
                     logger.info(f"📍 补记录舒尔特测试开始时间戳: {call_timestamp}")
+                
+                # ⚠️ 修复：快捷键跳过时也要保存语音识别结果和触发情绪分析
+                try:
+                    self._save_speech_recognition_results()
+                    self._trigger_emotion_analysis()
+                    logger.info("✅ 快捷键跳过：已保存语音识别结果并触发情绪分析")
+                except Exception as e:
+                    logger.warning(f"快捷键跳过时保存结果失败: {e}")
                 
                 self._on_schulte_result(30.0, 85.0)
                 self._on_schulte_completed()
@@ -2536,12 +2566,21 @@ class TestPage(QWidget):
                 if not hasattr(self, '_video_paths'):
                     self._video_paths = []
             
+            # ✅ 停止RGB/深度视频、眼动数据录制和疲劳度推理，但保持脑负荷推理继续运行
+            # ⚠️ 注意：停止视频录制、眼动数据、疲劳度推理，但脑负荷推理和EEG采集继续运行
+            try:
+                if HAS_MULTIMODAL:
+                    # 停止视频/眼动数据录制和疲劳度推理，但保持脑负荷推理
+                    multidata_stop_video_only()
+                    logger.info("✅ 朗读阶段结束，已停止视频/眼动数据录制和疲劳度推理（脑负荷推理继续运行）")
+            except Exception as e:
+                logger.warning(f"停止视频/眼动数据录制和疲劳度推理失败: {e}")
+            
             # 📍 记录血压测试开始时间戳
             call_timestamp = time.time()
             self.part_timestamps.append(call_timestamp)
             logger.info(f"📍 已记录血压测试开始时间戳: {call_timestamp}")
             
-            # ✅ 疲劳度检测已结束，后续阶段不再进行疲劳度监控
             self.update_step_ui()
             
             # 保存音视频路径到数据库
@@ -2552,13 +2591,8 @@ class TestPage(QWidget):
             self.part_timestamps.append(call_timestamp)
             logger.info(f"📍 已记录血压测试结束时间戳: {call_timestamp}")
             
-            # ✅ 确保多模态监控在舒尔特阶段仍然运行（保持脑负荷推理）
-            if HAS_MULTIMODAL:
-                try:
-                    self._start_multimodal_monitoring(force=True)
-                    logger.info("✅ 舒尔特阶段继续更新脑负荷推理")
-                except Exception as restart_exc:
-                    logger.error(f"舒尔特阶段刷新疲劳度监控失败: {restart_exc}")
+            # ❌ 舒尔特阶段不再需要疲劳度监控（已在朗读阶段结束时停止）
+            # 💡 EEG采集仍在后台运行，只是不进行疲劳度分数推理
             
             # 📍 记录舒尔特测试开始时间戳
             call_timestamp = time.time()
@@ -2580,11 +2614,11 @@ class TestPage(QWidget):
         self.part_timestamps.append(call_timestamp)
         logger.info(f"📍 已记录舒尔特测试结束时间戳: {call_timestamp}")
         
-        # ✅ 舒尔特阶段结束，停止疲劳度监控
+        # ✅ 舒尔特阶段结束，确保疲劳度监控已停止（防御性代码，实际在朗读阶段已停止）
         try:
             self._stop_multimodal_monitoring()
             multidata_stop_collection()
-            logger.info("舒尔特测试完成，已停止疲劳度监控与多模态采集")
+            logger.info("舒尔特测试完成，已确认疲劳度监控与多模态采集已停止")
         except Exception as e:
             logger.warning(f"舒尔特阶段停止疲劳度监控或采集失败: {e}")
         
