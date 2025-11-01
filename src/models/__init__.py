@@ -1,14 +1,14 @@
 """Model management wrappers and inference adapters."""
 
 from .base_model import BaseModel
-from .emotion_model import EmotionModel
+from .emotion_v2_model import EmotionV2Model
 from .fatigue_model import FatigueModel
 from .eeg_model import EEGModel
 from .model_manager import ModelManager
 
 __all__ = [
     "BaseModel",
-    "EmotionModel",
+    "EmotionV2Model",
     "FatigueModel",
     "EEGModel",
     "ModelManager",
