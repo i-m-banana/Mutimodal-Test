@@ -294,35 +294,35 @@ class UnifiedInferenceService:
         request_id = payload.get("request_id")
         audio_paths = payload.get("audio_paths", [])
         video_paths = payload.get("video_paths", [])
-        text_data = payload.get("text_data", [])
+        # text_data = payload.get("text_data", [])
         
         if not audio_paths and not video_paths:
             self.logger.warning("情绪分析请求缺少音视频数据")
             return
         
-        # 分发到情绪模型
+        # 分发到情绪模型（V2 架构：不再依赖文本模态）
         if "emotion" in self.integrated_models:
-            # 提取文本数据（字段名是 recognized_text）
-            text_list = []
-            for item in text_data:
-                if isinstance(item, dict):
-                    text = item.get("recognized_text", "")
-                    text_list.append(text)
+            # # 提取文本数据（字段名是 recognized_text）
+            # text_list = []
+            # for item in text_data:
+            #     if isinstance(item, dict):
+            #         text = item.get("recognized_text", "")
+            #         text_list.append(text)
             
-            # 记录提取的文本数据
-            if text_data:
-                total_chars = sum(len(t) for t in text_list)
-                self.logger.info(f"\n{'='*60}")
-                self.logger.info(f"📝 语音识别文本提取")
-                self.logger.info(f"{'='*60}")
-                self.logger.info(f"样本数量: {len(text_list)}")
-                self.logger.info(f"总字符数: {total_chars}")
-                self.logger.info(f"-" * 60)
-                for i, text in enumerate(text_list, 1):
-                    self.logger.info(f"第{i}题: {text}")
-                self.logger.info(f"{'='*60}\n")
-            else:
-                self.logger.warning("⚠️  未提取到语音识别文本")
+            # # 记录提取的文本数据
+            # if text_data:
+            #     total_chars = sum(len(t) for t in text_list)
+            #     self.logger.info(f"\n{'='*60}")
+            #     self.logger.info(f"📝 语音识别文本提取")
+            #     self.logger.info(f"{'='*60}")
+            #     self.logger.info(f"样本数量: {len(text_list)}")
+            #     self.logger.info(f"总字符数: {total_chars}")
+            #     self.logger.info(f"-" * 60)
+            #     for i, text in enumerate(text_list, 1):
+            #         self.logger.info(f"第{i}题: {text}")
+            #     self.logger.info(f"{'='*60}\n")
+            # else:
+            #     self.logger.warning("⚠️  未提取到语音识别文本")
             
             # 使用多样本模式进行推理
             num_samples = min(len(video_paths), len(audio_paths))
@@ -335,7 +335,7 @@ class UnifiedInferenceService:
                 "multi_sample_mode": True,  # 新增多样本模式
                 "video_paths": video_paths[:num_samples],
                 "audio_paths": audio_paths[:num_samples],
-                "text_list": text_list[:num_samples]  # 按样本顺序的文本列表
+                # "text_list": text_list[:num_samples]  # 按样本顺序的文本列表
             }
             
             metadata = {

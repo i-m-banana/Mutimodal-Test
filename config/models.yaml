@@ -31,7 +31,7 @@ inference_models:
     mode: integrated
     enabled: true
     integrated:
-      class: models.emotion_model.EmotionModel
+      class: models.emotion_v2_model.EmotionV2Model
       options:
         device: auto
   

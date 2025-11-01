@@ -2549,7 +2549,12 @@ class TestPage(QWidget):
                     self._audio_paths = []
                 if not hasattr(self, '_video_paths'):
                     self._video_paths = []
-            
+
+            try:
+                self._trigger_emotion_analysis()
+            except Exception as e:
+                logger.warning(f"触发情绪分析失败: {e}")
+
             # ✅ 停止疲劳度推理与多模态数据采集（EEG 保持运行）
             if HAS_MULTIMODAL:
                 try:
@@ -2595,9 +2600,8 @@ class TestPage(QWidget):
             self.part_timestamps.append(call_timestamp)
             logger.info(f"📍 已记录舒尔特测试开始时间戳: {call_timestamp}")
                         
-            # 📍 在切换到舒尔特测试时，先保存语音识别结果，再触发情绪分析
+            # 📍 在切换到舒尔特测试时，保存语音识别结果
             self._save_speech_recognition_results()
-            self._trigger_emotion_analysis()
             
             self.current_step += 1
             self.update_step_ui()
