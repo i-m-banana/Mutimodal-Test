@@ -18,7 +18,8 @@ else:  # pragma: no cover - runtime branch when bleak is available
 HAS_EEG_HARDWARE = BleakClient is not None
 
 # Default BLE configuration for the current EEG headband model.
-DEFAULT_DEVICE_ADDRESS = "F4:3C:7C:A6:29:E0"
+DEFAULT_DEVICE_ADDRESS = "CB:D1:D1:B7:F2:B9"
+# DEFAULT_DEVICE_ADDRESS = "C2:67:CD:E9:16:E4"
 TX_CHARACTERISTIC = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 RX_CHARACTERISTIC = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 
@@ -48,6 +49,11 @@ class BleEEGDevice:
     def address(self) -> str:
         """Return the BLE address currently targeted by this device."""
         return self._address
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if device is currently connected."""
+        return self._connected
 
     async def connect(self, callback: NotificationCallback) -> None:
         """Connect to the device and start streaming notifications."""

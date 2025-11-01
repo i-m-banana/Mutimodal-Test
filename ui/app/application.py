@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -207,29 +208,50 @@ class MainWindow(QMainWindow):
             self.test_page.set_current_user(self.current_user)
         except Exception as exc:  # noqa: BLE001
             logger.warning("同步用户名到测试页失败: %s", exc)
-        self.stack.fade_to_index(1)
-
-    def show_baseline_page(self) -> None:
-        """切换到基线校准页面"""
-        logger.info("正在切换到基线校准页面...")
         
-        # 为基线创建会话目录（因为基线在 TestPage 的 start_test 之前运行）
+        # ⚠️ 修复：在切换到校准页面时就创建session_dir，避免EEG预连接和后续数据使用不同目录
+        # 这样确保整个测试流程（校准→基线→文本QA→血压→舒尔特）使用同一个session_dir
         if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
             from datetime import datetime
             import os
             session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             user_dir = self.current_user or 'anonymous'
             
-            # 🐛 修复：使用项目根目录的绝对路径，而不是相对路径
-            # 项目根目录 = ui/ 的父目录
+            # 使用项目根目录的绝对路径
             project_root = Path(__file__).parent.parent.parent
             session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
             
-            # 保存到 test_page 以便后续使用
+            # 保存到 test_page，供所有后续阶段使用
             self.test_page.session_timestamp = session_timestamp
             self.test_page.session_dir = session_dir
             
-            logger.info(f"为基线创建会话目录: {session_dir}")
+            logger.info(f"🆕 创建整个测试会话的session目录: {session_dir}")
+        else:
+            logger.info(f"✅ 已有session目录: {self.test_page.session_dir}")
+        
+        self.stack.fade_to_index(1)
+
+    def show_baseline_page(self) -> None:
+        """切换到基线校准页面"""
+        logger.info("正在切换到基线校准页面...")
+        
+        # ✅ session_dir应该已经在校准页面创建了，这里只是防御性检查
+        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
+            logger.warning("⚠️ session_dir未在校准阶段创建，现在创建（这不应该发生）")
+            from datetime import datetime
+            import os
+            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            user_dir = self.current_user or 'anonymous'
+            
+            project_root = Path(__file__).parent.parent.parent
+            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
+            
+            self.test_page.session_timestamp = session_timestamp
+            self.test_page.session_dir = session_dir
+            
+            logger.info(f"⚠️ 补救：创建会话目录: {session_dir}")
+        else:
+            logger.info(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
         
         # 传递时间戳列表和会话信息
         if hasattr(self.test_page, 'part_timestamps'):
@@ -249,7 +271,12 @@ class MainWindow(QMainWindow):
         # 基线页面有自己的开始按钮，不需要自动启动
     
     def _start_eeg_collection_for_session(self) -> None:
-        """为整个测试会话启动EEG采集（异步，非阻塞）"""
+        """为整个测试会话启动EEG采集（异步，非阻塞）
+        
+        ⚠️ 注意：如果EEG已经在校准阶段启动（calibration页面的预连接），
+        后端会返回 'already-running' 状态，这是正常的。重要的是确保
+        使用的是当前的 session_dir。
+        """
         from ..utils_common.thread_process_manager import get_thread_manager
         thread_manager = get_thread_manager()
         
@@ -261,8 +288,24 @@ class MainWindow(QMainWindow):
                     save_dir=self.test_page.session_dir,
                     part=1
                 )
-                logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
-                logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+                status = result.get('status', '').lower()
+                
+                if status == 'already-running':
+                    # EEG已在运行（可能在校准阶段启动）
+                    old_dir = result.get('save_dir', 'unknown')
+                    if old_dir != os.path.join(self.test_page.session_dir, 'eeg'):
+                        logger.warning(f"⚠️ EEG已在运行但目录不匹配！")
+                        logger.warning(f"   当前EEG目录: {old_dir}")
+                        logger.warning(f"   期望session目录: {self.test_page.session_dir}/eeg")
+                        logger.info("💡 建议：在校准页面时应该已经设置了正确的session_dir")
+                    else:
+                        logger.info(f"✅ EEG采集已在运行（校准阶段启动），继续使用: {old_dir}")
+                elif status == 'started':
+                    logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
+                    logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+                else:
+                    logger.warning(f"⚠️ EEG启动返回未知状态: {status}")
+                    
             except Exception as e:
                 logger.error(f"❌ 启动测试会话EEG采集失败: {e}")
                 logger.info("测试将继续运行，但不会记录EEG数据")

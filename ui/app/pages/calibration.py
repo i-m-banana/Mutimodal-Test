@@ -5,6 +5,7 @@ from __future__ import annotations
 from .. import config
 from ..qt import (
     QFont,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
@@ -21,6 +22,11 @@ from ..utils.helpers import init_camera
 from ..utils.responsive import scale, scale_font, scale_size
 from ui.widgets.camera_preview import CameraPreviewWidget
 
+try:
+    from ui.services.backend_proxy import eeg_get_diagnostics
+except ImportError:
+    from ...services.backend_proxy import eeg_get_diagnostics  # type: ignore
+
 
 class CalibrationPage(QWidget):
     """校准页面，用于在测试前检查和准备摄像头。"""
@@ -30,6 +36,7 @@ class CalibrationPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.camera_preview: CameraPreviewWidget | None = None
+        self.eeg_preconnect_started = False  # 标记EEG预连接是否已启动
 
         self.stacked_layout = QStackedLayout()
         self.setLayout(self.stacked_layout)
@@ -37,6 +44,11 @@ class CalibrationPage(QWidget):
         self._init_loading_widget()
         self._init_calibration_widget()
         self.stacked_layout.setCurrentIndex(0)
+        
+        # EEG状态查询定时器
+        self.eeg_status_timer = QTimer(self)
+        self.eeg_status_timer.timeout.connect(self._update_eeg_status)
+        self.eeg_status_timer.setInterval(1000)  # 每秒更新一次
 
     # ----------------- Loading Widget -----------------
     def _init_loading_widget(self) -> None:
@@ -83,12 +95,33 @@ class CalibrationPage(QWidget):
 
         title = QLabel("设备校准")
         title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Arial", scale_font(18)))
+        title.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(18)))
         layout.addWidget(title)
 
         cam_width, cam_height = scale_size(640, 480)
         self.camera_preview = CameraPreviewWidget(cam_width, cam_height)
         layout.addWidget(self.camera_preview, alignment=Qt.AlignCenter)
+        
+        # EEG设备状态显示（居中显示在按钮上方）
+        eeg_status_container = QWidget()
+        eeg_status_layout = QHBoxLayout(eeg_status_container)
+        eeg_status_layout.setContentsMargins(0, 0, 0, 0)
+        eeg_status_layout.setAlignment(Qt.AlignCenter)
+        
+        eeg_label = QLabel("脑电设备:")
+        eeg_label.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(12)))
+        eeg_status_layout.addWidget(eeg_label)
+        
+        self.eeg_status_icon = QLabel("●")
+        self.eeg_status_icon.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(14)))
+        self.eeg_status_icon.setStyleSheet("color: gray;")
+        eeg_status_layout.addWidget(self.eeg_status_icon)
+        
+        self.eeg_status_text = QLabel("检测中...")
+        self.eeg_status_text.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(12)))
+        eeg_status_layout.addWidget(self.eeg_status_text)
+        
+        layout.addWidget(eeg_status_container, 0, Qt.AlignCenter)
 
         self.finish_button = QPushButton("  校准完成")
         self.finish_button.setObjectName("finishButton")  # 设置对象名以应用QSS样式
@@ -104,6 +137,15 @@ class CalibrationPage(QWidget):
     def showEvent(self, event):  # type: ignore[override]
         super().showEvent(event)
         config.logger.info("进入校准页面。")
+        
+        # 启动EEG状态查询
+        self.eeg_status_timer.start()
+        self._update_eeg_status()  # 立即查询一次
+        
+        # 🔥 启动EEG预连接（仅启动一次）
+        if not self.eeg_preconnect_started:
+            self._start_eeg_preconnect()
+            self.eeg_preconnect_started = True
         
         # 检查主窗口是否已预加载摄像头
         main_window = self.window()
@@ -143,6 +185,10 @@ class CalibrationPage(QWidget):
 
     def hideEvent(self, event):  # type: ignore[override]
         config.logger.info("离开校准页面。")
+        
+        # 停止EEG状态查询
+        self.eeg_status_timer.stop()
+        
         try:
             if self.camera_preview:
                 self.camera_preview.stop_preview()
@@ -209,6 +255,120 @@ class CalibrationPage(QWidget):
             self.calibration_finished.emit()
         except Exception as e:
             config.logger.error(f"发送校准完成信号失败: {e}")
+    
+    def _update_eeg_status(self) -> None:
+        """更新EEG设备连接状态（异步，不阻塞UI）"""
+        try:
+            diag = eeg_get_diagnostics(timeout=1.0)
+            
+            hardware_available = diag.get("hardware_driver_available", False)
+            force_simulation = diag.get("force_simulation", False)
+            is_running = diag.get("running", False)
+            device_connected = diag.get("device_connected", False)
+            
+            # 根据状态设置图标和文字
+            if force_simulation:
+                # 模拟模式
+                if is_running:
+                    self.eeg_status_icon.setStyleSheet("color: green;")
+                    self.eeg_status_text.setText("使用模拟数据")
+                else:
+                    self.eeg_status_icon.setStyleSheet("color: orange;")
+                    self.eeg_status_text.setText("模拟模式（未启动）")
+            elif not hardware_available:
+                # 硬件驱动不可用
+                self.eeg_status_icon.setStyleSheet("color: red;")
+                self.eeg_status_text.setText("硬件驱动不可用")
+            elif device_connected:
+                # 设备已连接
+                if is_running:
+                    self.eeg_status_icon.setStyleSheet("color: green;")
+                    self.eeg_status_text.setText("已连接")
+                else:
+                    self.eeg_status_icon.setStyleSheet("color: green;")
+                    self.eeg_status_text.setText("已连接（就绪）")
+            elif is_running:
+                # 正在连接中（已调用start但连接还在进行）
+                self.eeg_status_icon.setStyleSheet("color: orange;")
+                self.eeg_status_text.setText("连接中...")
+            else:
+                # 硬件可用但未连接
+                self.eeg_status_icon.setStyleSheet("color: gray;")
+                self.eeg_status_text.setText("未连接")
+                
+        except ConnectionError:
+            # 后端未连接
+            self.eeg_status_icon.setStyleSheet("color: red;")
+            self.eeg_status_text.setText("后端未连接")
+        except TimeoutError:
+            # 查询超时
+            self.eeg_status_icon.setStyleSheet("color: orange;")
+            self.eeg_status_text.setText("连接超时")
+        except Exception as e:
+            # 其他错误
+            config.logger.debug(f"查询EEG状态失败: {e}")
+            self.eeg_status_icon.setStyleSheet("color: gray;")
+            self.eeg_status_text.setText("状态未知")
+    
+    def _start_eeg_preconnect(self) -> None:
+        """启动EEG预连接（在校准页面就开始连接设备）"""
+        try:
+            from ...utils_common.thread_process_manager import get_thread_manager
+            from ...services.backend_proxy import eeg_start_collection
+            from datetime import datetime
+            from pathlib import Path
+            import os
+            
+            thread_manager = get_thread_manager()
+            
+            def preconnect_eeg():
+                try:
+                    # 获取主窗口的用户信息和会话目录
+                    main_window = self.window()
+                    current_user = getattr(main_window, 'current_user', 'anonymous')
+                    
+                    # ✅ 关键修改：从 test_page 获取共享的 session_dir
+                    # session_dir应该已经在application.show_calibration_page()中创建了
+                    test_page = getattr(main_window, 'test_page', None)
+                    
+                    if test_page and hasattr(test_page, 'session_dir') and test_page.session_dir:
+                        # 使用已有的 session_dir（正常情况）
+                        session_dir = test_page.session_dir
+                        config.logger.info(f"🔗 使用已创建的session目录进行EEG预连接: {session_dir}")
+                    else:
+                        # 防御性代码：如果session_dir不存在，创建新的（这不应该发生）
+                        config.logger.warning("⚠️ session_dir不存在，创建临时目录（这不应该发生）")
+                        session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        project_root = Path(__file__).parent.parent.parent.parent
+                        session_dir = os.path.join(project_root, "recordings", current_user, session_timestamp)
+                        
+                        # 尝试保存到 test_page
+                        if test_page:
+                            test_page.session_timestamp = session_timestamp
+                            test_page.session_dir = session_dir
+                            config.logger.warning(f"⚠️ 补救：创建session目录: {session_dir}")
+                        else:
+                            config.logger.error(f"❌ 无法访问test_page，使用临时目录: {session_dir}")
+                    
+                    result = eeg_start_collection(
+                        username=current_user,
+                        save_dir=session_dir,
+                        part=1
+                    )
+                    status = (result or {}).get("status", "").lower()
+                    if status in {"started", "already-running"}:
+                        config.logger.info(f"✅ EEG预连接已启动，保存目录: {session_dir}")
+                    else:
+                        config.logger.warning(f"⚠️ EEG预连接启动失败: {result}")
+                except Exception as e:
+                    config.logger.error(f"❌ EEG预连接失败: {e}", exc_info=True)
+            
+            thread_manager.submit_data_task(
+                preconnect_eeg,
+                task_name="EEG设备预连接"
+            )
+        except Exception as e:
+            config.logger.error(f"❌ 启动EEG预连接失败: {e}")
 
 
 __all__ = ["CalibrationPage"]

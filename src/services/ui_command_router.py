@@ -46,6 +46,8 @@ class UICommandRouter:
         if self._running:
             return
         self._subscription = self.bus.subscribe(EventTopic.UI_COMMAND, self._on_command)
+        # 将EEG服务注册到EventBus，供UnifiedInferenceService访问
+        self.bus._eeg_service = self.eeg_service
         self._running = True
         self._log_startup_status()
 
@@ -216,6 +218,8 @@ class UICommandRouter:
             return self.multimodal_service.start(body)
         if action == "multimodal.stop":
             return self.multimodal_service.stop()
+        if action == "multimodal.stop_video_only":
+            return self.multimodal_service.stop_video_only()
         if action == "multimodal.cleanup":
             return self.multimodal_service.cleanup()
         if action == "multimodal.status":
@@ -235,6 +239,8 @@ class UICommandRouter:
             return self.eeg_service.get_snapshot()
         if action == "eeg.file_paths":
             return self.eeg_service.get_file_paths()
+        if action == "eeg.diagnostics":
+            return self.eeg_service.diagnostics()
         if action == "emotion.analyze":
             audio_paths = body.get("audio_paths", [])
             video_paths = body.get("video_paths", [])
