@@ -1199,17 +1199,13 @@ class ScorePage(QWidget):
             if base == 0:
                 base = 1
             
-            if metric in ["疲劳检测", "情绪", "脑负荷"]:
-                # 这些指标越低越好：原始值越小，表现越好
-                # 换算逻辑：
-                # - 如果本次 <= 首次：表现更好或持平，得分 >= 80
-                # - 如果本次 > 首次：表现下降，得分 < 80
-                # 公式：80 * (2 - curr/base)，限制在 [0, 100]
+            if metric == "疲劳检测":
+                # 疲劳分数越低越好，需要进行反转。
                 ratio = curr / base
                 score = BASELINE_SCORE * (2 - ratio)
                 score = max(0, min(100, score))
                 
-            elif metric == "舒尔特准确率":
+            elif metric in ["情绪", "脑负荷", "舒尔特准确率"]:
                 # 准确率越高越好：原始值越大，表现越好
                 # 换算逻辑：
                 # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
