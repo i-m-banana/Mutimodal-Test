@@ -164,21 +164,27 @@ class EEGService:
     def diagnostics(self) -> Dict[str, Any]:
         """返回当前EEG模块的硬件可用性和设备连接状态。"""
         device_connected = False
+        simulation_mode = FORCE_SIMULATION or not HAS_EEG_HARDWARE
+
         if self._recorder:
-            # 模拟模式下，认为设备已"连接"（虚拟）
+            # 读取 recorder 的真实运行模式
+            simulation_mode = bool(self._recorder.simulation_enabled)
+
             if self._recorder.simulation_enabled:
+                # 模拟模式下视为已连接，只要采集线程处于运行状态
                 device_connected = self._running
-            # 真实设备模式下，检查BLE连接状态
             elif self._recorder.device:
+                # 真实设备模式下，检查BLE连接状态
                 try:
-                    device_connected = self._recorder.device.is_connected
+                    device_connected = bool(self._recorder.device.is_connected)
                 except AttributeError:
-                    # 兼容旧版本，没有is_connected属性
+                    # 兼容旧版本，没有 is_connected 属性
                     device_connected = self._running
-        
+
         return {
             "hardware_driver_available": HAS_EEG_HARDWARE,
             "force_simulation": FORCE_SIMULATION,
+            "simulation_mode": simulation_mode,
             "running": self._running,
             "device_connected": device_connected,
         }

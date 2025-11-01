@@ -262,53 +262,45 @@ class CalibrationPage(QWidget):
             diag = eeg_get_diagnostics(timeout=1.0)
             
             hardware_available = diag.get("hardware_driver_available", False)
+            simulation_mode = diag.get("simulation_mode")
             force_simulation = diag.get("force_simulation", False)
             is_running = diag.get("running", False)
             device_connected = diag.get("device_connected", False)
-            
-            # 根据状态设置图标和文字
-            if force_simulation:
-                # 模拟模式
-                if is_running:
-                    self.eeg_status_icon.setStyleSheet("color: green;")
-                    self.eeg_status_text.setText("使用模拟数据")
-                else:
-                    self.eeg_status_icon.setStyleSheet("color: orange;")
-                    self.eeg_status_text.setText("模拟模式（未启动）")
-            elif not hardware_available:
-                # 硬件驱动不可用
-                self.eeg_status_icon.setStyleSheet("color: red;")
-                self.eeg_status_text.setText("硬件驱动不可用")
-            elif device_connected:
-                # 设备已连接
-                if is_running:
-                    self.eeg_status_icon.setStyleSheet("color: green;")
-                    self.eeg_status_text.setText("已连接")
-                else:
-                    self.eeg_status_icon.setStyleSheet("color: green;")
-                    self.eeg_status_text.setText("已连接（就绪）")
+
+            # 向后兼容：后端老版本没有 simulation_mode 字段时，回退到 force_simulation
+            if simulation_mode is None:
+                simulation_mode = force_simulation or not hardware_available
+
+            if simulation_mode:
+                # 模拟数据模式
+                self.eeg_status_icon.setStyleSheet("color: #2980b9;")
+                self.eeg_status_text.setText("模拟数据")
+            elif is_running and device_connected:
+                # 采集线程运行且设备已连接
+                self.eeg_status_icon.setStyleSheet("color: #27ae60;")
+                self.eeg_status_text.setText("已连接")
             elif is_running:
-                # 正在连接中（已调用start但连接还在进行）
-                self.eeg_status_icon.setStyleSheet("color: orange;")
+                # 采集线程已启动但尚未建立连接
+                self.eeg_status_icon.setStyleSheet("color: #f39c12;")
                 self.eeg_status_text.setText("连接中...")
             else:
-                # 硬件可用但未连接
-                self.eeg_status_icon.setStyleSheet("color: gray;")
-                self.eeg_status_text.setText("未连接")
+                # 其他情况统一视为连接失败，避免显示额外状态
+                self.eeg_status_icon.setStyleSheet("color: #e74c3c;")
+                self.eeg_status_text.setText("连接失败")
                 
         except ConnectionError:
             # 后端未连接
-            self.eeg_status_icon.setStyleSheet("color: red;")
-            self.eeg_status_text.setText("后端未连接")
+            self.eeg_status_icon.setStyleSheet("color: #e74c3c;")
+            self.eeg_status_text.setText("连接失败")
         except TimeoutError:
             # 查询超时
-            self.eeg_status_icon.setStyleSheet("color: orange;")
-            self.eeg_status_text.setText("连接超时")
+            self.eeg_status_icon.setStyleSheet("color: #e74c3c;")
+            self.eeg_status_text.setText("连接失败")
         except Exception as e:
             # 其他错误
             config.logger.debug(f"查询EEG状态失败: {e}")
-            self.eeg_status_icon.setStyleSheet("color: gray;")
-            self.eeg_status_text.setText("状态未知")
+            self.eeg_status_icon.setStyleSheet("color: #e74c3c;")
+            self.eeg_status_text.setText("连接失败")
     
     def _start_eeg_preconnect(self) -> None:
         """启动EEG预连接（在校准页面就开始连接设备）"""

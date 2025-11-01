@@ -393,6 +393,14 @@ class UnifiedInferenceService:
                     
                     # 转换为 [n_samples, 2] 格式
                     eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
+
+                    simulation_mode = False
+                    try:
+                        diagnostics = self._eeg_service.diagnostics()
+                        simulation_mode = bool(diagnostics.get("simulation_mode"))
+                    except Exception as diag_exc:
+                        # 诊断信息获取失败时，保持默认值
+                        self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
                     
                     # 执行推理
                     if "eeg" in self.integrated_models:
@@ -401,7 +409,8 @@ class UnifiedInferenceService:
                             "memory_mode": memory_mode,
                             "eeg_signal": eeg_signal,
                             "sampling_rate": sampling_rate,
-                            "subject_id": subject_id
+                            "subject_id": subject_id,
+                            "simulation_mode": simulation_mode,
                         }
                         metadata = {
                             "request_id": request_id,
@@ -427,12 +436,28 @@ class UnifiedInferenceService:
             return
         
         if "eeg" in self.integrated_models:
+            simulation_mode = payload.get("simulation_mode")
+
+            if simulation_mode is None and self._eeg_service is None:
+                self._eeg_service = getattr(self.bus, '_eeg_service', None)
+
+            if simulation_mode is None and self._eeg_service is not None:
+                try:
+                    diagnostics = self._eeg_service.diagnostics()
+                    simulation_mode = bool(diagnostics.get("simulation_mode"))
+                except Exception as diag_exc:
+                    self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
+
             inference_data = {
                 "memory_mode": memory_mode,
                 "eeg_signal": eeg_signal,
                 "sampling_rate": sampling_rate,
-                "subject_id": subject_id
+                "subject_id": subject_id,
             }
+
+            if simulation_mode is not None:
+                inference_data["simulation_mode"] = bool(simulation_mode)
+
             metadata = {
                 "request_id": request_id,
                 "timestamp": payload.get("timestamp")
@@ -499,8 +524,12 @@ class UnifiedInferenceService:
                     brain_load_score = predictions.get("brain_load_score", 0)
                     state = predictions.get("state", "unknown")
                     num_windows = predictions.get("num_windows", 0)
+                    simulation_mode = bool(data.get("simulation_mode"))
                     # 压缩输出: 脑负荷单行显示
-                    self.logger.info(f"✅脑负荷 {brain_load_score:.1f} [{state[:3]}] {num_windows}win {inference_time:.0f}ms")
+                    sim_suffix = "(模拟)" if simulation_mode else ""
+                    self.logger.info(
+                        f"✅脑负荷{sim_suffix} {brain_load_score:.1f} [{state[:3]}] {num_windows}win {inference_time:.0f}ms"
+                    )
                 else:
                     self.logger.info(f"✅ {model_type} 推理完成")
             else:

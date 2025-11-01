@@ -85,7 +85,6 @@ av_get_current_audio_level = config.av_get_current_audio_level
 
 multidata_start_collection = config.multidata_start_collection
 multidata_stop_collection = config.multidata_stop_collection
-multidata_stop_video_only = config.multidata_stop_video_only
 multidata_get_snapshot = config.multidata_get_snapshot
 
 eeg_start_collection = config.eeg_start_collection
@@ -347,28 +346,13 @@ class TestPage(QWidget):
             
             logger.info(f"💾 保存 {len(record_payload)} 条语音识别结果")
             
-            # 写入到文件（使用JSON格式便于阅读和解析）
+            # 写入到文件
             try:
                 record_txt = os.path.join(self.session_dir, 'emotion', "record.txt")
-                record_json = os.path.join(self.session_dir, 'emotion', "record.json")
                 os.makedirs(os.path.dirname(record_txt), exist_ok=True)
-                
-                # 保存为纯文本格式（便于快速查看）
                 with open(record_txt, 'w', encoding='utf-8') as f:
-                    for item in record_payload:
-                        f.write(f"题目 {item.get('question_index', '?')}:\n")
-                        f.write(f"  原文: {item.get('question_text', '')}\n")
-                        f.write(f"  识别: {item.get('recognized_text', '')}\n")
-                        f.write(f"  音频: {item.get('audio_path', '')}\n")
-                        f.write(f"  时间: {item.get('timestamp', '')}\n")
-                        f.write("-" * 50 + "\n")
-                
-                # 保存为JSON格式（便于程序解析）
-                import json
-                with open(record_json, 'w', encoding='utf-8') as f:
-                    json.dump(record_payload, f, ensure_ascii=False, indent=2)
-                
-                logger.info(f"✅ 语音识别结果已写入文件: {record_txt} 和 {record_json}")
+                    f.write(str(record_payload))
+                logger.info(f"✅ 语音识别结果已写入文件: {record_txt}")
             except Exception as exc:
                 logger.warning(f"写入语音识别记录文本失败: {exc}")
             
@@ -1973,7 +1957,7 @@ class TestPage(QWidget):
                     'pulse': 75,
                 }
                 self._complete_bp_test()
-                # 立即推进到下一步，update_step_ui() 会自动保存语音识别结果和触发情绪分析
+                # 立即推进到下一步，避免重复触发情绪分析
                 self.current_step = 2
                 self.update_step_ui()
                 return True
@@ -1989,14 +1973,14 @@ class TestPage(QWidget):
                     call_timestamp = time.time()
                     self.part_timestamps.append(call_timestamp)
                     logger.info(f"📍 补记录舒尔特测试开始时间戳: {call_timestamp}")
-                
-                # ⚠️ 修复：快捷键跳过时也要保存语音识别结果和触发情绪分析
+
                 try:
                     self._save_speech_recognition_results()
                     self._trigger_emotion_analysis()
                     logger.info("✅ 快捷键跳过：已保存语音识别结果并触发情绪分析")
                 except Exception as e:
                     logger.warning(f"快捷键跳过时保存结果失败: {e}")
+                
                 
                 self._on_schulte_result(30.0, 85.0)
                 self._on_schulte_completed()
@@ -2566,15 +2550,14 @@ class TestPage(QWidget):
                 if not hasattr(self, '_video_paths'):
                     self._video_paths = []
             
-            # ✅ 停止RGB/深度视频、眼动数据录制和疲劳度推理，但保持脑负荷推理继续运行
-            # ⚠️ 注意：停止视频录制、眼动数据、疲劳度推理，但脑负荷推理和EEG采集继续运行
+            # ✅ 停止疲劳度推理监控（朗读阶段结束后不再需要疲劳度分数）
+            # ⚠️ 注意：只停止疲劳度推理，EEG采集继续运行直到整个测试结束
             try:
                 if HAS_MULTIMODAL:
-                    # 停止视频/眼动数据录制和疲劳度推理，但保持脑负荷推理
-                    multidata_stop_video_only()
-                    logger.info("✅ 朗读阶段结束，已停止视频/眼动数据录制和疲劳度推理（脑负荷推理继续运行）")
+                    self._stop_multimodal_monitoring()
+                    logger.info("✅ 朗读阶段结束，已停止疲劳度推理监控（EEG采集继续运行）")
             except Exception as e:
-                logger.warning(f"停止视频/眼动数据录制和疲劳度推理失败: {e}")
+                logger.warning(f"停止疲劳度监控失败: {e}")
             
             # 📍 记录血压测试开始时间戳
             call_timestamp = time.time()
