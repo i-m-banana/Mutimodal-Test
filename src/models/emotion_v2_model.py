@@ -107,11 +107,20 @@ class EmotionV2Model(BaseInferenceModel):
         )
 
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        from .emotion_v2.infer_v2 import infer_sample, summarize_emotion_predictions  # type: ignore
+        """执行情绪推理
+        
+        多样本模式：调用 run_directory_inference 完成切分/批量推理/CSV输出/汇总
+        单样本模式：直接调用 infer_sample 进行单文件推理
+        """
+        from .emotion_v2.infer_v2 import infer_sample, run_directory_inference  # type: ignore
+        import tempfile
+        import shutil
 
         start_ts = time.time()
+        # 类别名称映射（按 class_0/1/2 → 开心/中性/消极）
+        label_names = ["开心", "中性", "消极"]
 
-        # 多样本模式
+        # 多样本模式：使用 run_directory_inference 完成切分+批量推理
         if bool(data.get("multi_sample_mode")):
             video_paths: List[str] = list(map(str, data.get("video_paths", [])))
             audio_paths: List[str] = list(map(str, data.get("audio_paths", [])))
@@ -120,74 +129,140 @@ class EmotionV2Model(BaseInferenceModel):
             if n == 0:
                 return {"status": "error", "error": "没有可用的音视频样本", "emotion_score": 0.0}
 
-            probs_list: List[np.ndarray] = []
-            sample_results: List[Dict[str, Any]] = []
-
-            for idx in range(n):
-                vp = Path(video_paths[idx])
-                ap = Path(audio_paths[idx])
-                probs = infer_sample(
-                    vp,
-                    ap,
-                    device=self.device,
-                    vision_processor=self.vision_processor,
-                    audio_processor=self.audio_processor,
-                    vision_model=self.vision_model,
-                    audio_model=self.audio_model,
-                    classifier=self.classifier,
+            # 确定CSV保存路径：如果输入文件来自recordings目录，则保存到同一会话目录
+            # 否则保存到项目根目录的 recordings/emotion_results/
+            project_root = Path(__file__).resolve().parents[2]
+            first_video = Path(video_paths[0])
+            
+            # 尝试从第一个视频路径推断会话目录
+            csv_output = None
+            if "recordings" in first_video.parts:
+                # 找到 recordings 目录后的用户和会话路径
+                try:
+                    rec_idx = first_video.parts.index("recordings")
+                    if len(first_video.parts) > rec_idx + 2:
+                        # 路径格式: recordings/user/session/emotion/1.avi
+                        user_name = first_video.parts[rec_idx + 1]
+                        session_name = first_video.parts[rec_idx + 2]
+                        session_dir = project_root / "recordings" / user_name / session_name
+                        csv_output = session_dir / "emotion_predictions.csv"
+                except (ValueError, IndexError):
+                    pass
+            
+            # 回退：保存到专用的结果目录
+            if csv_output is None:
+                results_dir = project_root / "recordings" / "emotion_results"
+                results_dir.mkdir(parents=True, exist_ok=True)
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                csv_output = results_dir / f"predictions_{timestamp}.csv"
+            
+            # 创建临时目录存放所有输入文件
+            temp_dir = None
+            try:
+                temp_dir = tempfile.mkdtemp(prefix="emotion_v2_")
+                temp_path = Path(temp_dir)
+                
+                # 复制所有视频音频对到临时目录（统一扩展名以便 run_directory_inference 识别）
+                for idx in range(n):
+                    src_video = Path(video_paths[idx])
+                    src_audio = Path(audio_paths[idx])
+                    
+                    # 使用索引作为文件名，保持配对关系
+                    dst_video = temp_path / f"sample_{idx+1}.avi"
+                    dst_audio = temp_path / f"sample_{idx+1}.wav"
+                    
+                    shutil.copy2(src_video, dst_video)
+                    shutil.copy2(src_audio, dst_audio)
+                
+                self.logger.info(f"📹 已准备 {n} 对音视频文件，开始切分+批量推理...")
+                
+                # 调用 run_directory_inference：自动切分+推理+汇总（临时CSV）
+                temp_csv = temp_path / "predictions.csv"
+                results, summary = run_directory_inference(
+                    media_dir=temp_path,
+                    checkpoint=self.checkpoint_path,
+                    vision_model_path=self.vision_model_path,
+                    audio_model_path=self.audio_model_path,
+                    device=str(self.device),
                     vision_frames=self.vision_frames,
                     audio_sampling_rate=self.audio_sampling_rate,
                     audio_max_length=self.audio_max_length,
+                    hidden_dim=self.hidden_dim,
+                    num_classes=self.num_classes,
+                    video_extension=".avi",  # 临时目录中的视频格式
+                    audio_extension=".wav",
+                    preprocess_with_crop=True,  # 启用人脸裁剪+切分为3-6秒片段
+                    raw_video_extension=".avi",  # 原始视频扩展名
+                    raw_audio_extension=".wav",  # 原始音频扩展名
+                    crop_output_dir="crop",  # 裁剪临时目录（已废弃但保留兼容性）
+                    output_csv=temp_csv,
                 )
-                if probs is None:
-                    self.logger.warning(f"样本失败(跳过): {vp.name}")
-                    continue
+                
+                # 将CSV从临时目录移动到项目目录
+                if temp_csv.exists():
+                    csv_output.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(temp_csv), str(csv_output))
+                    self.logger.info(f"📄 CSV结果已保存到: {csv_output}")
+                
+                if not results:
+                    return {"status": "error", "error": "所有样本推理失败", "emotion_score": 0.0}
+                
+                # 提取汇总分数与标签分布
+                emotion_score = summary.get("emotion_score", 0.0) if summary else 0.0
+                mean_probs = summary.get("mean_probabilities", {}) if summary else {}
+                
+                # 构建样本结果（带标签）
+                sample_results = []
+                for idx, rec in enumerate(results):
+                    pred = int(rec.get("predicted_label", 0))
+                    probs = [rec.get(f"prob_class_{i}", 0.0) for i in range(self.num_classes)]
+                    sample_results.append({
+                        "sample_index": idx + 1,
+                        "prediction": pred,
+                        "label": label_names[pred] if pred < len(label_names) else str(pred),
+                        "probabilities": probs,
+                        "video_file": Path(rec.get("video_path", "")).name,
+                        "audio_file": Path(rec.get("audio_path", "")).name,
+                    })
+                
+                elapsed_ms = round((time.time() - start_ts) * 1000.0, 1)
+                
+                # 统计标签分布
+                from collections import Counter
+                labels_dist = Counter([s["label"] for s in sample_results])
+                top_label, top_count = labels_dist.most_common(1)[0] if labels_dist else ("未知", 0)
+                
+                self.logger.info(
+                    f"✅ 情绪(多样本): {emotion_score:.2f} [主:{top_label} {top_count}/{len(sample_results)}] "
+                    f"{elapsed_ms:.0f}ms | CSV已保存: {csv_output}"
+                )
+                
+                return {
+                    "status": "success",
+                    "emotion_score": round(emotion_score, 2),
+                    "sample_results": sample_results,
+                    "num_samples": len(sample_results),
+                    "mean_probabilities": mean_probs,
+                    "inference_time_ms": elapsed_ms,
+                    "inference_mode": "multi_file",
+                    "labels": label_names,
+                    "csv_path": str(csv_output),
+                }
+                
+            except Exception as exc:
+                self.logger.error(f"多样本推理失败: {exc}", exc_info=True)
+                return {"status": "error", "error": str(exc), "emotion_score": 0.0}
+            finally:
+                # 清理临时目录（可选：保留用于调试）
+                if temp_dir and Path(temp_dir).exists():
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception:
+                        pass
 
-                probs_np = probs.detach().cpu().numpy()
-                pred = int(np.argmax(probs_np))
-                probs_list.append(probs_np)
-                sample_results.append({
-                    "sample_index": idx + 1,
-                    "prediction": pred,
-                    "probabilities": probs_np.tolist(),
-                    "video_file": vp.name,
-                    "audio_file": ap.name,
-                })
-
-            if not probs_list:
-                return {"status": "error", "error": "所有样本推理失败", "emotion_score": 0.0}
-
-            predictions = []
-            for arr in probs_list:
-                rec = {f"prob_class_{i}": float(p) for i, p in enumerate(arr.tolist())}
-                predictions.append(rec)
-
-            # 汇总分数（使用 v2 提供的统计函数，返回 50-90 区间）
-            summary = summarize_emotion_predictions(
-                predictions=[{**r} for r in predictions], num_classes=self.num_classes
-            )
-            if summary is not None:
-                emotion_score = float(summary.get("emotion_score", 0.0))
-            else:
-                # 回退: 用目标类(1)概率的均值映射到0-100
-                target_probs = [rec.get("prob_class_1", 0.0) for rec in predictions]
-                emotion_score = float(np.mean(target_probs) * 100.0)
-
-            elapsed_ms = round((time.time() - start_ts) * 1000.0, 1)
-            self.logger.info(f"✅ 情绪(多样本): {emotion_score:.2f} | {len(sample_results)} 样本 | {elapsed_ms:.0f}ms")
-            return {
-                "status": "success",
-                "emotion_score": round(emotion_score, 2),
-                "sample_results": sample_results,
-                "num_samples": len(sample_results),
-                "inference_time_ms": elapsed_ms,
-                "inference_mode": "multi_file",
-            }
-
-        # 单样本模式
+        # 单样本模式：直接推理单个文件
         if bool(data.get("file_mode")):
-            from .emotion_v2.infer_v2 import infer_sample  # type: ignore
-
             video_path = Path(str(data.get("video_path", "")))
             audio_path = Path(str(data.get("audio_path", "")))
             if not video_path.exists() or not audio_path.exists():
@@ -218,13 +293,17 @@ class EmotionV2Model(BaseInferenceModel):
             score = float(np.max(probs_np) * 100.0)  # 简单以最大概率映射 0-100
 
             elapsed_ms = round((time.time() - start_ts) * 1000.0, 1)
+            self.logger.info(f"✅ 情绪(单样本): {score:.2f} [{label_names[pred]}] {elapsed_ms:.0f}ms")
+            
             return {
                 "status": "success",
                 "emotion_score": round(score, 2),
                 "prediction": pred,
+                "prediction_label": label_names[pred] if pred < len(label_names) else str(pred),
                 "probabilities": probs_np.tolist(),
                 "inference_time_ms": elapsed_ms,
                 "inference_mode": "file",
+                "labels": label_names,
             }
 
         # 其他模式（例如 base64）不支持 —— 可按需扩展

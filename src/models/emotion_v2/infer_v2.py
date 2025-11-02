@@ -315,7 +315,18 @@ def run_directory_inference(
             audio_file = video_file.with_suffix(audio_extension)
             segment_pairs.append((video_file, audio_file))
 
-    for video_file, audio_file in segment_pairs:
+    # 类别标签映射
+    label_names = {
+        0: "开心",
+        1: "中性", 
+        2: "消极",
+    }
+    
+    import time
+    
+    for idx, (video_file, audio_file) in enumerate(segment_pairs, 1):
+        segment_start = time.time()
+        
         probs = infer_sample(
             video_file,
             audio_file,
@@ -335,29 +346,70 @@ def run_directory_inference(
 
         probs_np = probs.detach().cpu().numpy()
         predicted = int(np.argmax(probs_np))
+        inference_time_ms = round((time.time() - segment_start) * 1000.0, 1)
+        
+        # 获取中文标签
+        label_cn = label_names.get(predicted, f"未知({predicted})")
+        max_prob = float(np.max(probs_np))
 
         record: Dict[str, object] = {
+            "segment_index": idx,
+            "video_file": video_file.name,
+            "audio_file": audio_file.name,
             "video_path": str(video_file),
             "audio_path": str(audio_file),
-            "predicted_label": predicted,
+            "predicted_label": predicted,  # 保持数字类型，用于程序读取
+            "predicted_label_cn": label_cn,  # 中文标签，用于人类阅读
+            "confidence": round(max_prob, 4),
         }
 
-        for idx, prob in enumerate(probs_np):
-            record[f"prob_class_{idx}"] = float(prob)
+        # 添加各类别概率
+        for class_idx in range(num_classes):
+            prob_val = float(probs_np[class_idx]) if class_idx < len(probs_np) else 0.0
+            record[f"prob_class_{class_idx}"] = round(prob_val, 4)
+            record[f"prob_{label_names.get(class_idx, f'class_{class_idx}')}"] = round(prob_val, 4)
+        
+        record["inference_time_ms"] = inference_time_ms
 
         results.append(record)
 
-        print(f"{video_file.name} -> class {predicted} | probs: {probs_np}")
+        print(f"[{idx}/{len(segment_pairs)}] {video_file.name} -> {label_cn}({predicted}) | 置信度:{max_prob:.3f} | {inference_time_ms:.0f}ms")
 
     if output_csv and results:
         output_path = Path(output_csv)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 写入详细结果
         fieldnames = list(results[0].keys())
         with output_path.open("w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(results)
-        print(f"Saved batch predictions to {output_path}")
+            
+            # 添加空行分隔
+            fh.write("\n")
+            
+            # 添加汇总统计信息
+            fh.write("# 汇总统计\n")
+            fh.write(f"总样本数,{len(results)}\n")
+            
+            # 统计各类别数量
+            from collections import Counter
+            label_counts = Counter([r.get("predicted_label_cn", "未知") for r in results])
+            fh.write("\n# 标签分布\n")
+            fh.write("标签,数量,百分比\n")
+            for label, count in label_counts.most_common():
+                percentage = (count / len(results)) * 100
+                fh.write(f"{label},{count},{percentage:.1f}%\n")
+            
+            # 平均推理时间
+            avg_time = sum(r.get("inference_time_ms", 0) for r in results) / len(results)
+            total_time = sum(r.get("inference_time_ms", 0) for r in results)
+            fh.write(f"\n# 性能统计\n")
+            fh.write(f"平均推理时间(ms),{avg_time:.1f}\n")
+            fh.write(f"总推理时间(ms),{total_time:.1f}\n")
+            
+        print(f"✅ 已保存 {len(results)} 条推理记录到: {output_path}")
 
     from .infer_v2 import summarize_emotion_predictions  # local import for reuse
     summary = summarize_emotion_predictions(results, num_classes=num_classes)

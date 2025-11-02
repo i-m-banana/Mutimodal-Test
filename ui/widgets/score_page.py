@@ -398,7 +398,7 @@ class HistoryDialog(QDialog):
             elif metric == "脉搏":
                 ax.set_ylabel("脉搏 (次/分)", fontproperties=self.zh_font, fontsize=16)
             elif metric == "舒尔特准确率":
-                ax.set_ylabel("准确率 (%)", fontproperties=self.zh_font, fontsize=16)
+                ax.set_ylabel("专注度 (%)", fontproperties=self.zh_font, fontsize=16)
             else:
                 ax.set_ylabel("分数", fontproperties=self.zh_font, fontsize=16)
 
@@ -1170,7 +1170,7 @@ class ScorePage(QWidget):
         
         # 定义要展示的指标（不包括综合得分）
         metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", "收缩压", "舒张压", "脉搏"]
-        metric_labels = ["疲劳", "情绪", "脑负荷", "准确率", "收缩压", "舒张压", "脉搏"]
+        metric_labels = ["疲劳", "情绪", "脑负荷", "专注度", "收缩压", "舒张压", "脉搏"]
         
         # 获取本次测试值
         current_values = []
