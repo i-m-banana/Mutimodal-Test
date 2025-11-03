@@ -533,11 +533,45 @@ class FatigueAssessmentService:
         }
     
     def _publish_result(self, result: Dict[str, Any]) -> None:
-        """发布评估结果"""
+        """发布评估结果
+        
+        同时发布两种格式的事件：
+        1. FATIGUE_ASSESSMENT_RESULT - 完整评估结果（用于后端日志/存储）
+        2. DETECTION_RESULT - 前端兼容格式（用于UI实时显示）
+        """
+        # 发布完整评估结果事件
         self.bus.publish(Event(
             topic=EventTopic.FATIGUE_ASSESSMENT_RESULT,
             payload=result
         ))
+        
+        # 同时发布前端兼容格式的检测结果事件
+        # 前端期望的格式: detector="model_fatigue", predictions={"fatigue_score": ..., "prediction_class": ...}
+        if result.get("status") == "success":
+            fatigue_score = result.get("fatigue_score", 0.0)
+            fatigue_level = result.get("fatigue_level", "未知")
+            
+            # 转换为前端期望的格式
+            self.bus.publish(Event(
+                topic=EventTopic.DETECTION_RESULT,
+                payload={
+                    "detector": "model_fatigue",
+                    "status": "detected",
+                    "label": "fatigue",
+                    "predictions": {
+                        "fatigue_score": fatigue_score,
+                        "prediction_class": fatigue_level,
+                        "confidence": result.get("confidence", 0.0),
+                        "fusion_method": result.get("fusion_method", "unknown"),
+                        "components": result.get("components", {}),
+                        "inference_mode": "session_assessment"  # 标识这是会话评估结果
+                    },
+                    "request_id": result.get("request_id"),
+                    "timestamp": time.time()
+                }
+            ))
+            
+            self.logger.info(f"✅ 同时发布前端兼容格式: fatigue_score={fatigue_score:.2f}, level={fatigue_level}")
         
         self.logger.info(f"\n✅ 疲劳度评估完成")
         self.logger.info(f"{'='*60}\n")

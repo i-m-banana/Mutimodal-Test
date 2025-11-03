@@ -93,45 +93,12 @@ class EEGService:
         if not save_dir:
             return {"status": "error", "error": "save_dir is required"}
         
-        # ✅ 修复：允许运行时更新 save_dir
-        new_save_dir = os.path.join(os.path.abspath(save_dir), 'eeg')
-        
         if self._running:
-            # 如果save_dir改变了，更新recorder的save_dir并保存旧数据
-            if self._save_dir != new_save_dir:
-                self.logger.info(f"🔄 检测到新会话，更新EEG保存目录: {self._save_dir} → {new_save_dir}")
-                
-                # 先保存当前数据到旧目录
-                if self._recorder:
-                    try:
-                        self._recorder._save_data()
-                        self.logger.info(f"💾 旧会话EEG数据已保存")
-                    except Exception as e:
-                        self.logger.warning(f"保存旧会话数据失败: {e}")
-                
-                # 更新save_dir并重置recorder
-                self._save_dir = new_save_dir
-                os.makedirs(self._save_dir, exist_ok=True)
-                
-                # 清空去重集合，允许新会话保存数据
-                if hasattr(self, '_saved_sessions'):
-                    self._saved_sessions.clear()
-                    self.logger.debug("🔄 已清空EEG保存去重集合")
-                
-                # 重新创建recorder以使用新目录
-                self._recorder = EEGRecorder(
-                    save_dir=self._save_dir,
-                    bus=self.bus,
-                    logger=self.logger
-                )
-                asyncio.run_coroutine_threadsafe(self._recorder.start(), self._loop)
-                self.logger.info(f"✅ EEG采集已切换到新目录: {self._save_dir}")
-            
             self._ensure_inference_polling()
-            return {"status": "running", "save_dir": self._save_dir, "updated": self._save_dir == new_save_dir}
+            return {"status": "already-running", "save_dir": self._save_dir}
 
         self._ensure_loop_thread()
-        self._save_dir = new_save_dir
+        self._save_dir = os.path.join(os.path.abspath(save_dir), 'eeg')
         os.makedirs(self._save_dir, exist_ok=True)
 
         def _create_and_start():
@@ -192,23 +159,9 @@ class EEGService:
             return {"status": "error", "error": str(exc)}
     
     def _on_fatigue_assessment_request(self, event: Event) -> None:
-        """处理疲劳度评估请求，立即保存当前EEG数据（去重）"""
+        """处理疲劳度评估请求，立即保存当前EEG数据"""
         if not self._running:
             return
-        
-        # ✅ 去重检查：使用 session_dir 防止同一会话重复保存
-        payload = event.payload or {}
-        session_dir = payload.get("session_dir")
-        
-        if not hasattr(self, '_saved_sessions'):
-            self._saved_sessions = set()
-        
-        if session_dir and session_dir in self._saved_sessions:
-            self.logger.info(f"⏭️ EEG数据已保存，跳过重复请求: {session_dir}")
-            return
-        
-        if session_dir:
-            self._saved_sessions.add(session_dir)
         
         self.logger.info("📊 收到疲劳度评估请求，立即保存EEG数据...")
         self.save_current_data()

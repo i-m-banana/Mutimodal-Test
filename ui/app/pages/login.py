@@ -154,7 +154,7 @@ class RegisterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("用户注册")
         self.setModal(True)
-        self.setFixedSize(500, 500)  # ✅ 增大对话框尺寸
+        self.setFixedSize(400, 450)
         self._init_ui()
     
     def _init_ui(self) -> None:
@@ -166,50 +166,54 @@ class RegisterDialog(QDialog):
         # 标题
         title = QLabel("创建新账户")
         title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("阿里健康体2.0 中文 45 R", 28, QFont.Bold))  # ✅ 增大标题字号
-        title.setStyleSheet("color: #1565C0; margin-bottom: 15px;")
+        title.setFont(QFont("阿里健康体2.0 中文 45 R", 22, QFont.Bold))
+        title.setStyleSheet("color: #1565C0; margin-bottom: 10px;")
         layout.addWidget(title)
         
-        # ❌ 删除提示小字，不占位置
+        # 提示文字
+        hint = QLabel("请填写以下信息完成注册")
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setStyleSheet("color: #666; font-size: 15px; margin-bottom: 10px;")
+        layout.addWidget(hint)
         
-        layout.addSpacing(20)  # ✅ 增加顶部间距
+        layout.addSpacing(10)
         
         # 用户名输入
         username_label = QLabel("用户名:")
-        username_label.setStyleSheet("color: #333; font-size: 18px; font-weight: bold;")  # ✅ 增大标签字号
+        username_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
         layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("请输入用户名 (3-20个字符)")
         self.username_input.setObjectName("loginInput")
-        self.username_input.setFixedHeight(50)  # ✅ 增大输入框高度
+        self.username_input.setFixedHeight(45)
         layout.addWidget(self.username_input)
         
         # 密码输入
         password_label = QLabel("密码:")
-        password_label.setStyleSheet("color: #333; font-size: 18px; font-weight: bold;")  # ✅ 增大标签字号
+        password_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
         layout.addWidget(password_label)
         
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("请输入密码 (6-20个字符)")
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setObjectName("loginInput")
-        self.password_input.setFixedHeight(50)  # ✅ 增大输入框高度
+        self.password_input.setFixedHeight(45)
         layout.addWidget(self.password_input)
         
         # 确认密码输入
         confirm_label = QLabel("确认密码:")
-        confirm_label.setStyleSheet("color: #333; font-size: 18px; font-weight: bold;")  # ✅ 增大标签字号
+        confirm_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
         layout.addWidget(confirm_label)
         
         self.confirm_input = QLineEdit()
         self.confirm_input.setPlaceholderText("请再次输入密码")
         self.confirm_input.setEchoMode(QLineEdit.Password)
         self.confirm_input.setObjectName("loginInput")
-        self.confirm_input.setFixedHeight(50)  # ✅ 增大输入框高度
+        self.confirm_input.setFixedHeight(45)
         layout.addWidget(self.confirm_input)
         
-        layout.addSpacing(20)  # ✅ 增加底部间距
+        layout.addSpacing(10)
         
         # 按钮布局
         button_layout = QHBoxLayout()
@@ -218,7 +222,7 @@ class RegisterDialog(QDialog):
         # 取消按钮
         cancel_button = QPushButton("取消")
         cancel_button.setObjectName("finishButton")
-        cancel_button.setFixedHeight(50)  # ✅ 增大按钮高度
+        cancel_button.setFixedHeight(45)
         cancel_button.setCursor(Qt.PointingHandCursor)
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
@@ -226,7 +230,7 @@ class RegisterDialog(QDialog):
         # 注册按钮
         register_button = QPushButton("注册")
         register_button.setObjectName("successButton")
-        register_button.setFixedHeight(50)  # ✅ 增大按钮高度
+        register_button.setFixedHeight(45)
         register_button.setCursor(Qt.PointingHandCursor)
         register_button.clicked.connect(self._perform_register)
         button_layout.addWidget(register_button)

@@ -597,57 +597,6 @@ class TestPage(QWidget):
         except Exception as exc:
             logger.error(f"处理推理结果时出错: {exc}", exc_info=True)
 
-    def _on_fatigue_assessment_result(self, payload: dict) -> None:
-        """处理疲劳度评估结果（文件模式，SART结束后）
-        
-        Args:
-            payload: 疲劳评估结果数据,格式:
-                {
-                    "status": "success",
-                    "request_id": "...",
-                    "session_dir": "...",
-                    "subject_id": "zyp0",
-                    "fatigue_score": 83.88,
-                    "fatigue_level": "重度疲劳",
-                    "confidence": 0.65,
-                    "fusion_method": "eeg_priority",
-                    "components": {
-                        "eeg": {"score": 99.65, "weight": 0.85, "valid": True},
-                        "rgb": {"score": 50.0, "weight": 0.15, "valid": True}
-                    }
-                }
-        """
-        try:
-            status = payload.get("status", "error")
-            
-            if status != "success":
-                error_msg = payload.get("error", "未知错误")
-                logger.error(f"❌ 疲劳度评估失败: {error_msg}")
-                return
-            
-            fatigue_score = payload.get("fatigue_score", 0.0)
-            fatigue_level = payload.get("fatigue_level", "未知")
-            confidence = payload.get("confidence", 0.0)
-            session_dir = payload.get("session_dir", "")
-            
-            logger.info(
-                f"📊 收到文件模式疲劳度评估结果: "
-                f"score={fatigue_score:.2f}, level={fatigue_level}, "
-                f"confidence={confidence:.2%}, session={session_dir}"
-            )
-            
-            # 将评估结果添加到累积列表（用于计算平均值）
-            self._fatigue_scores_list.append(fatigue_score)
-            
-            # 更新最后一次的疲劳度分数
-            self._last_fatigue_score = fatigue_score
-            
-            # 可选：显示在UI上（如果需要实时反馈）
-            # self._update_fatigue_only(fatigue_score)
-            
-        except Exception as exc:
-            logger.error(f"处理疲劳度评估结果时出错: {exc}", exc_info=True)
-
     def _update_fatigue_only(self, score_f) -> None:
         """只更新疲劳度显示（安全，失败不影响UI）"""
         try:
@@ -902,8 +851,6 @@ class TestPage(QWidget):
         # 连接后端推理结果信号 (用于获取真实的疲劳度分数)
         backend_client = get_backend_client()
         backend_client.detection_result.connect(self._on_detection_result)
-        # ✅ 连接疲劳度评估结果信号（文件模式，SART结束后）
-        backend_client.fatigue_assessment_result.connect(self._on_fatigue_assessment_result)
 
     def _setup_mic_button_animation(self):
         """为麦克风按钮创建光晕（阴影模糊）动画，以避免布局抖动。"""
@@ -2740,12 +2687,12 @@ class TestPage(QWidget):
         self._stop_camera_preview()
         if HAS_MULTIMODAL:
             try:
-                # ✅ 只调用一次 stop，cleanup 会自动清理资源，不需要手动调用
-                stop_result = multidata_stop_collection()
+                multidata_stop_collection()
                 self.multimodal_collector = None
-                logger.info(f"多模态数据采集已停止: {stop_result.get('status')}")
+                logger.info("多模态数据采集已停止")
                 self._persist_multimodal_paths_to_db()
-                # cleanup_collector()  # ❌ 去掉重复调用，stop 已经完成清理
+                from ...services.backend_proxy import cleanup_collector
+                cleanup_collector()
             except Exception as e:
                 logger.error(f"停止多模态数据采集时出错: {e}")
             finally:
@@ -2803,12 +2750,11 @@ class TestPage(QWidget):
 
         if HAS_MULTIMODAL:
             try:
-                # ✅ 只调用一次 stop，cleanup 会自动清理资源，不需要手动调用
-                stop_result = multidata_stop_collection()
+                multidata_stop_collection()
                 self.multimodal_collector = None
-                logger.info(f"页面隐藏时多模态采集已停止: {stop_result.get('status')}")
                 self._persist_multimodal_paths_to_db()
-                # cleanup_collector()  # ❌ 去掉重复调用
+                from ...services.backend_proxy import cleanup_collector
+                cleanup_collector()
             except Exception as e:
                 logger.error(f"页面隐藏时停止多模态数据采集失败: {e}")
             finally:

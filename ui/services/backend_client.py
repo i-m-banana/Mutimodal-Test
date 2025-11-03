@@ -37,7 +37,6 @@ class BackendClient(QObject):
     camera_frame = pyqtSignal(dict)
     multimodal_frame = pyqtSignal(dict)
     audio_level = pyqtSignal(dict)
-    fatigue_assessment_result = pyqtSignal(dict)  # ✅ 疲劳度评估结果信号
     raw_event = pyqtSignal(object)
     connection_state_changed = pyqtSignal(bool)
     command_failed = pyqtSignal(str, str)
@@ -177,9 +176,6 @@ class BackendClient(QObject):
                 self.audio_level.emit(payload)
             elif topic == "multimodal.frame":
                 self.multimodal_frame.emit(payload)
-            elif topic == "fatigue.assessment.result":
-                # ✅ 转发疲劳度评估结果（文件模式，SART结束后）
-                self.fatigue_assessment_result.emit(payload)
             return
         if msg_type == "response":
             request_id = data.get("id")
