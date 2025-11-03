@@ -9,6 +9,7 @@ import os
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -681,10 +682,43 @@ class MultimodalService:
         with self._lock:
             if not self._collector:
                 return {"status": "idle"}
+            
+            # 保存录制信息用于疲劳度评估
+            username = self._collector.username
+            save_dir = self._collector.save_dir
+            
             self._collector.stop()
             self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
             self._snapshot_requested = False
+            
+            # ✅ 录制完成后，触发疲劳度评估（只触发一次）
+            # 使用 session_dir 作为去重键，防止同一会话多次触发
+            if self.bus and save_dir:
+                # 获取session目录（save_dir的父目录）
+                session_dir = str(Path(save_dir).parent)
+                
+                # 去重检查：使用 session_dir 作为键
+                if not hasattr(self, '_assessed_sessions'):
+                    self._assessed_sessions = set()
+                
+                if session_dir in self._assessed_sessions:
+                    self.logger.info(f"⏭️ 疲劳度评估已触发，跳过重复请求: {session_dir}")
+                else:
+                    self._assessed_sessions.add(session_dir)
+                    self.logger.info(f"📊 录制完成，触发疲劳度评估: {session_dir}, 被试ID: {username}")
+                    
+                    # 发布疲劳度评估请求事件
+                    self.bus.publish(Event(
+                        topic=EventTopic.FATIGUE_ASSESSMENT_REQUEST,
+                        payload={
+                            "request_id": uuid.uuid4().hex,
+                            "session_dir": session_dir,
+                            "subject_id": username,  # 使用username作为subject_id
+                            "timestamp": time.time()
+                        }
+                    ))
+        
         return {"status": "stopped"}
 
     def cleanup(self) -> Dict[str, Any]:

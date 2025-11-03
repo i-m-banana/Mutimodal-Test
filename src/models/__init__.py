@@ -2,14 +2,16 @@
 
 from .base_model import BaseModel
 from .emotion_v2_model import EmotionV2Model
-from .fatigue_model import FatigueModel
+from .rgb_fatigue_model import RGBFatigueModel
+from .eeg_fatigue_model import EEGFatigueModel
 from .eeg_model import EEGModel
 from .model_manager import ModelManager
 
 __all__ = [
     "BaseModel",
     "EmotionV2Model",
-    "FatigueModel",
+    "RGBFatigueModel",
+    "EEGFatigueModel",
     "EEGModel",
     "ModelManager",
 ]

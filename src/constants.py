@@ -19,6 +19,8 @@ class EventTopic(str, Enum):
     DETECTION_RESULT = "detector.result"
     EMOTION_REQUEST = "emotion.request"
     EEG_REQUEST = "eeg.request"
+    FATIGUE_ASSESSMENT_REQUEST = "fatigue.assessment.request"
+    FATIGUE_ASSESSMENT_RESULT = "fatigue.assessment.result"
     SYSTEM_HEARTBEAT = "system.heartbeat"
     UI_COMMAND = "ui.command"
     UI_RESPONSE = "ui.response"

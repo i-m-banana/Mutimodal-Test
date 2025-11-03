@@ -187,7 +187,10 @@ class SARTPage(QWidget):
         
         # 记录SART开始时间戳（触发1 for short, 20 for long）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录SART开始时间戳: {call_timestamp} (模式={self.mode})")
         
         # ⚠️ 注意：EEG采集应该已经在运行中
@@ -287,7 +290,10 @@ class SARTPage(QWidget):
         
         # 记录SART结束时间戳（触发4 for short, 21 for long）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录SART结束时间戳: {call_timestamp} (模式={self.mode})")
         
         # ⚠️ 注意：EEG采集继续运行，不在这里停止
@@ -307,7 +313,7 @@ class SARTPage(QWidget):
         # 显示完成信息,等待用户按键
         self.digit_label.setVisible(False)
         self.progress_label.setVisible(False)
-        self.completion_label.setText(f"任务结束\n\n准确率: {accuracy:.1f}%\n\n按任意键继续")
+        self.completion_label.setText(f"任务结束\n\n\n\n按任意键继续")
         self.completion_label.setVisible(True)
         
         # 设置标志,表示等待按键确认
@@ -397,13 +403,15 @@ class SARTPage(QWidget):
         except Exception as e:
             config.logger.error(f"❌ 保存SART结果失败: {e}", exc_info=True)
     
-    def set_part_timestamps(self, timestamps: list) -> None:
+    def set_part_timestamps(self, timestamps: list, save_callback=None) -> None:
         """设置时间戳列表（与TestPage共享）
         
         Args:
             timestamps: 时间戳列表引用
+            save_callback: 保存时间戳的回调函数（可选）
         """
         self.part_timestamps = timestamps
+        self._save_timestamp_callback = save_callback
     
     def set_mode(self, mode: str, duration: int = None) -> None:
         """
@@ -414,7 +422,7 @@ class SARTPage(QWidget):
             duration: 自定义时长(秒)，None则使用默认值
         """
         self.mode = mode
-        self.total_duration = duration if duration else (300 if mode == "short" else 1500)
+        self.total_duration = duration if duration else (120 if mode == "short" else 1500)
         
         mode_text = "低负荷采集" if mode == "short" else "疲劳诱发"
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
@@ -455,8 +463,12 @@ class SARTPage(QWidget):
                 config.logger.info("⏭️ 用户跳过SART测试")
                 # 记录开始和结束时间戳（快速标记）
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)  # 开始
-                self.part_timestamps.append(call_timestamp)  # 结束
+                if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+                    self._save_timestamp_callback(call_timestamp)  # 开始
+                    self._save_timestamp_callback(call_timestamp)  # 结束
+                else:
+                    self.part_timestamps.append(call_timestamp)  # 开始
+                    self.part_timestamps.append(call_timestamp)  # 结束
                 
                 # 即使跳过也要创建 sart 目录并尝试保存数据（如果有试次记录）
                 self._ensure_sart_directory()

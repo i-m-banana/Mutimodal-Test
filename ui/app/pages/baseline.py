@@ -138,7 +138,10 @@ class BaselineCalibrationPage(QWidget):
         
         # 记录基线开始时间戳（触发10）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录基线开始时间戳: {call_timestamp}")
         
         # ✅ 启动疲劳度检测（多模态采集）
@@ -179,7 +182,10 @@ class BaselineCalibrationPage(QWidget):
         
         # 记录基线结束时间戳（触发11）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录基线结束时间戳: {call_timestamp}")
         
         # ⚠️ 注意：EEG采集继续运行，不在这里停止
@@ -216,8 +222,12 @@ class BaselineCalibrationPage(QWidget):
                 config.logger.info("⏭️ 用户跳过基线校准")
                 # 记录开始和结束时间戳（快速标记）
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)  # 开始
-                self.part_timestamps.append(call_timestamp)  # 结束
+                if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+                    self._save_timestamp_callback(call_timestamp)  # 开始
+                    self._save_timestamp_callback(call_timestamp)  # 结束
+                else:
+                    self.part_timestamps.append(call_timestamp)  # 开始
+                    self.part_timestamps.append(call_timestamp)  # 结束
                 
                 # 显示跳过提示,等待按键继续
                 self.instruction_label.setVisible(False)
@@ -234,13 +244,15 @@ class BaselineCalibrationPage(QWidget):
         
         super().keyPressEvent(event)
     
-    def set_part_timestamps(self, timestamps: list) -> None:
+    def set_part_timestamps(self, timestamps: list, save_callback=None) -> None:
         """设置时间戳列表（与TestPage共享）
         
         Args:
             timestamps: 时间戳列表引用
+            save_callback: 保存时间戳的回调函数（可选）
         """
         self.part_timestamps = timestamps
+        self._save_timestamp_callback = save_callback
     
     def set_session_info(self, session_dir: str, current_user: str) -> None:
         """设置会话信息（用于EEG采集）

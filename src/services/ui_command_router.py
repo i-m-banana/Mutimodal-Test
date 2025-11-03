@@ -229,8 +229,8 @@ class UICommandRouter:
         if action == "tts.speak":
             return self.tts_service.speak(body)
         if action == "eeg.start":
-            save_dir = body.get("save_dir", "")
-            return self.eeg_service.start_recording(save_dir)
+            # 直接传递所有body参数，避免重复传递save_dir
+            return self.eeg_service.start_recording(**body)
         if action == "eeg.stop":
             return self.eeg_service.stop_recording()
         if action == "eeg.snapshot":

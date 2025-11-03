@@ -1,15 +1,23 @@
 """统一推理服务 - 集成模式
 
 直接调用集成模型进行推理
+
+注意事项：
+1. RGB疲劳度和EEG疲劳度已从实时推理中移除
+2. 所有疲劳度评估现在由FatigueAssessmentService在SART测试结束后统一处理
+3. 使用保存的视频和EEG数据文件进行离线推理
+4. 仅保留EEG脑负荷和情绪识别的实时推理
+
+优化：使用统一线程池管理，避免创建独立线程池
 """
 
 import importlib
 import logging
 from typing import Any, Dict, List, Optional
-from concurrent.futures import ThreadPoolExecutor
 
 from ..constants import EventTopic
 from ..core.event_bus import Event, EventBus
+from ..core.thread_pool import get_thread_pool
 from ..models.base_inference_model import BaseInferenceModel
 
 
@@ -40,8 +48,8 @@ class UnifiedInferenceService:
         # 集成模式的模型实例
         self.integrated_models: Dict[str, BaseInferenceModel] = {}
         
-        # 线程池用于异步处理
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="inference")
+        # 使用统一线程池（CPU密集型任务）
+        self._thread_pool = get_thread_pool()
         
         # EEG服务引用（通过EventBus获取，延迟初始化）
         self._eeg_service = None
@@ -141,6 +149,9 @@ class UnifiedInferenceService:
         except Exception as e:
             self.logger.error(f"取消订阅失败: {e}")
         
+        # 注意：不需要关闭线程池，由统一线程池管理器负责
+        self.logger.info("推理任务已停止提交到线程池")
+        
         # 卸载集成模型
         for model_type, model in self.integrated_models.items():
             try:
@@ -150,14 +161,15 @@ class UnifiedInferenceService:
                 self.logger.error(f"卸载集成模型失败 ({model_type}): {e}")
         self.integrated_models.clear()
         
-        # 关闭线程池
-        self._executor.shutdown(wait=True)
-        
         self._running = False
         self.logger.info("✅ 统一推理服务已停止")
     
     def _on_multimodal_data(self, event: Event) -> None:
-        """处理多模态数据,分发到各模型"""
+        """处理多模态数据,分发到情绪识别模型
+        
+        注意：RGB疲劳度推理已移至 FatigueAssessmentService，
+        在录制完成后使用文件路径进行离线推理，不在此处实时处理
+        """
         payload = event.payload or {}
         
         # 提取数据
@@ -165,6 +177,10 @@ class UnifiedInferenceService:
         timestamp = payload.get("timestamp")
         frame_count = payload.get("frame_count", 0)
         elapsed_time = payload.get("elapsed_time", 0.0)
+        
+        # 检查采集状态
+        if status != "running":
+            return
         
         # 优先使用内存模式(避免重复I/O)
         memory_mode = payload.get("memory_mode", False)
@@ -228,38 +244,18 @@ class UnifiedInferenceService:
                 # 没有RGB帧序列数据时,静默跳过
                 return
         
-        # 检查采集状态
-        if status != "running":
-            return
-        
-        # 验证帧数量是否足够(避免模型推理失败)
-        # 疲劳度模型需要足够的帧序列(至少30帧)
-        MIN_FRAMES_FOR_FATIGUE = 30
-        
-        # 检查帧数是否足够
-        if memory_mode:
-            # 内存模式: 检查数组长度
-            if len(rgb_frames_memory) < MIN_FRAMES_FOR_FATIGUE:
-                # 数据不足时静默跳过
-                return
-        elif file_mode:
-            # 文件模式: 检查 frame_count 元数据
-            if frame_count < MIN_FRAMES_FOR_FATIGUE:
-                # 数据不足时静默跳过,避免日志刷屏
-                return
-        else:
-            # Base64模式: 检查数组长度
-            if len(rgb_frames_b64) < MIN_FRAMES_FOR_FATIGUE:
-                # 数据不足时静默跳过
-                return
-        
         metadata = {
             "timestamp": timestamp,
             "frame_count": frame_count
         }
         
-        # 分发到疲劳度模型(使用完整的多模态数据)
-        if "fatigue" in self.integrated_models:
+        # ===== 注意:RGB疲劳度推理已从此处移除 =====
+        # RGB疲劳度现在在 FatigueAssessmentService 中处理
+        # 前端录制完成后,发送 FATIGUE_ASSESSMENT_REQUEST 事件
+        # 使用保存的视频文件进行离线推理
+        
+        # 保留情绪识别的实时推理(如果需要)
+        if "emotion" in self.integrated_models:
             inference_data = {
                 "elapsed_time": elapsed_time
             }
@@ -286,7 +282,7 @@ class UnifiedInferenceService:
                     "eyetrack_samples": eyetrack_samples,
                 })
             
-            self._submit_inference("fatigue", inference_data, metadata)
+            self._submit_inference("emotion", inference_data, metadata)
     
     def _on_emotion_request(self, event: Event) -> None:
         """处理情绪分析请求"""
@@ -391,8 +387,8 @@ class UnifiedInferenceService:
                         self.logger.warning(f"EEG通道长度不匹配 {len(ch1_data)}≠{len(ch2_data)}")
                         return
                     
-                    # 转换为 [n_samples, 2] 格式
-                    eeg_signal = np.column_stack([ch1_data, ch2_data]).tolist()
+                    # 转换为 [n_samples, 2] 格式（numpy数组，避免大list的内存开销）
+                    eeg_signal = np.column_stack([ch1_data, ch2_data])
 
                     simulation_mode = False
                     try:
@@ -402,12 +398,13 @@ class UnifiedInferenceService:
                         # 诊断信息获取失败时，保持默认值
                         self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
                     
-                    # 执行推理
+                    # 执行推理 - EEG脑负荷模型
                     if "eeg" in self.integrated_models:
-                        self.logger.debug(f"🧠 开始EEG推理 ({len(ch1_data)}样本)")
+                        self.logger.debug(f"🧠 开始EEG脑负荷推理 ({len(ch1_data)}样本)")
+                        # 创建数据副本以避免共享引用
                         inference_data = {
                             "memory_mode": memory_mode,
-                            "eeg_signal": eeg_signal,
+                            "eeg_signal": eeg_signal.copy(),  # 创建副本
                             "sampling_rate": sampling_rate,
                             "subject_id": subject_id,
                             "simulation_mode": simulation_mode,
@@ -420,14 +417,30 @@ class UnifiedInferenceService:
                         result = self._infer_integrated("eeg", inference_data)
                         if result:
                             self._publish_result("eeg", result, metadata)
-                    else:
-                        self.logger.warning("EEG模型未加载到integrated_models中")
+                        # 清理推理数据
+                        inference_data.clear()
+                    
+                    # ===== 注意：EEG疲劳度推理已从此处移除 =====
+                    # EEG疲劳度现在在 FatigueAssessmentService 中处理
+                    # SART测试结束后，使用保存的EEG数据文件进行离线推理
+                    # 不再进行实时推理，避免重复计算和资源浪费
+                    
+                    if "eeg" not in self.integrated_models:
+                        self.logger.warning("EEG脑负荷模型未加载到integrated_models中")
                     
                 except Exception as exc:
                     self.logger.error(f"EEG推理失败: {exc}", exc_info=True)
+                finally:
+                    # 清理EEG信号数据
+                    eeg_signal = None
+                    ch1_data = None
+                    ch2_data = None
+                    window_data = None
+                    import gc
+                    gc.collect()
             
-            # 提交到线程池异步执行
-            self._executor.submit(_fetch_and_infer)
+            # 提交到CPU线程池异步执行
+            self._thread_pool.submit_cpu_task(_fetch_and_infer)
             return
         
         # 如果已经有eeg_signal，直接推理
@@ -435,6 +448,12 @@ class UnifiedInferenceService:
             self.logger.warning("EEG分析请求缺少信号数据")
             return
         
+        # 转换为numpy数组以便复制
+        import numpy as np
+        if not isinstance(eeg_signal, np.ndarray):
+            eeg_signal = np.array(eeg_signal)
+        
+        # EEG脑负荷模型
         if "eeg" in self.integrated_models:
             simulation_mode = payload.get("simulation_mode")
 
@@ -448,9 +467,10 @@ class UnifiedInferenceService:
                 except Exception as diag_exc:
                     self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
 
+            # 创建数据副本，避免多个模型共享同一数据引用
             inference_data = {
                 "memory_mode": memory_mode,
-                "eeg_signal": eeg_signal,
+                "eeg_signal": eeg_signal.copy(),  # 创建副本
                 "sampling_rate": sampling_rate,
                 "subject_id": subject_id,
             }
@@ -463,6 +483,22 @@ class UnifiedInferenceService:
                 "timestamp": payload.get("timestamp")
             }
             self._submit_inference("eeg", inference_data, metadata)
+        
+        # EEG疲劳度模型
+        if "eeg_fatigue" in self.integrated_models:
+            # 创建数据副本，避免多个模型共享同一数据引用
+            inference_data_fatigue = {
+                "memory_mode": memory_mode,
+                "eeg_signal": eeg_signal.copy(),  # 创建副本
+                "sampling_rate": sampling_rate,
+                "subject_id": subject_id,
+            }
+
+            metadata_fatigue = {
+                "request_id": request_id,
+                "timestamp": payload.get("timestamp")
+            }
+            self._submit_inference("eeg_fatigue", inference_data_fatigue, metadata_fatigue)
     
     def _submit_inference(
         self,
@@ -470,7 +506,18 @@ class UnifiedInferenceService:
         data: Dict[str, Any],
         metadata: Dict[str, Any]
     ) -> None:
-        """提交推理任务（异步）"""
+        """提交推理任务到线程池（异步执行，避免阻塞主线程）
+        
+        Args:
+            model_type: 模型类型 (rgb_fatigue, eeg_fatigue, eeg, emotion等)
+            data: 推理数据字典（包含模型输入数据）
+            metadata: 元数据字典（用于结果发布）
+        
+        注意：
+            - 所有推理任务在独立线程中执行
+            - 推理完成后自动清理数据引用
+            - 支持numpy数组和普通数据的混合清理
+        """
         def _infer():
             try:
                 # 集成模式推理
@@ -488,11 +535,16 @@ class UnifiedInferenceService:
                 self.logger.error(f"推理任务失败 ({model_type}): {e}", exc_info=True)
             finally:
                 # 显式清理推理数据,释放内存
+                # 清理可能包含numpy数组的数据引用
+                for key in list(data.keys()):
+                    data[key] = None
                 data.clear()
+                # 触发垃圾回收
                 import gc
                 gc.collect()
         
-        self._executor.submit(_infer)
+        # 提交到CPU线程池异步执行
+        self._thread_pool.submit_cpu_task(_infer)
     
     def _infer_integrated(
         self,
@@ -503,7 +555,7 @@ class UnifiedInferenceService:
         model = self.integrated_models[model_type]
         
         try:
-            self.logger.info(f"🔄 开始集成模型推理: {model_type}")
+            self.logger.debug(f"🔄 开始集成模型推理: {model_type}")
             result = model.infer(data)
             
             # 输出推理结果关键信息
@@ -511,15 +563,20 @@ class UnifiedInferenceService:
                 predictions = result.get("predictions", result)
                 inference_mode = result.get("inference_mode", "unknown")
                 inference_time = result.get("inference_time_ms", 0)
-                if model_type == "fatigue":
-                    fatigue_score = predictions.get("fatigue_score", 0)
+                if model_type == "rgb_fatigue":
+                    rgb_fatigue_score = predictions.get("rgb_fatigue_score", 0)
                     prediction_class = predictions.get("prediction_class", 0)
-                    # 压缩输出: 疲劳度单行显示
-                    self.logger.info(f"✅疲劳度 {fatigue_score:.1f} [C{prediction_class}] {inference_time:.0f}ms")
+                    # 压缩输出: RGB疲劳度单行显示
+                    self.logger.debug(f"✅RGB疲劳度 {rgb_fatigue_score:.1f} [C{prediction_class}] {inference_time:.0f}ms")
+                elif model_type == "eeg_fatigue":
+                    eeg_fatigue_score = predictions.get("eeg_fatigue_score", 0)
+                    num_windows = predictions.get("num_windows", 0)
+                    # 压缩输出: EEG疲劳度单行显示
+                    self.logger.debug(f"✅EEG疲劳度 {eeg_fatigue_score:.1f} {num_windows}窗口 {inference_time:.0f}ms")
                 elif model_type == "emotion":
                     emotion_score = predictions.get("emotion_score", 0)
                     inference_time = result.get("inference_time_ms", 0)
-                    self.logger.info(f"✅情绪 {emotion_score:.1f} {inference_time:.0f}ms")
+                    self.logger.debug(f"✅情绪 {emotion_score:.1f} {inference_time:.0f}ms")
                 elif model_type == "eeg":
                     brain_load_score = predictions.get("brain_load_score", 0)
                     state = predictions.get("state", "unknown")
@@ -527,19 +584,19 @@ class UnifiedInferenceService:
                     simulation_mode = bool(data.get("simulation_mode"))
                     # 压缩输出: 脑负荷单行显示
                     sim_suffix = "(模拟)" if simulation_mode else ""
-                    self.logger.info(
+                    self.logger.debug(
                         f"✅脑负荷{sim_suffix} {brain_load_score:.1f} [{state[:3]}] {num_windows}win {inference_time:.0f}ms"
                     )
                 else:
-                    self.logger.info(f"✅ {model_type} 推理完成")
+                    self.logger.debug(f"✅ {model_type} 推理完成")
             else:
                 # 非 success 情况：no-data 视为正常缺数据（信息级日志），其他按失败处理
                 if result and result.get("status") == "no-data":
                     msg = result.get("error", "no-data")
-                    self.logger.info(f"ℹ️  {model_type} 暂无有效数据，跳过发布: {msg}")
+                    self.logger.debug(f"ℹ️  {model_type} 暂无有效数据，跳过发布: {msg}")
                     return None
                 error_msg = result.get("error", "未知错误") if result else "返回结果为空"
-                self.logger.warning(f"⚠️  {model_type} 推理失败: {error_msg}")
+                self.logger.debug(f"⚠️  {model_type} 推理失败: {error_msg}")
                 # 推理失败时返回None，不发布结果
                 return None
             
@@ -571,11 +628,22 @@ class UnifiedInferenceService:
             return
         
         # 提取预测结果（根据模型类型）
+        # 注意：rgb_fatigue 和 eeg_fatigue 已不再在此处实时推理
+        # 保留代码结构以兼容旧版本或特殊场景
         predictions = {}
-        if model_type == "fatigue":
+        if model_type == "rgb_fatigue":
             predictions = {
-                "fatigue_score": result.get("fatigue_score", 0),
+                "rgb_fatigue_score": result.get("rgb_fatigue_score", 0),
                 "prediction_class": result.get("prediction_class", 0),
+                "inference_time_ms": result.get("inference_time_ms", 0),
+                "inference_mode": result.get("inference_mode", "unknown")
+            }
+        elif model_type == "eeg_fatigue":
+            # EEG疲劳度已移至FatigueAssessmentService，不再实时推理
+            predictions = {
+                "eeg_fatigue_score": result.get("eeg_fatigue_score", 0),
+                "num_windows": result.get("num_windows", 0),
+                "window_results": result.get("window_results", []),
                 "inference_time_ms": result.get("inference_time_ms", 0),
                 "inference_mode": result.get("inference_mode", "unknown")
             }

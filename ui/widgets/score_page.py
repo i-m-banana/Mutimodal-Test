@@ -24,13 +24,23 @@ logger = logging.getLogger()
 # 强制使用 Qt5Agg 后端
 plt.switch_backend('Qt5Agg')
 
-# 系统字体路径（Windows 微软雅黑）
-font_path = "C:/Windows/Fonts/msyh.ttc"
-if not os.path.exists(font_path):
-    print("警告: 微软雅黑字体未找到，中文可能显示方块")
-zh_font = font_manager.FontProperties(fname=font_path)
+# 字体配置（优先使用阿里健康体2.0，fallback到微软雅黑）
+alibaba_health_font_path = "C:/Windows/Fonts/Alibaba-PuHuiTi-2.0-55-Regular.ttf"
+msyh_font_path = "C:/Windows/Fonts/msyh.ttc"
 
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+if os.path.exists(alibaba_health_font_path):
+    zh_font = font_manager.FontProperties(fname=alibaba_health_font_path)
+    plt.rcParams['font.sans-serif'] = ['Alibaba PuHuiTi 2.0']
+    print("✓ 使用阿里健康体2.0字体")
+elif os.path.exists(msyh_font_path):
+    zh_font = font_manager.FontProperties(fname=msyh_font_path)
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+    print("⚠ 阿里健康体未找到，使用微软雅黑")
+else:
+    zh_font = font_manager.FontProperties(family="sans-serif")
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial']
+    print("⚠ 字体未找到，使用系统默认字体")
+
 plt.rcParams['axes.unicode_minus'] = False
 
 
@@ -575,8 +585,8 @@ class ScorePage(QWidget):
         self._loading_timer.timeout.connect(self._update_loading_animation)
         self._is_loading = False
         
-        # 中文字体
-        self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
+        # 中文字体（使用全局配置的字体）
+        self.zh_font = zh_font
 
         self._init_ui()
         # 不在初始化时更新分数，等待数据加载完成后再更新
@@ -584,48 +594,48 @@ class ScorePage(QWidget):
         QTimer.singleShot(0, self._refresh_data)
 
     def _init_ui(self):
-        # 设置窗口背景
-        self.setStyleSheet("QWidget { background-color: #f5f5f5; }")
+        # 设置窗口背景（更柔和的背景色）
+        self.setStyleSheet("QWidget { background-color: #f8f9fa; }")
 
-        # 主布局
+        # 主布局（优化间距）
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(30)
+        main_layout.setContentsMargins(35, 35, 35, 35)
+        main_layout.setSpacing(25)
 
         # 内容区域
         content_layout = QHBoxLayout()
         content_layout.setSpacing(30)
 
-        # 左侧雷达图容器
+        # 左侧雷达图容器（优化阴影和圆角）
         left_container = QWidget()
         left_container.setStyleSheet("""
             QWidget {
                 background-color: white;
-                border-radius: 20px;
+                border-radius: 16px;
             }
         """)
         left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         left_shadow = QGraphicsDropShadowEffect()
-        left_shadow.setBlurRadius(20)
-        left_shadow.setColor(QColor(0, 0, 0, 40))
-        left_shadow.setOffset(0, 5)
+        left_shadow.setBlurRadius(15)
+        left_shadow.setColor(QColor(0, 0, 0, 25))
+        left_shadow.setOffset(0, 3)
         left_container.setGraphicsEffect(left_shadow)
 
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(30, 30, 30, 30)
-        left_layout.setSpacing(20)
+        left_layout.setContentsMargins(28, 28, 28, 28)
+        left_layout.setSpacing(18)
 
-        # 左侧标题
+        # 左侧标题（使用阿里健康体）
         left_title = QLabel("各项指标对比")
         left_title.setAlignment(Qt.AlignCenter)
-        left_title.setStyleSheet("font-size:28px; font-weight:bold; color:#333;")
+        left_title.setStyleSheet("font-size:26px; font-weight:500; color:#2c3e50; letter-spacing:1px;")
         left_layout.addWidget(left_title)
 
-        # 添加分隔线
+        # 添加分隔线（更细更淡）
         line1 = QFrame()
         line1.setFrameShape(QFrame.HLine)
         line1.setFrameShadow(QFrame.Sunken)
-        line1.setStyleSheet("background-color: #e0e0e0;")
+        line1.setStyleSheet("background-color: #ecf0f1; height: 1px;")
         left_layout.addWidget(line1)
 
         # 雷达图容器
@@ -642,95 +652,96 @@ class ScorePage(QWidget):
 
         left_layout.addWidget(radar_widget, 1)
 
-        # 底部说明
+        # 底部说明（优化文字样式）
         info_label = QLabel("🔵 蓝色=本次测试 | 🔴 红色虚线=理想基准 (80分)")
         info_label.setAlignment(Qt.AlignCenter)
-        info_label.setStyleSheet("font-size:13px; color:#666; font-weight:500;")
+        info_label.setStyleSheet("font-size:13px; color:#7f8c8d; font-weight:400; letter-spacing:0.5px;")
         left_layout.addWidget(info_label)
         
-        # 指标说明
+        # 指标说明（更淡的颜色）
         metric_info = QLabel("※ 得分相对于首次测试换算，蓝色区域越接近红色正七边形表示状态越好")
         metric_info.setAlignment(Qt.AlignCenter)
-        metric_info.setStyleSheet("font-size:11px; color:#999;")
+        metric_info.setStyleSheet("font-size:11px; color:#95a5a6;")
         left_layout.addWidget(metric_info)
 
         content_layout.addWidget(left_container, 5)
 
-        # 右侧综合得分容器
+        # 右侧综合得分容器（优化阴影和圆角）
         right_container = QWidget()
         right_container.setStyleSheet("""
             QWidget {
                 background-color: white;
-                border-radius: 20px;
+                border-radius: 16px;
             }
         """)
         right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         right_shadow = QGraphicsDropShadowEffect()
-        right_shadow.setBlurRadius(20)
-        right_shadow.setColor(QColor(0, 0, 0, 40))
-        right_shadow.setOffset(0, 5)
+        right_shadow.setBlurRadius(15)
+        right_shadow.setColor(QColor(0, 0, 0, 25))
+        right_shadow.setOffset(0, 3)
         right_container.setGraphicsEffect(right_shadow)
 
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(30, 30, 30, 30)
-        right_layout.setSpacing(20)
+        right_layout.setContentsMargins(28, 28, 28, 28)
+        right_layout.setSpacing(18)
 
-        # 右侧标题
+        # 右侧标题（使用阿里健康体）
         right_title = QLabel("综合评估")
         right_title.setAlignment(Qt.AlignCenter)
-        right_title.setStyleSheet("font-size:28px; font-weight:bold; color:#333;")
+        right_title.setStyleSheet("font-size:26px; font-weight:500; color:#2c3e50; letter-spacing:1px;")
         right_layout.addWidget(right_title)
 
-        # 添加分隔线
+        # 添加分隔线（更细更淡）
         line2 = QFrame()
         line2.setFrameShape(QFrame.HLine)
         line2.setFrameShadow(QFrame.Sunken)
-        line2.setStyleSheet("background-color: #e0e0e0;")
+        line2.setStyleSheet("background-color: #ecf0f1; height: 1px;")
         right_layout.addWidget(line2)
 
         # 添加上部空间
-        right_layout.addSpacing(20)
+        right_layout.addSpacing(15)
 
         # 仪表盘
         self.gauge = ModernGaugeWidget()
         right_layout.addWidget(self.gauge, alignment=Qt.AlignCenter)
 
         # 添加中间空间
-        right_layout.addSpacing(20)
+        right_layout.addSpacing(15)
 
-        # 等级评价
+        # 等级评价（优化字体样式）
         self.lbl_level = QLabel("")
         self.lbl_level.setAlignment(Qt.AlignCenter)
-        self.lbl_level.setStyleSheet("font-size:36px; font-weight:bold;")
+        self.lbl_level.setStyleSheet("font-size:34px; font-weight:500; letter-spacing:2px;")
         right_layout.addWidget(self.lbl_level)
-
-        # 评语
+        
+        # 评语标签（新增）
         self.lbl_comment = QLabel("")
         self.lbl_comment.setAlignment(Qt.AlignCenter)
         self.lbl_comment.setWordWrap(True)
-        self.lbl_comment.setStyleSheet("font-size:16px; color:#666; line-height:1.5;")
+        self.lbl_comment.setStyleSheet("font-size:15px; color:#7f8c8d; font-weight:400; padding:8px;")
         right_layout.addWidget(self.lbl_comment)
 
         # 添加下部空间
-        right_layout.addSpacing(30)
+        right_layout.addSpacing(20)
 
-        # 历史数据按钮
+        # 历史数据按钮（优化样式）
         self.btn_history = QPushButton("查看历史数据")
-        self.btn_history.setFixedSize(220, 50)
+        self.btn_history.setFixedSize(200, 46)
         self.btn_history.setStyleSheet("""
             QPushButton {
-                font-size: 18px;
-                font-weight: bold;
-                background-color: #4CAF50;
+                font-size: 16px;
+                font-weight: 400;
+                background-color: #5dade2;
                 color: white;
                 border: none;
-                border-radius: 25px;
+                border-radius: 23px;
+                letter-spacing: 1px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #3498db;
             }
             QPushButton:pressed {
-                background-color: #3d8b40;
+                background-color: #2980b9;
             }
         """)
         self.btn_history.clicked.connect(self._show_history)
@@ -740,9 +751,9 @@ class ScorePage(QWidget):
 
         main_layout.addLayout(content_layout)
 
-        # 添加加载覆盖层（初始隐藏）
+        # 添加加载覆盖层（初始隐藏，优化样式）
         self.loading_overlay = QWidget(self)
-        self.loading_overlay.setStyleSheet("background-color: rgba(255, 255, 255, 180);")
+        self.loading_overlay.setStyleSheet("background-color: rgba(248, 249, 250, 200);")
         self.loading_overlay.setVisible(False)
 
         loading_layout = QVBoxLayout(self.loading_overlay)
@@ -750,13 +761,13 @@ class ScorePage(QWidget):
 
         self.loading_label = QLabel("正在加载历史数据...")
         self.loading_label.setAlignment(Qt.AlignCenter)
-        self.loading_label.setStyleSheet("font-size:24px; font-weight:bold; color:#333; background:transparent;")
+        self.loading_label.setStyleSheet("font-size:22px; font-weight:400; color:#2c3e50; background:transparent; letter-spacing:1px;")
         loading_layout.addWidget(self.loading_label)
 
         # 加载动画标签
         self.loading_spinner = QLabel("⏳")
         self.loading_spinner.setAlignment(Qt.AlignCenter)
-        self.loading_spinner.setStyleSheet("font-size:48px; background:transparent;")
+        self.loading_spinner.setStyleSheet("font-size:44px; background:transparent;")
         loading_layout.addWidget(self.loading_spinner)
 
     def _get_score_level(self, score):
@@ -1055,12 +1066,8 @@ class ScorePage(QWidget):
         # 更新雷达图
         self._draw_radar_chart(data)
 
-        # 更新仪表盘（取整显示）
-        raw_total = data.get("舒尔特综合得分", 0)
-        try:
-            total_score = int(round(float(raw_total))) if raw_total is not None else 0
-        except (ValueError, TypeError):
-            total_score = 0
+        # 计算综合得分（整合多维度指标）
+        total_score = self._calculate_comprehensive_score(data)
         self.gauge.setValue(total_score)
 
         # 更新等级评价和评语
@@ -1068,6 +1075,94 @@ class ScorePage(QWidget):
         self.lbl_level.setText(f"{level}")
         self.lbl_level.setStyleSheet(f"font-size:36px; font-weight:bold; color:{color};")
         self.lbl_comment.setText(comment)
+    
+    def _calculate_comprehensive_score(self, data: dict) -> int:
+        """
+        计算综合得分（整合多维度指标）
+        
+        评分维度和权重分配：
+        - 疲劳检测: 25% (核心指标，疲劳度越低越好)
+        - 情绪: 20% (情绪压力越低越好)
+        - 脑负荷: 20% (脑负荷越低越好)
+        - 舒尔特准确率: 20% (专注度，准确率越高越好)
+        - 血压/脉搏健康度: 15% (生理指标健康度)
+        
+        返回: 0-100的综合得分
+        """
+        try:
+            # 获取各维度原始值
+            fatigue = float(data.get("疲劳检测", 50))
+            emotion = float(data.get("情绪", 50))
+            brain_load = float(data.get("脑负荷", 50))
+            schulte_accuracy = float(data.get("舒尔特准确率", 85))
+            systolic = float(data.get("收缩压", 120))
+            diastolic = float(data.get("舒张压", 80))
+            pulse = float(data.get("脉搏", 75))
+            
+            # 1. 疲劳度得分 (越低越好，反转评分)
+            # 假设疲劳度范围 0-100，0最好100最差
+            fatigue_score = max(0, min(100, 100 - fatigue))
+            
+            # 2. 情绪得分 (越低越好，反转评分)
+            # 假设情绪压力范围 0-100，0最好100最差
+            emotion_score = max(0, min(100, 100 - emotion))
+            
+            # 3. 脑负荷得分 (越低越好，反转评分)
+            # 假设脑负荷范围 0-100，0最好100最差
+            brain_load_score = max(0, min(100, brain_load))
+            
+            # 4. 专注度得分 (舒尔特准确率，越高越好)
+            # 准确率范围 0-100%
+            attention_score = max(0, min(100, schulte_accuracy))
+            
+            # 5. 血压脉搏健康度得分
+            # 理想值：收缩压120, 舒张压80, 脉搏75
+            # 计算偏离度，偏离越小得分越高
+            systolic_ideal = 120
+            diastolic_ideal = 80
+            pulse_ideal = 75
+            
+            # 收缩压得分 (偏离±20为可接受范围)
+            systolic_deviation = abs(systolic - systolic_ideal)
+            systolic_score = max(0, 100 - (systolic_deviation / 20.0) * 100)
+            
+            # 舒张压得分 (偏离±15为可接受范围)
+            diastolic_deviation = abs(diastolic - diastolic_ideal)
+            diastolic_score = max(0, 100 - (diastolic_deviation / 15.0) * 100)
+            
+            # 脉搏得分 (偏离±25为可接受范围)
+            pulse_deviation = abs(pulse - pulse_ideal)
+            pulse_score = max(0, 100 - (pulse_deviation / 25.0) * 100)
+            
+            # 血压脉搏综合健康度 (三者平均)
+            bp_health_score = (systolic_score + diastolic_score + pulse_score) / 3.0
+            
+            # 6. 加权计算综合得分
+            total_score = (
+                fatigue_score * 0.35 +      # 疲劳检测 35%
+                emotion_score * 0.20 +      # 情绪 20%
+                brain_load_score * 0.20 +   # 脑负荷 20%
+                attention_score * 0.20 +    # 专注度 20%
+                bp_health_score * 0.05      # 血压脉搏健康度 5%
+            )
+            
+            # 取整并限制在 0-100 范围
+            final_score = int(round(max(0, min(100, total_score))))
+            
+            logger.debug(
+                f"综合得分计算: 疲劳={fatigue_score:.1f}(25%), "
+                f"情绪={emotion_score:.1f}(20%), "
+                f"脑负荷={brain_load_score:.1f}(20%), "
+                f"专注度={attention_score:.1f}(20%), "
+                f"血压健康={bp_health_score:.1f}(15%) "
+                f"→ 综合={final_score}分"
+            )
+            
+            return final_score
+            
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"综合得分计算异常: {e}，使用默认值50分")
+            return 50
     
     def _calculate_baseline(self):
         """
@@ -1124,10 +1219,10 @@ class ScorePage(QWidget):
             logger.info(f"用户 '{self.username}' 第一次测试数据不完整（仅{len(first_record)}/{len(metrics)}维度有效），搜索其他完整记录")
         
         # 策略2: 搜索最近一次7维度都完整的测试
-        for idx in range(len(history_dates) - 1, -1, -1):  # 从最新往前搜索
+        for idx in range(-1, len(history_dates) - 1, 1):  # 从最新往前搜索
             record = get_record_at_index(idx)
             if len(record) == len(metrics):
-                logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
+                logger.info(f"使用第{idx}次测试（最早完整记录）作为基准: {record}")
                 return record
         
         # 策略3: 如果所有记录都不完整，尝试拼凑（每个维度取最早的有效值）
@@ -1142,9 +1237,9 @@ class ScorePage(QWidget):
         
         # 策略4: 如果某些维度仍然没有有效值，用默认值补齐
         defaults = {
-            "疲劳检测": 30,
-            "情绪": 30,
-            "脑负荷": 30,
+            "疲劳检测": 50,
+            "情绪": 50,
+            "脑负荷": 50,
             "舒尔特准确率": 95,
             "收缩压": 120,
             "舒张压": 80,
@@ -1203,7 +1298,7 @@ class ScorePage(QWidget):
                 # 疲劳分数越低越好，需要进行反转。
                 ratio = curr / base
                 score = BASELINE_SCORE * (2 - ratio)
-                score = max(0, min(100, score))
+                score = max(40, min(100, score))
                 
             elif metric in ["情绪", "脑负荷", "舒尔特准确率"]:
                 # 准确率越高越好：原始值越大，表现越好
@@ -1213,26 +1308,25 @@ class ScorePage(QWidget):
                 # 公式：80 * (curr/base)，限制在 [0, 100]
                 ratio = curr / base
                 score = BASELINE_SCORE * ratio
-                score = max(0, min(100, score))
+                score = max(40, min(100, score))
                 
             elif metric in ["收缩压", "舒张压", "脉搏"]:
                 # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
-                # 不相对于首次测试，而是直接评估当前值的健康程度
                 ideal_values = {"收缩压": 120, "舒张压": 80, "脉搏": 75}
-                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}  # 最大可接受偏离
+                max_deviations = {"收缩压": 40, "舒张压": 40, "脉搏": 50}  # 最大可接受偏离
                 
                 ideal = ideal_values[metric]
                 max_dev = max_deviations[metric]
                 
                 # 计算本次测试的偏离度
-                deviation = abs(curr - ideal)
+                deviation = abs(curr - base)
                 
                 # 换算逻辑：
                 # - 偏离度 = 0（完美）: 得分 = 80
                 # - 偏离度 = max_dev（极差）: 得分 = 0
                 # 公式：80 * (1 - deviation/max_dev)，限制在 [0, 80]
                 score = BASELINE_SCORE * (1 - deviation / max_dev)
-                score = max(0, min(BASELINE_SCORE, score))  # 最高不超过 80 分
+                score = max(40, min(BASELINE_SCORE, score))  # 最高不超过 80 分
             else:
                 # 其他未定义指标，默认按比例换算
                 ratio = curr / base
@@ -1250,34 +1344,37 @@ class ScorePage(QWidget):
         angles = [n / float(num_vars) * 2 * np.pi for n in range(num_vars)]
         angles += angles[:1]
         
-        # 创建极坐标子图
+        # 创建极坐标子图（优化背景）
         ax = self.radar_figure.add_subplot(111, projection='polar')
-        ax.set_facecolor('#fafafa')
+        ax.set_facecolor('#fbfcfd')
         
-        # 绘制基准线（红色虚线正七边形，固定为 80 分）
-        ax.plot(angles, normalized_baseline, 'r--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7)
-        ax.fill(angles, normalized_baseline, 'r', alpha=0.1)
+        # 绘制基准线（优化颜色和透明度）
+        ax.plot(angles, normalized_baseline, color='#e74c3c', linestyle='--', linewidth=2.2, 
+                label='理想基准线 (80分)', alpha=0.75)
+        ax.fill(angles, normalized_baseline, color='#e74c3c', alpha=0.08)
         
-        # 绘制本次测试值（蓝色实线）
-        ax.plot(angles, normalized_current, 'b-', linewidth=3, label='本次测试', marker='o', 
-                markersize=8, markerfacecolor='white', markeredgecolor='b', markeredgewidth=2)
-        ax.fill(angles, normalized_current, 'b', alpha=0.25)
+        # 绘制本次测试值（优化颜色）
+        ax.plot(angles, normalized_current, color='#3498db', linestyle='-', linewidth=2.8, 
+                label='本次测试', marker='o', markersize=7, 
+                markerfacecolor='white', markeredgecolor='#3498db', markeredgewidth=2.2)
+        ax.fill(angles, normalized_current, color='#3498db', alpha=0.22)
         
-        # 设置刻度标签
+        # 设置刻度标签（优化字体）
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
+        ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12.5, color='#34495e')
         
-        # 设置Y轴范围和刻度
+        # 设置Y轴范围和刻度（优化颜色）
         ax.set_ylim(0, 100)
         ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=10, color='#666')
+        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=9.5, color='#7f8c8d')
         
-        # 添加网格
-        ax.grid(True, linestyle=':', alpha=0.5)
+        # 添加网格（更淡的网格线）
+        ax.grid(True, linestyle=':', alpha=0.4, color='#bdc3c7')
         
-        # 添加图例
-        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), 
-                prop=self.zh_font, fontsize=11, framealpha=0.9)
+        # 添加图例（优化样式）
+        ax.legend(loc='upper right', bbox_to_anchor=(1.28, 1.1), 
+                prop=self.zh_font, fontsize=10.5, framealpha=0.95, 
+                edgecolor='#ecf0f1', fancybox=True)
         
         # 在每个数据点旁边显示实际数值
         for angle, curr_val, metric in zip(angles[:-1], current_values, metrics):
@@ -1301,16 +1398,12 @@ class ScorePage(QWidget):
             
             ax.text(x, y, text, ha='center', va='center', 
                 fontproperties=self.zh_font, fontsize=9, 
-                color='#2196F3', fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                            edgecolor='#2196F3', alpha=0.8))
+                color='#3498db', fontweight='normal',
+                bbox=dict(boxstyle='round,pad=0.35', facecolor='white', 
+                            edgecolor='#5dade2', alpha=0.92, linewidth=1.2))
         
-        self.radar_figure.tight_layout()
+        self.radar_figure.tight_layout(pad=0.8)
         self.radar_canvas.draw()
-        
-        # 保存zh_font供雷达图使用
-        if not hasattr(self, 'zh_font'):
-            self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
 
     def _show_history(self):
         """显示历史数据对话框 - 直接使用已缓存的历史数据（与主页面数据一致）"""

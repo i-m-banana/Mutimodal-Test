@@ -240,6 +240,7 @@ class TestPage(QWidget):
 
         # 环节时间戳记录
         self.part_timestamps = []
+        self._timestamps_file_path = None  # 时间戳文件路径
 
         # 测试流程状态标志
         self.test_started = False
@@ -275,6 +276,46 @@ class TestPage(QWidget):
             callback()
         except Exception as e:
             logger.error(f"执行延迟回调时出错: {e}", exc_info=True)
+    
+    def _save_timestamp_immediately(self, call_timestamp: float) -> None:
+        """实时保存时间戳到JSON文件（每次添加时间戳立即写入）
+        
+        Args:
+            call_timestamp: 时间戳（Unix时间戳）
+        """
+        try:
+            # 确保文件路径已初始化
+            if self._timestamps_file_path is None:
+                if not hasattr(self, 'session_dir') or not self.session_dir:
+                    logger.warning("session_dir 未初始化，无法保存时间戳")
+                    return
+                
+                eeg_dir = os.path.join(self.session_dir, 'eeg')
+                os.makedirs(eeg_dir, exist_ok=True)
+                self._timestamps_file_path = os.path.join(eeg_dir, 'part_timestamps.json')
+            
+            # 添加到列表
+            self.part_timestamps.append(call_timestamp)
+            
+            # 格式化所有时间戳
+            call_timestamps_formatted = [
+                {
+                    'timestamp': ts,
+                    'datetime': datetime.fromtimestamp(ts).isoformat(),
+                    'call_index': i
+                }
+                for i, ts in enumerate(self.part_timestamps)
+            ]
+            
+            # 立即写入文件
+            import json
+            with open(self._timestamps_file_path, 'w', encoding='utf-8') as f:
+                json.dump(call_timestamps_formatted, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ 时间戳实时保存: call_index={len(self.part_timestamps)-1}, file={self._timestamps_file_path}")
+            
+        except Exception as e:
+            logger.error(f"实时保存时间戳失败: {e}", exc_info=True)
 
     def _start_multimodal_monitoring(self, *, force: bool = False) -> None:
         """启动或重新启动多模态数据监控（仅内嵌显示，非阻塞）。"""
@@ -556,6 +597,57 @@ class TestPage(QWidget):
         except Exception as exc:
             logger.error(f"处理推理结果时出错: {exc}", exc_info=True)
 
+    def _on_fatigue_assessment_result(self, payload: dict) -> None:
+        """处理疲劳度评估结果（文件模式，SART结束后）
+        
+        Args:
+            payload: 疲劳评估结果数据,格式:
+                {
+                    "status": "success",
+                    "request_id": "...",
+                    "session_dir": "...",
+                    "subject_id": "zyp0",
+                    "fatigue_score": 83.88,
+                    "fatigue_level": "重度疲劳",
+                    "confidence": 0.65,
+                    "fusion_method": "eeg_priority",
+                    "components": {
+                        "eeg": {"score": 99.65, "weight": 0.85, "valid": True},
+                        "rgb": {"score": 50.0, "weight": 0.15, "valid": True}
+                    }
+                }
+        """
+        try:
+            status = payload.get("status", "error")
+            
+            if status != "success":
+                error_msg = payload.get("error", "未知错误")
+                logger.error(f"❌ 疲劳度评估失败: {error_msg}")
+                return
+            
+            fatigue_score = payload.get("fatigue_score", 0.0)
+            fatigue_level = payload.get("fatigue_level", "未知")
+            confidence = payload.get("confidence", 0.0)
+            session_dir = payload.get("session_dir", "")
+            
+            logger.info(
+                f"📊 收到文件模式疲劳度评估结果: "
+                f"score={fatigue_score:.2f}, level={fatigue_level}, "
+                f"confidence={confidence:.2%}, session={session_dir}"
+            )
+            
+            # 将评估结果添加到累积列表（用于计算平均值）
+            self._fatigue_scores_list.append(fatigue_score)
+            
+            # 更新最后一次的疲劳度分数
+            self._last_fatigue_score = fatigue_score
+            
+            # 可选：显示在UI上（如果需要实时反馈）
+            # self._update_fatigue_only(fatigue_score)
+            
+        except Exception as exc:
+            logger.error(f"处理疲劳度评估结果时出错: {exc}", exc_info=True)
+
     def _update_fatigue_only(self, score_f) -> None:
         """只更新疲劳度显示（安全，失败不影响UI）"""
         try:
@@ -810,6 +902,8 @@ class TestPage(QWidget):
         # 连接后端推理结果信号 (用于获取真实的疲劳度分数)
         backend_client = get_backend_client()
         backend_client.detection_result.connect(self._on_detection_result)
+        # ✅ 连接疲劳度评估结果信号（文件模式，SART结束后）
+        backend_client.fatigue_assessment_result.connect(self._on_fatigue_assessment_result)
 
     def _setup_mic_button_animation(self):
         """为麦克风按钮创建光晕（阴影模糊）动画，以避免布局抖动。"""
@@ -1901,7 +1995,7 @@ class TestPage(QWidget):
                 # 📍 确保文本问答开始时间戳已记录（如果还没记录则补记录）
                 if not getattr(self, '_text_qa_start_timestamp_recorded', False):
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录文本问答开始时间戳(Q键跳过，页面未真正开始): {call_timestamp}")
                     self._text_qa_start_timestamp_recorded = True
                 
@@ -1922,7 +2016,7 @@ class TestPage(QWidget):
                 
                 # 📍 记录文本问答结束时间戳
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)
+                self._save_timestamp_immediately(call_timestamp)
                 logger.info(f"📍 已记录文本问答结束时间戳(Q键跳过): {call_timestamp}")
                 
                 # 保存音视频路径到数据库
@@ -1943,12 +2037,12 @@ class TestPage(QWidget):
                 if len(self.part_timestamps) < expected_timestamps_before_bp + 1:
                     # 缺少血压开始时间戳，补记录
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录血压测试开始时间戳(Q键跳过): {call_timestamp}")
                 
                 # 📍 记录血压测试结束时间戳
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)
+                self._save_timestamp_immediately(call_timestamp)
                 logger.info(f"📍 已记录血压测试结束时间戳(Q键跳过): {call_timestamp}")
                 
                 self.bp_results = {
@@ -1971,7 +2065,7 @@ class TestPage(QWidget):
                 if len(self.part_timestamps) < expected_timestamps_before_schulte + 1:
                     # 缺少舒尔特开始时间戳，补记录
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录舒尔特测试开始时间戳: {call_timestamp}")
 
                 try:
@@ -2469,7 +2563,7 @@ class TestPage(QWidget):
         # 📍 记录朗读录音开始时间戳（第一次录音时）
         if not self._text_qa_start_timestamp_recorded:
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录朗读录音开始时间戳: {call_timestamp}")
             self._text_qa_start_timestamp_recorded = True
 
@@ -2524,7 +2618,7 @@ class TestPage(QWidget):
             # 🔄 朗读录音阶段，不再有多个问题，直接进入下一步
             # 📍 记录朗读录音结束时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录朗读录音结束时间戳: {call_timestamp}")
             
             self.reading_completed = True
@@ -2579,7 +2673,7 @@ class TestPage(QWidget):
             
             # 📍 记录血压测试开始时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录血压测试开始时间戳: {call_timestamp}")
             
             self.update_step_ui()
@@ -2589,7 +2683,7 @@ class TestPage(QWidget):
         elif self.current_step == 1:
             # 📍 记录血压测试结束时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录血压测试结束时间戳: {call_timestamp}")
             
             # ❌ 舒尔特阶段不再需要疲劳度监控（已在朗读阶段结束时停止）
@@ -2597,7 +2691,7 @@ class TestPage(QWidget):
             
             # 📍 记录舒尔特测试开始时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录舒尔特测试开始时间戳: {call_timestamp}")
                         
             # 📍 在切换到舒尔特测试时，保存语音识别结果
@@ -2611,7 +2705,7 @@ class TestPage(QWidget):
         
         # 📍 记录舒尔特测试结束时间戳
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        self._save_timestamp_immediately(call_timestamp)
         logger.info(f"📍 已记录舒尔特测试结束时间戳: {call_timestamp}")
         
         # ✅ 舒尔特阶段结束，确保疲劳度监控已停止（防御性代码，实际在朗读阶段已停止）
@@ -2646,12 +2740,12 @@ class TestPage(QWidget):
         self._stop_camera_preview()
         if HAS_MULTIMODAL:
             try:
-                multidata_stop_collection()
+                # ✅ 只调用一次 stop，cleanup 会自动清理资源，不需要手动调用
+                stop_result = multidata_stop_collection()
                 self.multimodal_collector = None
-                logger.info("多模态数据采集已停止")
+                logger.info(f"多模态数据采集已停止: {stop_result.get('status')}")
                 self._persist_multimodal_paths_to_db()
-                from ...services.backend_proxy import cleanup_collector
-                cleanup_collector()
+                # cleanup_collector()  # ❌ 去掉重复调用，stop 已经完成清理
             except Exception as e:
                 logger.error(f"停止多模态数据采集时出错: {e}")
             finally:
@@ -2669,24 +2763,10 @@ class TestPage(QWidget):
         # except Exception as e:
         #     logger.error(f"停止EEG采集或保存路径时出错: {e}")
         
+        # 📍 最后的完成时间戳（已通过实时保存自动写入）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
-        if self.part_timestamps:
-            import json
-            call_timestamp_json_path = os.path.join(self.session_dir, 'eeg')
-            os.makedirs(call_timestamp_json_path, exist_ok=True)
-            call_timestamp_json_path = os.path.join(call_timestamp_json_path, 'part_timestamps.json')
-            call_timestamps_formatted = [
-                {
-                    'timestamp': ts,
-                    'datetime': datetime.fromtimestamp(ts).isoformat(),
-                    'call_index': i
-                }
-                for i, ts in enumerate(self.part_timestamps)
-            ]
-            with open(call_timestamp_json_path, 'w', encoding='utf-8') as f:
-                json.dump(call_timestamps_formatted, f, ensure_ascii=False, indent=2)
-            logger.info(f"调用时间戳JSON数据已保存: {call_timestamp_json_path}")
+        self._save_timestamp_immediately(call_timestamp)
+        logger.info(f"📍 已记录评估完成时间戳: {call_timestamp}")
         QMessageBox.information(self, "评估完成", "感谢您的参与！")
         self.btn_finish.setEnabled(False)
         self._invoke_later(self._auto_close_page, 2000)
@@ -2723,11 +2803,12 @@ class TestPage(QWidget):
 
         if HAS_MULTIMODAL:
             try:
-                multidata_stop_collection()
+                # ✅ 只调用一次 stop，cleanup 会自动清理资源，不需要手动调用
+                stop_result = multidata_stop_collection()
                 self.multimodal_collector = None
+                logger.info(f"页面隐藏时多模态采集已停止: {stop_result.get('status')}")
                 self._persist_multimodal_paths_to_db()
-                from ...services.backend_proxy import cleanup_collector
-                cleanup_collector()
+                # cleanup_collector()  # ❌ 去掉重复调用
             except Exception as e:
                 logger.error(f"页面隐藏时停止多模态数据采集失败: {e}")
             finally:

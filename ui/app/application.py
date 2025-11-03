@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
             mode = "short"
         
         self.sart_mode = mode
-        self.sart_duration = 300 if mode == "short" else 1500
+        self.sart_duration = 60 if mode == "short" else 1500
         
         logger.info(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
         
@@ -194,6 +194,15 @@ class MainWindow(QMainWindow):
             self.sart_page.set_session_dir(self.test_page.session_dir if hasattr(self.test_page, 'session_dir') else 'recordings')
         except Exception as exc:  # noqa: BLE001
             logger.debug("同步调试用户名失败: %s", exc)
+        
+        # 后门跳过时也要停止多模态数据采集
+        logger.info("⏭️ 调试后门跳过SART，停止多模态数据采集...")
+        try:
+            multidata_stop_collection()
+            logger.info("✅ 多模态数据采集已停止（调试后门）")
+        except Exception as exc:
+            logger.error(f"❌ 停止多模态数据采集失败（调试后门）: {exc}")
+        
         self.stack.fade_to_index(4)  # 跳到测试页面（索引4）
         self.brain_load_tip.setVisible(False)
         try:
@@ -253,9 +262,10 @@ class MainWindow(QMainWindow):
         else:
             logger.info(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
         
-        # 传递时间戳列表和会话信息
+        # 传递时间戳列表和会话信息（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
-            self.baseline_page.set_part_timestamps(self.test_page.part_timestamps)
+            save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
+            self.baseline_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 传递会话信息（用于EEG采集）
         self.baseline_page.set_session_info(
@@ -319,9 +329,10 @@ class MainWindow(QMainWindow):
         """切换到SART实验页面"""
         logger.info("正在切换到SART实验页面...")
         
-        # 同步时间戳列表
+        # 同步时间戳列表（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
-            self.sart_page.set_part_timestamps(self.test_page.part_timestamps)
+            save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
+            self.sart_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 确保会话目录已创建（可能已在基线阶段创建）
         if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
@@ -355,6 +366,15 @@ class MainWindow(QMainWindow):
     def show_test_page(self) -> None:
         """切换到测试主流程页面"""
         logger.info("正在切换到测试页面（文本问答、血压、舒尔特）...")
+        
+        # SART测试结束，停止多模态数据采集（EEG、RGB等）
+        logger.info("📊 SART测试已完成，停止多模态数据采集...")
+        try:
+            multidata_stop_collection()
+            logger.info("✅ 多模态数据采集已停止，疲劳度评估将自动开始")
+        except Exception as exc:
+            logger.error(f"❌ 停止多模态数据采集失败: {exc}")
+        
         self.stack.fade_to_index(4)
         self.brain_load_tip.setVisible(False)
         self.test_page.start_test()
