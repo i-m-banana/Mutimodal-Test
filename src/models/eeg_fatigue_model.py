@@ -140,14 +140,18 @@ class EEGFatigueModel(BaseInferenceModel):
         """
         # 优先使用会话目录模式（完整评估）
         if "session_dir" in data:
+            print("会话目录模式------------------------------------")
             return self._infer_from_session(data)
         # 内存模式
         elif data.get("memory_mode") == True:
+            print("内存模式------------------------------------")
             return self._infer_from_memory(data)
         # 文件路径模式
         elif data.get("file_mode") == True:
+            print("文件路径模式------------------------------------")
             return self._infer_from_file(data)
         else:
+            print("未指定有效的输入模式------------------------------------")
             return {
                 "status": "error",
                 "error": "未指定有效的输入模式",
@@ -302,8 +306,9 @@ class EEGFatigueModel(BaseInferenceModel):
             win = int(self.WIN_SEC * sampling_rate)
             step = win
             window_results = []
-            
+            print(f"EEG signal length: {len(ch1)}, window size: {win}, step size: {step},winow count:{len(ch1) - win + 1}")
             for i in range(0, len(ch1) - win + 1, step):
+                print(f"zxProcessing window {i // step + 1} of {len(ch1) // step}")
                 # 提取窗口
                 w1, w2 = ch1[i:i+win], ch2[i:i+win]
                 
@@ -356,7 +361,8 @@ class EEGFatigueModel(BaseInferenceModel):
                 f"🧠💤 EEG疲劳度: {round(avg_score, 2)} ({fatigue_level}, "
                 f"{len(window_results)}窗口, {round(inference_time, 1)}ms)"
             )
-            
+            print(f"🧠💤 -------zx的EEG疲劳度: {round(avg_score, 2)} ({fatigue_level}, ")
+            print(f"{len(window_results)}窗口, {round(inference_time, 1)}ms)-------")
             return {
                 "status": "success",
                 "eeg_fatigue_score": round(avg_score, 2),
@@ -482,15 +488,202 @@ class EEGFatigueModel(BaseInferenceModel):
             }
     
     def _infer_from_session(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从会话目录读取完整数据并评估（支持基线更新）"""
-        # TODO: 实现完整的会话评估逻辑
-        # 这需要读取 part_timestamps.json 和对应的 CSV 文件
-        # 以及可选的基线更新
-        return {
-            "status": "error",
-            "error": "会话目录模式尚未实现",
-            "eeg_fatigue_score": 0.0
-        }
+        """从会话目录读取完整数据并评估（支持基线更新）
+        
+        Args:
+            data: {
+                "session_dir": str - 会话目录路径
+                "subject_base": str - 被试标识（如"shh", "zyp", "wsh"）
+                "qc_is_lowload": bool - 是否低负荷状态（默认True）
+                "update_baseline": bool - 是否更新基线（默认True）
+            }
+        
+        Returns:
+            推理结果 + 基线更新信息
+        """
+        session_dir = Path(data.get("session_dir", ""))
+        subject_base = data.get("subject_base", "unknown")
+        qc_is_lowload = data.get("qc_is_lowload", True)
+        update_baseline = data.get("update_baseline", True)
+        
+        if not session_dir.exists():
+            return {
+                "status": "error",
+                "error": f"会话目录不存在: {session_dir}",
+                "eeg_fatigue_score": 0.0
+            }
+        
+        try:
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"🧠💤 EEG疲劳度分析 - 会话模式（含基线更新）")
+            self.logger.info(f"{'='*60}")
+            self.logger.info(f"📂 会话目录: {session_dir.name}")
+            self.logger.info(f"👤 被试标识: {subject_base}")
+            
+            # 1. 查找 EEG 数据文件
+            eeg_dir = session_dir / "eeg"
+            if not eeg_dir.exists():
+                return {
+                    "status": "error",
+                    "error": f"EEG目录不存在: {eeg_dir}",
+                    "eeg_fatigue_score": 0.0
+                }
+            
+            # 查找 EEG CSV 文件
+            # 支持两种命名格式：
+            # 1. 新格式: eeg_data_YYYYMMDD_HHMMSS.csv
+            # 2. 旧格式: part3.csv, part1.csv
+            eeg_csv = None
+            
+            # 优先查找新格式的文件（按时间戳排序，取最新的）
+            eeg_csv_files = sorted(eeg_dir.glob("eeg_data_*.csv"), reverse=True)
+            if eeg_csv_files:
+                eeg_csv = eeg_csv_files[0]  # 取最新的文件
+                self.logger.info(f"  ✓ 找到EEG数据文件（新格式）: {eeg_csv.name}")
+            else:
+                # 回退到旧格式
+                for part_name in ["part3.csv", "part1.csv"]:
+                    candidate = eeg_dir / part_name
+                    if candidate.exists():
+                        eeg_csv = candidate
+                        self.logger.info(f"  ✓ 找到EEG数据文件（旧格式）: {eeg_csv.name}")
+                        break
+            
+            if not eeg_csv:
+                return {
+                    "status": "error",
+                    "error": "未找到EEG数据文件（eeg_data_*.csv 或 part*.csv）",
+                    "eeg_fatigue_score": 0.0
+                }
+            
+            # 2. 读取时间戳文件
+            timestamps_file = eeg_dir / "part_timestamps.json"
+            if not timestamps_file.exists():
+                self.logger.warning("  ⚠️ 未找到 part_timestamps.json，无法进行基线更新")
+                update_baseline = False
+            
+            # 3. 读取EEG信号
+            import pandas as pd
+            df = pd.read_csv(eeg_csv)
+            ch1 = df["Channel1"].values.astype(float)
+            ch2 = df["Channel2"].values.astype(float)
+            
+            # 4. 预处理
+            ch1, ch2 = self._preprocess_pair(ch1, ch2, self.FS)
+            
+            # 5. 如果支持基线更新，提取基线段（call_index 0→1）
+            baseline_updated = False
+            baseline_reason = "未尝试更新"
+            
+            if update_baseline and timestamps_file.exists():
+                try:
+                    with open(timestamps_file, 'r', encoding='utf-8') as f:
+                        timestamps = json.load(f)
+                    
+                    # 提取时间戳映射
+                    ts_map = {t.get("call_index"): t.get("datetime") for t in timestamps if t.get("datetime")}
+                    
+                    if 0 in ts_map and 1 in ts_map and "Timestamp" in df.columns:
+                        # 提取基线段（call_index 0→1）
+                        csv_datetimes = pd.to_datetime(df["Timestamp"])
+                        t0 = np.datetime64(ts_map[0])
+                        t1 = np.datetime64(ts_map[1])
+                        
+                        mask_baseline = (csv_datetimes >= t0) & (csv_datetimes <= t1)
+                        num_baseline = mask_baseline.sum()
+                        
+                        if num_baseline > 1000:  # 至少2秒数据
+                            b1 = ch1[mask_baseline]
+                            b2 = ch2[mask_baseline]
+                            
+                            # 计算候选基线统计量
+                            candidate = self._robust_baseline_stats(b1, b2, self.FS)
+                            
+                            if candidate:
+                                # 计算幅值超限比例
+                                bad_ratio = self._amplitude_bad_ratio(b1, b2, self.AMP_UV)
+                                qc = {"is_lowload": qc_is_lowload, "bad_ratio": bad_ratio}
+                                
+                                # 门控更新
+                                update_result = self.baseline_manager.gated_update(
+                                    subject_base, candidate, qc=qc
+                                )
+                                
+                                baseline_updated = update_result.get("updated", False)
+                                baseline_reason = update_result.get("reason", "未知")
+                                
+                                self.logger.info(
+                                    f"  🔄 基线更新: {'✅成功' if baseline_updated else '❌跳过'} "
+                                    f"({baseline_reason})"
+                                )
+                                self.logger.info(
+                                    f"     基线段: {num_baseline}样本 ({num_baseline/self.FS:.1f}秒), "
+                                    f"坏信号率={bad_ratio:.2%}"
+                                )
+                        else:
+                            baseline_reason = f"基线段太短({num_baseline}样本)"
+                            self.logger.warning(f"  ⚠️ {baseline_reason}")
+                    else:
+                        baseline_reason = "时间戳数据不完整"
+                        self.logger.warning(f"  ⚠️ {baseline_reason}")
+                        
+                except Exception as e:
+                    baseline_reason = f"基线更新失败: {str(e)}"
+                    self.logger.error(f"  ❌ {baseline_reason}", exc_info=True)
+            
+            # 6. 提取任务段（call_index 1→3）进行疲劳度推理
+            task_signal = None
+            if timestamps_file.exists():
+                try:
+                    with open(timestamps_file, 'r', encoding='utf-8') as f:
+                        timestamps = json.load(f)
+                    
+                    ts_map = {t.get("call_index"): t.get("datetime") for t in timestamps if t.get("datetime")}
+                    
+                    if 1 in ts_map and 3 in ts_map and "Timestamp" in df.columns:
+                        csv_datetimes = pd.to_datetime(df["Timestamp"])
+                        t1 = np.datetime64(ts_map[1])
+                        t3 = np.datetime64(ts_map[3])
+                        
+                        mask_task = (csv_datetimes >= t1) & (csv_datetimes <= t3)
+                        num_task = mask_task.sum()
+                        
+                        if num_task > 500:
+                            task_signal = np.column_stack([ch1[mask_task], ch2[mask_task]])
+                            self.logger.info(
+                                f"  ✓ 任务段: {num_task}样本 ({num_task/self.FS:.1f}秒)"
+                            )
+                except Exception as e:
+                    self.logger.warning(f"  ⚠️ 任务段提取失败: {e}")
+            
+            # 如果没有成功提取任务段，使用全部信号
+            if task_signal is None:
+                task_signal = np.column_stack([ch1, ch2])
+                self.logger.info(f"  ✓ 使用全部信号: {len(ch1)}样本")
+            
+            # 7. 执行疲劳度推理
+            result = self._infer_from_memory({
+                "memory_mode": True,
+                "eeg_signal": task_signal,
+                "sampling_rate": self.FS,
+                "subject_id": subject_base
+            })
+            
+            # 8. 添加基线更新信息
+            if result.get("status") == "success":
+                result["baseline_updated"] = baseline_updated
+                result["baseline_reason"] = baseline_reason
+                result["inference_mode"] = "session"
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"会话模式推理失败: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "eeg_fatigue_score": 0.0
+            }
     
     def cleanup(self) -> None:
         """清理模型资源"""

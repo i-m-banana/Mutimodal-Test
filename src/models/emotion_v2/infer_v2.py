@@ -465,26 +465,54 @@ def summarize_emotion_predictions(
     *,
     num_classes: int = 3,
 ) -> Dict[str, object] | None:
+    """方案1: 加权投票法
+    
+    每个样本根据预测类别和置信度进行加权投票
+    最终根据各类别得票比例计算情绪分数
+    
+    优点: 考虑了样本数量和置信度，更公平
+    """
     if not predictions:
         return None
-
-    mean_probabilities: Dict[str, float] = {}
-    for idx in range(num_classes):
-        key = f"prob_class_{idx}"
-        values = [float(record[key]) for record in predictions if key in record and record[key] is not None]
-        if values:
-            mean_probabilities[f"class_{idx}"] = float(np.mean(values))
-
-    if not mean_probabilities:
+    
+    # 统计各类别的加权票数
+    class_votes = {i: 0.0 for i in range(num_classes)}
+    total_confidence = 0.0
+    
+    for record in predictions:
+        predicted_label = record.get("predicted_label")
+        confidence = record.get("confidence", 0.0)
+        
+        if predicted_label is not None and confidence > 0:
+            class_votes[predicted_label] += confidence
+            total_confidence += confidence
+    
+    if total_confidence == 0:
         return None
-
-    positive = mean_probabilities.get("class_0", 0.0)
-    negative = mean_probabilities.get("class_2", 0.0)
-    diff = positive - negative
-    raw_score = 70.0 + diff * 20.0
+    
+    # 归一化为比例
+    class_ratios = {
+        f"class_{i}": votes / total_confidence 
+        for i, votes in class_votes.items()
+    }
+    
+    # 计算情绪分数
+    # class_0 (开心) -> 高分, class_2 (消极) -> 低分
+    positive_ratio = class_ratios.get("class_0", 0.0)
+    neutral_ratio = class_ratios.get("class_1", 0.0)
+    negative_ratio = class_ratios.get("class_2", 0.0)
+    
+    # 情绪分数 = 基准分70 + 积极占比×20 - 消极占比×20
+    raw_score = 70.0 + positive_ratio * 20.0 - negative_ratio * 20.0
     emotion_score = float(np.clip(raw_score, 50.0, 90.0))
-
+    
     return {
-        "mean_probabilities": mean_probabilities,
+        "class_ratios": class_ratios,
+        "class_votes": class_votes,
+        "total_samples": len(predictions),
         "emotion_score": emotion_score,
+        "method": "weighted_voting",
+        "positive_ratio": round(positive_ratio, 4),
+        "neutral_ratio": round(neutral_ratio, 4),
+        "negative_ratio": round(negative_ratio, 4),
     }

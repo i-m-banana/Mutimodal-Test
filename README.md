@@ -59,15 +59,39 @@ pip install -r requirements.txt
 
 ### 3. 启动系统
 
-**启动后端服务**:
+**🎯 推荐方式 - 一键启动（自动启动后端和前端）**:
+
+双击运行以下任一脚本：
+- `start.bat` - Windows批处理脚本（推荐）
+- `start.py` - Python跨平台脚本
+- `start_silent.vbs` - 静默启动（无启动器窗口）
+
+或在命令行中执行：
 ```bash
-python -m src.main --root .
+# Windows
+start.bat
+
+# 或跨平台
+python start.py
 ```
 
-**启动UI应用**:
+详细说明请查看 [启动说明文档](README_启动说明.md)
+
+---
+
+**手动启动（分步执行）**:
+
+步骤1 - 启动后端服务:
+```bash
+python -m src.main
+```
+
+步骤2 - 等待5秒后，启动前端界面:
 ```bash
 python -m ui.main
 ```
+
+> 💡 **注意**: 必须使用 `-m` 参数以模块方式运行，否则会出现相对导入错误
 
 ### 4. 模拟模式（无硬件）
 ```bash
@@ -75,8 +99,8 @@ python -m ui.main
 set UI_FORCE_SIMULATION=1
 set BACKEND_EEG_SIMULATION=1
 
-# 启动系统
-python -m src.main --root .
+# 启动系统（使用模块方式）
+python -m src.main
 python -m ui.main
 ```
 

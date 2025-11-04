@@ -333,7 +333,7 @@ def fatigue(
     # 较新版本(0.10.14+)可能支持额外参数，但为了兼容性使用基础参数
     with mp_face_mesh.FaceMesh(
         max_num_faces=1,
-        refine_landmarks=False,  # 🚀 改为False加速30%（对疲劳检测影响很小）
+        refine_landmarks=True,  # 🚀 改为False加速30%（对疲劳检测影响很小）
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
     ) as face_mesh:
@@ -343,13 +343,13 @@ def fatigue(
                 break
             total_processed_frames += 1
             
-            # 🚀 性能优化：缩小帧尺寸加速推理（2-3倍提速）
-            # 640x480对人脸检测足够，且MediaPipe CPU版本处理更快
-            if frame.shape[1] > 640:  # 如果宽度大于640
-                scale = 640 / frame.shape[1]
-                new_width = 640
-                new_height = int(frame.shape[0] * scale)
-                frame = cv2.resize(frame, (new_width, new_height))
+            # # 🚀 性能优化：缩小帧尺寸加速推理（2-3倍提速）
+            # # 640x480对人脸检测足够，且MediaPipe CPU版本处理更快
+            # if frame.shape[1] > 640:  # 如果宽度大于640
+            #     scale = 640 / frame.shape[1]
+            #     new_width = 640
+            #     new_height = int(frame.shape[0] * scale)
+            #     frame = cv2.resize(frame, (new_width, new_height))
 
             # 若为视频文件且设置了时长，超过则终止
             if video_path is not None and duration_sec is not None and duration_sec > 0:

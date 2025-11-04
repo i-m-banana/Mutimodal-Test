@@ -141,8 +141,8 @@ class RGBFatigueModel(BaseInferenceModel):
             # 反转公式: rgb_fatigue = 140 - raw_score
             # 当 raw_score=90（最清醒）时，rgb_fatigue=50（不疲劳）
             # 当 raw_score=50（最疲劳）时，rgb_fatigue=90（疲劳）
-            raw_score = max(50.0, min(90.0, fatigue_score))
-            rgb_fatigue_score = 140.0 - raw_score
+            raw_score = fatigue_score
+            rgb_fatigue_score = fatigue_score
             
             # 判断疲劳等级（基于50-90分，分数越高越疲劳）
             if rgb_fatigue_score < 65:  # <65分 = 不疲劳
@@ -264,8 +264,8 @@ class RGBFatigueModel(BaseInferenceModel):
             
             # RGB原始分数: 50-90分，分数越高越清醒（90=最清醒，50=最疲劳）
             # 为了与EEG疲劳度统一（分数越高越疲劳），需要反转
-            raw_score = max(50.0, min(90.0, fatigue_score))
-            rgb_fatigue_score = 140.0 - raw_score
+            rgb_fatigue_score = fatigue_score
+            # rgb_fatigue_score = 140.0 - raw_score
             
             # 判断疲劳等级（基于50-90分，分数越高越疲劳）
             if rgb_fatigue_score < 65:

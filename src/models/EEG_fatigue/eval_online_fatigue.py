@@ -16,11 +16,11 @@ from scipy.signal import butter, filtfilt, iirnotch, welch
 import joblib
 
 # === 模型参数存放路径 ===
-MODEL_DIR     = r"D:\zx\toll-box\code\EEG_fatigue\models"
+MODEL_DIR     = r"D:\Mutimodal-Test\models_data\eeg_fatigue_models"
 # === 在线数据存放路径（需读取时间戳和.csv) ===
-TRIAL_DIR     = r"D:\zx\toll-box\code\EEG_fatigue\online_textdata\shh1\20251031_235314"
+TRIAL_DIR     = r"D:\Mutimodal-Test\recordings\lyt\20251104_162442"
 #此处需读取被试信息，调取models\baselines命名只需名字缩写
-SUBJECT_BASE  = "shh"
+SUBJECT_BASE  = "111"
 QC_IS_LOWLOAD = True
 # =====================
 

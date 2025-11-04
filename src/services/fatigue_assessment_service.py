@@ -217,14 +217,19 @@ class FatigueAssessmentService:
             # 执行RGB疲劳度推理（耗时操作）
             rgb_result = self._assess_rgb_fatigue(files, session_path)
             
-            # 执行EEG疲劳度推理
-            eeg_result = self._assess_eeg_fatigue(files, subject_id)
+            # 执行EEG疲劳度推理（传入session_path以支持基线更新）
+            eeg_result = self._assess_eeg_fatigue(files, subject_id, session_dir=session_path)
             
             # 融合结果
             final_result = self._compute_weighted_score(rgb_result, eeg_result)
             final_result["request_id"] = request_id
             final_result["subject_id"] = subject_id
             final_result["session_dir"] = session_dir
+            
+            # 添加基线更新信息到最终结果
+            if "baseline_updated" in eeg_result:
+                final_result["baseline_updated"] = eeg_result["baseline_updated"]
+                final_result["baseline_reason"] = eeg_result.get("baseline_reason", "")
             
             # 发布结果
             self._publish_result(final_result)
@@ -312,9 +317,16 @@ class FatigueAssessmentService:
     def _assess_eeg_fatigue(
         self,
         files: Dict[str, Optional[Path]],
-        subject_id: str
+        subject_id: str,
+        session_dir: Optional[Path] = None
     ) -> Dict[str, Any]:
-        """评估EEG疲劳度"""
+        """评估EEG疲劳度
+        
+        Args:
+            files: 数据文件字典
+            subject_id: 被试ID（如 "shh0", "zyp1"）
+            session_dir: 会话目录（用于基线更新）
+        """
         if not files["eeg_csv"]:
             self.logger.warning("跳过EEG疲劳度评估：缺少EEG数据文件")
             return {"status": "skipped", "eeg_fatigue_score": 0.0}
@@ -326,20 +338,50 @@ class FatigueAssessmentService:
         try:
             self.logger.info("\n🧠 EEG疲劳度推理...")
             
-            inference_data = {
-                "file_mode": True,
-                "eeg_file_path": str(files["eeg_csv"]),
-                "sampling_rate": 500.0,
-                "subject_id": subject_id
-            }
+            # 提取被试基础标识（去掉末尾数字）
+            subject_base = ''.join(c for c in subject_id if not c.isdigit())
             
-            start_time = time.time()
-            result = self._eeg_model.infer(inference_data)
-            inference_time = (time.time() - start_time) * 1000
-            
-            self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
-            self.logger.info(f"  窗口数量: {result.get('num_windows', 0)}")
-            self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
+            # 优先使用会话模式（支持基线更新）
+            if session_dir and session_dir.exists():
+                inference_data = {
+                    "session_dir": str(session_dir),
+                    "subject_base": subject_base,
+                    "qc_is_lowload": True,  # 假设低负荷状态
+                    "update_baseline": True  # 启用基线更新
+                }
+                
+                start_time = time.time()
+                result = self._eeg_model.infer(inference_data)
+                print(result,"---------------------------inferfatigueeeg---------------")
+                inference_time = (time.time() - start_time) * 1000
+                
+                self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
+                self.logger.info(f"  窗口数量: {result.get('num_windows', 0)}")
+                
+                # 显示基线更新信息
+                if result.get('baseline_updated'):
+                    self.logger.info(f"  ✅ 基线已更新: {result.get('baseline_reason', '')}")
+                elif 'baseline_reason' in result:
+                    self.logger.info(f"  ℹ️ 基线未更新: {result.get('baseline_reason', '')}")
+                
+                self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
+                
+            else:
+                # 回退到文件模式（不更新基线）
+                inference_data = {
+                    "file_mode": True,
+                    "eeg_file_path": str(files["eeg_csv"]),
+                    "sampling_rate": 500.0,
+                    "subject_id": subject_id
+                }
+                
+                start_time = time.time()
+                result = self._eeg_model.infer(inference_data)
+                inference_time = (time.time() - start_time) * 1000
+                
+                self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
+                self.logger.info(f"  窗口数量: {result.get('num_windows', 0)}")
+                self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
             
             return result
             
@@ -388,7 +430,7 @@ class FatigueAssessmentService:
         # === 情况2: 仅EEG有效 ===
         elif not rgb_valid:
             # EEG是0-100范围，需要转换到50-90范围
-            final_score = 50 + (eeg_score / 100) * 40  # 0-100 -> 50-90
+            final_score = 10 + (1 - (eeg_score / 100)) * 90  # 0-100 -> 50-90
             used_eeg_weight = 1.0
             status = "partial"
             message = f"仅使用EEG疲劳度 (原始={eeg_score:.1f}/100, 转换={final_score:.1f}/90)"
@@ -409,7 +451,7 @@ class FatigueAssessmentService:
         else:
             # 注意：EEG是0-100范围，RGB已反转为50-90范围（分数越高越疲劳）
             # 将EEG也转换到50-90范围，然后直接融合
-            eeg_score_50_90 = 50 + (eeg_score / 100) * 40  # 0-100 -> 50-90
+            eeg_score_50_90 = 50 + (1 - (eeg_score / 100)) * 40  # 0-100 -> 50-90
             
             # 1. 一致性检测（基于50-90范围的差异）
             score_diff = abs(eeg_score_50_90 - rgb_score)
@@ -496,7 +538,6 @@ class FatigueAssessmentService:
         
         # 输出融合结果
         if rgb_valid and eeg_valid:
-            eeg_score_50_90 = 50 + (eeg_score / 100) * 40
             self.logger.info(f"  EEG: {eeg_score:.2f}/100 → {eeg_score_50_90:.2f}/90 (权重={used_eeg_weight:.2f}) ✓")
             self.logger.info(f"  RGB: {rgb_score:.2f}/90 (权重={used_rgb_weight:.2f}) ✓")
         else:
