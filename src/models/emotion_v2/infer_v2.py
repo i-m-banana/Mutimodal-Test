@@ -465,13 +465,6 @@ def summarize_emotion_predictions(
     *,
     num_classes: int = 3,
 ) -> Dict[str, object] | None:
-    """方案1: 加权投票法
-    
-    每个样本根据预测类别和置信度进行加权投票
-    最终根据各类别得票比例计算情绪分数
-    
-    优点: 考虑了样本数量和置信度，更公平
-    """
     if not predictions:
         return None
     

@@ -451,7 +451,7 @@ class FatigueAssessmentService:
         else:
             # 注意：EEG是0-100范围，RGB已反转为50-90范围（分数越高越疲劳）
             # 将EEG也转换到50-90范围，然后直接融合
-            eeg_score_50_90 = 50 + (1 - (eeg_score / 100)) * 40  # 0-100 -> 50-90
+            eeg_score_50_90 = 30 + (1 - (eeg_score / 100)) * 60  # 0-100 -> 50-90
             
             # 1. 一致性检测（基于50-90范围的差异）
             score_diff = abs(eeg_score_50_90 - rgb_score)
@@ -544,7 +544,7 @@ class FatigueAssessmentService:
             self.logger.info(f"  EEG: {eeg_score:.2f}/100 (权重={used_eeg_weight:.2f}) {'✓' if eeg_valid else '✗'}")
             self.logger.info(f"  RGB: {rgb_score:.2f}/90 (权重={used_rgb_weight:.2f}) {'✓' if rgb_valid else '✗'}")
         self.logger.info(f"  融合方法: {fusion_method}")
-        self.logger.info(f"  综合分数: {final_score:.2f}/90 (分数越高越疲劳)")
+        self.logger.info(f"  综合分数: {final_score:.2f}/90 (分数越高状态越好)")
         self.logger.info(f"  疲劳等级: {level} {emoji}")
         self.logger.info(f"  置信度: {confidence:.1%}")
         

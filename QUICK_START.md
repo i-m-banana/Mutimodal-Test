@@ -4,6 +4,8 @@
 
 - Python 3.11+
 - Windows 10/11 / Linux / macOS
+- 8GB+ RAM（推荐16GB）
+- （可选）NVIDIA GPU with CUDA支持（用于加速推理）
 - 所需依赖包已安装
 
 ## 📋 启动步骤
@@ -14,7 +16,7 @@
 
 ```bash
 # 进入项目根目录
-cd d:\duomotai\project-root-cut
+cd d:\Mutimodal-Test
 
 # 安装核心依赖
 pip install -r requirements.txt
@@ -24,48 +26,42 @@ pip install -r requirements.txt
 
 打开命令行，运行:
 ```bash
-cd d:\duomotai\project-root-cut
-python -m src.main --root .
+cd d:\Mutimodal-Test
+python -m src.main
 
 # 可选：关闭控制台监听输出（减少日志）
-python -m src.main --root . --no-listeners
+python -m src.main --no-listeners
 
 # 可选：显示全部事件日志
-python -m src.main --root . --full-events
+python -m src.main --full-events
 ```
 
 **期望输出**:
 ```
 INFO  WebsocketPushInterface | Starting WebSocket interface on 127.0.0.1:8765
 INFO  orchestrator | Orchestrator started
-INFO  inference | ✅ 统一推理服务已启动 (共 3 个模型)
+INFO  fatigue_assessment | ✅ 疲劳度评估服务已启动
+INFO  eeg_service | ✅ EEG服务已启动
+INFO  inference | ✅ 统一推理服务已启动
 ```
 
 ### 3. 启动UI应用
 
 另开一个命令行窗口，运行:
 ```bash
-cd d:\duomotai\project-root-cut
+cd d:\Mutimodal-Test
 
-# 默认启动（短流程：5分钟SART实验）
+# 默认启动
 python -m ui.main
-
-# 长流程启动（25分钟SART疲劳诱发实验）
-python -m ui.main --sart-mode long
 
 # 可选：启用调试模式（使用模拟数据，无需硬件）
 python -m ui.main --debug
 ```
 
-**SART 实验模式说明**:
-- **短流程（默认）**: 5分钟低负荷采集，适用于常规测试
-- **长流程**: 25分钟疲劳诱发，用于深度疲劳研究（每5分钟记录KSS困倦评分）
-
 **期望输出**:
 ```
 应用程序主窗口初始化完成
-✅ SART 模式已设置为: short (低负荷采集, 时长: 5分钟)
-已成功连接到后端服务器 ws://127.0.0.1:8765
+✅ 已成功连接到后端服务器 ws://127.0.0.1:8765
 ```
 
 

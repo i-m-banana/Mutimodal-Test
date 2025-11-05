@@ -20,8 +20,8 @@ echo.
 
 echo [2/3] 启动后端服务...
 echo ✓ 正在后台启动: python -m src.main
-start "多模态系统-后端服务" /min cmd /k "cd /d %~dp0 && python -m src.main"
-echo ✓ 后端服务已启动（最小化窗口运行）
+start "多模态系统-后端服务" /b python -m src.main
+echo ✓ 后端服务已启动（后台运行）
 echo.
 
 echo [3/3] 等待后端初始化 (5秒)...
@@ -33,19 +33,21 @@ echo.
 
 echo [4/4] 启动前端界面...
 echo ✓ 正在启动: python -m ui.main
-start "多模态系统-前端界面" cmd /k "cd /d %~dp0 && python -m ui.main"
-echo ✓ 前端界面已启动
+start "多模态系统-前端界面" /wait cmd /c "cd /d %~dp0 && python -m ui.main"
+echo ✓ 前端界面已关闭，正在停止后端服务...
+
+REM 强制终止所有 python 进程（后端服务）
+taskkill /f /im python.exe >nul 2>&1
+echo ✓ 后端服务已停止
 echo.
 
 echo ========================================
-echo ✅ 系统启动完成！
+echo ✅ 系统已完全退出！
 echo ========================================
 echo.
 echo 提示:
-echo   - 后端服务窗口已最小化，需要时可从任务栏恢复
-echo   - 前端界面窗口会自动弹出
-echo   - 关闭前端窗口不会停止后端服务
-echo   - 如需完全退出，请关闭两个命令行窗口
+echo   - 前端和后端窗口会在程序结束时自动关闭
+echo   - 关闭前端窗口后，后端服务会自动停止
+echo   - 此窗口将在 3 秒后自动关闭
 echo.
-echo 按任意键关闭此启动器窗口...
-pause >nul
+timeout /t 3 /nobreak >nul

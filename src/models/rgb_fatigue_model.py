@@ -278,7 +278,7 @@ class RGBFatigueModel(BaseInferenceModel):
             # 单行输出推理结果
             self.logger.info(
                 f"📷😴 RGB疲劳度: {round(rgb_fatigue_score, 2)}/90 ({fatigue_level}, "
-                f"原始={round(raw_score, 1)}, RGB帧{len(rgb_frames)}, {round(inference_time, 1)}ms)"
+                f"原始={round(rgb_fatigue_score, 1)}, RGB帧{len(rgb_frames)}, {round(inference_time, 1)}ms)"
             )
             
             return {

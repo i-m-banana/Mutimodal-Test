@@ -220,7 +220,7 @@ ACTIVE_AUDIO_DEVICE_INDEX: Optional[int] = DEFAULT_AUDIO_DEVICE_INDEX
 DB_HOST = os.getenv("UI_DB_HOST", "localhost")
 DB_USER = os.getenv("UI_DB_USER", "root")
 DB_PASSWORD = os.getenv("UI_DB_PASSWORD", "123456")
-DB_NAME = os.getenv("UI_DB_NAME", "tired")
+DB_NAME = os.getenv("UI_DB_NAME", "multimodal_test")
 
 # ---------------------------------------------------------------------------
 # Logging and data locations
