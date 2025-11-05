@@ -53,6 +53,18 @@ class CalibrationPage(QWidget):
     # ----------------- Loading Widget -----------------
     def _init_loading_widget(self) -> None:
         loading_widget = QWidget()
+        loading_widget.setObjectName("loadingWidget")
+        # 设置loading页面的明显渐变背景（只应用到主容器，不影响子元素）
+        loading_widget.setStyleSheet("""
+            #loadingWidget {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 1),
+                    stop:0.5 rgba(200, 235, 245, 0.6),
+                    stop:1 rgba(127, 219, 255, 0.5)
+                );
+            }
+        """)
         vbox = QVBoxLayout(loading_widget)
         vbox.setAlignment(Qt.AlignCenter)
 
@@ -89,6 +101,18 @@ class CalibrationPage(QWidget):
     # ----------------- Calibration Widget -----------------
     def _init_calibration_widget(self) -> None:
         calibration_widget = QWidget()
+        calibration_widget.setObjectName("calibrationWidget")
+        # 设置校准页面的明显渐变背景（只应用到主容器，不影响子元素）
+        calibration_widget.setStyleSheet("""
+            #calibrationWidget {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 1),
+                    stop:0.5 rgba(200, 235, 245, 0.6),
+                    stop:1 rgba(127, 219, 255, 0.5)
+                );
+            }
+        """)
         layout = QVBoxLayout(calibration_widget)
         layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
         layout.setSpacing(scale(15))

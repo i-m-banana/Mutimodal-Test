@@ -352,7 +352,7 @@ class FatigueAssessmentService:
                 
                 start_time = time.time()
                 result = self._eeg_model.infer(inference_data)
-                print(result,"---------------------------inferfatigueeeg---------------")
+                # print(result,"---------------------------inferfatigueeeg---------------")
                 inference_time = (time.time() - start_time) * 1000
                 
                 self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")

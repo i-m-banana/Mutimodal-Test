@@ -6,6 +6,17 @@
         color: #333;
     }
 
+    /* --- 测试页面背景渐变 --- */
+    TestPage {
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 rgba(255, 255, 255, 1),
+            stop:0.3 rgba(230, 245, 255, 0.9),
+            stop:0.6 rgba(200, 235, 250, 0.8),
+            stop:1 rgba(170, 220, 245, 0.7)
+        );
+    }
+
     /* --- 基线校准和SART实验页面样式 --- */
     /* 保持默认白色背景，确保文字和数字是黑色 */
     #baselinePage QLabel,

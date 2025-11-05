@@ -35,6 +35,7 @@ from PyQt5.QtCore import (
     pyqtSlot,
 )
 from PyQt5.QtGui import (
+    QBitmap,
     QBrush,
     QColor,
     QFont,
@@ -46,6 +47,7 @@ from PyQt5.QtGui import (
     QPainter,
     QPainterPath,
     QPixmap,
+    QRegion,
     QScreen,
 )
 import cv2  # type: ignore
@@ -83,6 +85,8 @@ __all__ = [
     "pyqtSignal",
     "pyqtSlot",
     "QSize",
+    "QMetaObject",
+    "QBitmap",
     "QBrush",
     "QColor",
     "QFont",
@@ -94,6 +98,7 @@ __all__ = [
     "QPainter",
     "QPainterPath",
     "QPixmap",
+    "QRegion",
     "QScreen",
     "cv2",
     "np",

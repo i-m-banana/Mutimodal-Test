@@ -54,14 +54,20 @@ class SARTPage(QWidget):
         self._reset_state()
     
     def _init_ui(self) -> None:
-        """初始化UI - 白色背景，黑色文字，简洁样式"""
-        # 取消黑色背景设置，使用默认白色背景
-        # 只设置页面属性标识
+        """初始化UI - 浅色渐变背景，黑色文字，简洁样式"""
+        # 设置页面属性标识
         self.setProperty("page_type", "sart")
         
-        # 不再设置背景色，让它保持默认白色
-        # 只确保文字是黑色
+        # 设置明显的渐变背景（从左上白色到右下深青色）+ 文字颜色
         self.setStyleSheet("""
+            SARTPage {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 1),
+                    stop:0.5 rgba(200, 235, 245, 0.6),
+                    stop:1 rgba(127, 219, 255, 0.5)
+                );
+            }
             #sartPage QLabel {
                 color: #000000 !important;
                 background-color: transparent !important;
@@ -75,16 +81,11 @@ class SARTPage(QWidget):
         # 添加顶部弹性空间，让说明文字居中
         layout.addStretch(1)
         
-        # 说明文字（初始显示）- 居中
+        # 说明文字（移除"按空格开始"提示，直接自动开始）- 居中
         mode_text = "低负荷采集" if self.mode == "short" else "疲劳诱发"
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
         
-        self.instruction_label = QLabel(
-            f"SART 任务 ({mode_text}, 时长: {duration_text})\n\n"
-            "规则：看到除'3'外的数字按【空格】，看到'3'不要按。\n\n"
-            "请保持安静、注视中央，不说话。\n\n"
-            "按【空格】开始测试"
-        )
+        self.instruction_label = QLabel("")  # 不显示任何说明文字
         self.instruction_label.setAlignment(Qt.AlignCenter)
         self.instruction_label.setWordWrap(True)
         instruction_font = QFont("阿里健康体2.0 中文 45 R", 24)  # 固定24px字号
@@ -92,6 +93,7 @@ class SARTPage(QWidget):
         self.instruction_label.setStyleSheet(
             "color: #000000 !important; line-height: 2.0; background-color: transparent !important; font-size: 24px !important;"
         )
+        self.instruction_label.setVisible(False)  # 初始隐藏说明文字
         layout.addWidget(self.instruction_label)
         
         # 数字刺激显示 - 中央
@@ -428,14 +430,6 @@ class SARTPage(QWidget):
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
         
         config.logger.info(f"✅ SART 模式已设置为: {mode} ({mode_text}, 时长: {duration_text})")
-        
-        # 更新说明文字
-        self.instruction_label.setText(
-            f"SART 任务 ({mode_text}, 时长: {duration_text})\n\n"
-            "规则：看到除'3'外的数字按【空格】，看到'3'不要按。\n\n"
-            "请保持安静、注视中央，不说话。\n\n"
-            "按【空格】开始测试"
-        )
     
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """键盘事件处理"""
@@ -446,13 +440,10 @@ class SARTPage(QWidget):
             self.sart_finished.emit()
             return
         
-        # 空格键：开始测试或响应刺激
+        # 空格键：响应刺激（移除手动启动功能，改为自动启动）
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            # 未开始时按空格启动测试
-            if not self.is_running and self.instruction_label.isVisible():
-                self.start_test()
             # 运行中按空格响应刺激
-            elif self.is_running and not self.key_pressed:
+            if self.is_running and not self.key_pressed:
                 self.key_pressed = True
                 self.response_time = (time.time() - self.trial_start_time) * 1000  # ms
                 config.logger.debug(f"按键响应: RT={self.response_time:.1f}ms")
@@ -517,12 +508,26 @@ class SARTPage(QWidget):
         self.waiting_for_continue = False  # 重置等待标志
         self._reset_state()
         
-        self.instruction_label.setVisible(True)
+        self.instruction_label.setVisible(False)  # 不显示说明文字
         self.digit_label.setVisible(False)
         self.completion_label.setVisible(False)
         self.completion_label.setText("")
         self.progress_label.setVisible(False)
         self.stats_label.setVisible(False)
+    
+    def showEvent(self, event) -> None:
+        """页面显示时自动开始SART测试"""
+        super().showEvent(event)
+        # 只在第一次显示或重置后自动开始
+        if not self.is_running and not self.waiting_for_continue:
+            # 延迟500ms后自动开始，让用户有时间准备
+            QTimer.singleShot(500, self._auto_start_sart)
+    
+    def _auto_start_sart(self) -> None:
+        """自动开始SART测试（页面显示后触发）"""
+        if not self.is_running and not self.waiting_for_continue:
+            config.logger.info("🚀 页面显示，自动开始SART测试")
+            self.start_test()
 
 
 __all__ = ["SARTPage"]

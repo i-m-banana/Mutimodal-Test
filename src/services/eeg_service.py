@@ -397,7 +397,7 @@ class EEGRecorder:
                 return
 
             # 🔥 连接重试机制 - 最多5次
-            max_retries = 5
+            max_retries = 10
             retry_delay = 3.0
             
             for attempt in range(max_retries):

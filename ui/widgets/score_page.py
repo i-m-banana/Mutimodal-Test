@@ -1335,6 +1335,9 @@ class ScorePage(QWidget):
                 value = 0
             current_values.append(value)
         
+        # 诊断日志：显示原始值
+        logger.debug(f"雷达图原始值: {dict(zip(metric_labels, current_values))}")
+        
         # 计算首次测试基准值（用于相对比较）
         baseline = self._calculate_baseline()
         baseline_values = [baseline.get(m, 0) for m in metrics]
@@ -1355,12 +1358,27 @@ class ScorePage(QWidget):
             if metric in ["情绪", "脑负荷", "舒尔特综合得分", "疲劳检测"]:
                 # 原始值越大，表现越好
                 # 换算逻辑：
-                # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
+                # - 如果本次 >= 首次：表现更好或持平，得分接近或超过 80
                 # - 如果本次 < 首次：表现下降，得分 < 80
-                # 公式：80 * (curr/base)，限制在 [0, 100]
-                ratio = curr / base
-                score = BASELINE_SCORE * ratio
-                score = max(30, min(100, score))
+                # 新公式：线性映射到 [50, 100] 区间
+                # 当 curr = base 时，score = 80
+                # 当 curr = 0 时，score = 50
+                # 当 curr = 100 时，score = 100 (上限)
+                
+                # 线性映射：score = 50 + (curr/100) * 50
+                # 但需要相对于基准值调整
+                if curr >= base:
+                    # 表现优于或等于基准：在 [80, 100] 区间
+                    # 当 curr = base 时，score = 80
+                    # 当 curr = 100 时，score = 100
+                    score = 80 + (curr - base) / (100 - base) * 20
+                else:
+                    # 表现低于基准：在 [50, 80) 区间
+                    # 当 curr = 0 时，score = 50
+                    # 当 curr = base 时，score = 80
+                    score = 50 + (curr / base) * 30
+                
+                score = max(50, min(100, score))
                 
             elif metric in ["收缩压", "舒张压", "脉搏"]:
                 # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
@@ -1380,7 +1398,7 @@ class ScorePage(QWidget):
                 # 线性映射公式：score = 80 - (deviation / max_dev) * 30
                 # 即：score = 80 - 30 * (deviation / max_dev)
                 score = 80 - 30 * (deviation / max_dev)
-                score = max(50, min(80, score))  # 限制在 [50, 80] 范围
+                score = max(30, min(80, score))  # 限制在 [50, 80] 范围
             else:
                 # 其他未定义指标，默认按比例换算
                 ratio = curr / base

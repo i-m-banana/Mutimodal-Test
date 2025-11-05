@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
     QLabel, QMessageBox, QSpacerItem, QSizePolicy, QApplication, QWidget
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize
-from PyQt5.QtGui import QPixmap, QIcon, QFont, QColor, QPalette, QPainter
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSize, QEvent
+from PyQt5.QtGui import QPixmap, QIcon, QFont, QColor, QPalette, QPainter, QMovie
 
 # 获取全局logger
 logger = logging.getLogger()
@@ -44,9 +44,10 @@ class SchulteButton(QPushButton):
         self.scaled_pixmap = None
         self.transparent_pixmap = None
         self._last_scaled_size = None  # (w, h)
+        self._image_loaded = False  # 标记图片是否已加载
         
-        # 载入原始背景图（一次IO）
-        self._load_original_pixmap()
+        # 延迟加载背景图（不在__init__中加载，避免卡UI）
+        # 将在第一次paintEvent或resizeEvent时加载
         
         # 初始显示：透明（无数字）
         self.setText("" if not self.test_number else str(self.test_number))
@@ -130,22 +131,32 @@ class SchulteButton(QPushButton):
             self.transparent_pixmap = None
     
     def _load_original_pixmap(self):
-        """仅加载一次原始背景图到内存，避免重复IO。"""
+        """
+        仅加载一次原始背景图到内存，避免重复IO。
+        延迟加载策略：只在第一次需要时加载。
+        """
+        if self._image_loaded:  # 已经加载过，直接返回
+            return
+            
         try:
             original_path = f"assets/schult/{self.background_number}.png"
             if not os.path.exists(original_path):
                 logger.warning(f"背景图片不存在: {original_path}")
                 self.original_pixmap = None
+                self._image_loaded = True  # 标记为已尝试加载
                 return
             pix = QPixmap(original_path)
             if pix.isNull():
                 logger.warning(f"无法加载图片: {original_path}")
                 self.original_pixmap = None
+                self._image_loaded = True  # 标记为已尝试加载
                 return
             self.original_pixmap = pix
+            self._image_loaded = True  # 加载成功
         except Exception as e:
             logger.error(f"加载原始图片时出错: {e}")
             self.original_pixmap = None
+            self._image_loaded = True  # 标记为已尝试加载
     
     def _create_transparent_version(self, original_pixmap):
         """创建图片的半透明版本"""
@@ -273,9 +284,9 @@ class SchulteGridDialog(QDialog):
         self.timer = QTimer()
         self.elapsed_time = 0
         
-        # 设计基准尺寸与缩放因子
+        # 设计基准尺寸与缩放因子（增加高度以容纳更多内容）
         self._base_dialog_w = 1200
-        self._base_dialog_h = 800
+        self._base_dialog_h = 900  # 从800增加到900
         self.ui_scale = 1.0
         
         # 左右分栏引用（用于后续按比例固定尺寸）
@@ -333,110 +344,146 @@ class SchulteGridDialog(QDialog):
         self.setStyleSheet("""
             QDialog#schulteDialog {
                 background-color: #F5F5F5;
-                border-radius: 15px;
+                border-radius: 35px;
             }
         """)
+        
+        # 添加右下角阴影效果
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt5.QtGui import QColor
+        shadow_effect = QGraphicsDropShadowEffect()
+        shadow_effect.setBlurRadius(25)  # 阴影模糊半径稍大
+        shadow_effect.setOffset(6, 6)    # 阴影偏移：右下方向
+        shadow_effect.setColor(QColor(0, 0, 0, 50))  # 浅黑色，透明度50
+        self.setGraphicsEffect(shadow_effect)
     
     def set_username(self, username: str):
         """更新当前测试的用户名"""
         self.username = username or "anonymous"
         
     def _init_ui(self):
-        """初始化UI（左侧文字引导，右侧紧凑25宫格）"""
+        """初始化UI（顶部大标题，中间网格+按钮，底部结果显示）"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout.setContentsMargins(30, 20, 30, 15)  # 减小底部边距（30→15）
+        layout.setSpacing(15)  # 减小整体间距
         
-        # 顶部标题
-        title_label = QLabel("舒尔特方格注意力测试")
+        # 顶部大标题 - 老年版简洁文字（替换原来的"舒尔特方格注意力测试"）
+        title_label = QLabel("按从小到大的顺序,快速、准确地依次点击所有数字")
         title_label.setObjectName("h1")
         title_label.setAlignment(Qt.AlignCenter)
+        title_label.setWordWrap(True)
+        # 使用超大字号
+        try:
+            title_px = max(36, int(36 * getattr(self, 'ui_scale', 1.0)))
+            title_label.setStyleSheet(f"font-size: {title_px}px; font-weight: 600; line-height: 1.4; color: #2c3e50;")
+        except Exception:
+            title_label.setStyleSheet("font-size: 36px; font-weight: 600; line-height: 1.4; color: #2c3e50;")
         layout.addWidget(title_label)
         
-        # 将错误提示移动到标题下方
+        # 错误提示移动到标题下方
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
         
-        # 中部左右分栏
+        # 中间区域：网格 + 开始按钮（居中，往上提）
         center_container = QWidget()
-        center_layout = QHBoxLayout(center_container)
+        center_layout = QVBoxLayout(center_container)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(20)
+        center_layout.setSpacing(25)  # 减小网格和按钮之间的间距
+        center_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)  # 改为顶部对齐
         
-        # 左侧：文字引导+状态+开始按钮
-        left_panel = QWidget()
-        left_panel.setObjectName("card")
-        left_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(20, 20, 20, 20)
-        left_layout.setSpacing(12)
-        # 顶部不再留白，直接展示标题与规则
-        self._left_top_spacer = None
+        # 创建GIF播放器容器（用于叠加播放按钮）
+        self.gif_container = QWidget()
+        self.gif_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         
-        rule_title = QLabel("测试目的与规则")
-        rule_title.setObjectName("h2")
-        rule_title.setAlignment(Qt.AlignLeft)
-        # 使用样式表基于缩放因子设置字号，优先级高于全局QSS
-        try:
-            title_px = max(24, int(18 * getattr(self, 'ui_scale', 1.0)))
-            rule_title.setStyleSheet(f"font-size: {title_px}px; font-weight: 600;")
-        except Exception:
-            rule_title.setStyleSheet("font-size: 24px; font-weight: 600;")
-        rule_text = QLabel(
-            "测试目的：评估注意力与视觉搜索效率。\n\n"
-            "规则：\n"
-            "1. 从最小数字开始，按递增顺序点击方格。\n"
-            "2. 点错会有红色提示，请继续寻找正确数字。\n"
-            "3. 开始后数字会显现，完成后显示用时与准确率。"
-        )
-        rule_text.setObjectName("subtitle")
-        rule_text.setWordWrap(True)
-        try:
-            text_px = max(22, int(14 * getattr(self, 'ui_scale', 1.0)))
-            rule_text.setStyleSheet(f"font-size: {text_px}px;")
-        except Exception:
-            rule_text.setStyleSheet("font-size: 22px;")
+        # GIF标签
+        self.gif_label = QLabel(self.gif_container)
+        self.gif_label.setObjectName("gifLabel")
+        self.gif_label.setAlignment(Qt.AlignCenter)
+        self.gif_label.setStyleSheet("""
+            QLabel#gifLabel {
+                background-color: #2c3e50;
+                border-radius: 10px;
+                border: none;
+            }
+        """)
         
-        # 开始按钮
-        self.start_button = QPushButton("开始测试")
-        self.start_button.setObjectName("successButton")
-        self.start_button.setFixedWidth(200)
-        self.start_button.clicked.connect(self._start_test)
+        # 创建纯透明的播放/暂停按钮（覆盖在GIF中央，初始显示）
+        self.play_pause_button = QPushButton(self.gif_container)
+        self.play_pause_button.setObjectName("playPauseButton")
+        self.play_pause_button.setText("▶")  # 初始显示播放图标
+        self.play_pause_button.setCursor(Qt.PointingHandCursor)
+        self.play_pause_button.setVisible(True)  # 初始显示，提示用户可以点击
+        self.play_pause_button.setStyleSheet("""
+            QPushButton#playPauseButton {
+                background-color: transparent;
+                background: transparent;
+                color: white;
+                border: none;
+                outline: none;
+                font-size: 80px;
+                font-weight: bold;
+            }
+            QPushButton#playPauseButton:hover {
+                background-color: transparent;
+                background: transparent;
+                color: white;
+                border: none;
+                outline: none;
+                font-size: 90px;
+            }
+            QPushButton#playPauseButton:pressed {
+                background-color: transparent;
+                background: transparent;
+                color: white;
+                border: none;
+                outline: none;
+                font-size: 75px;
+            }
+            QPushButton#playPauseButton:focus {
+                background-color: transparent;
+                background: transparent;
+                color: white;
+                border: none;
+                outline: none;
+            }
+        """)
+        self.play_pause_button.setFixedSize(150, 150)
+        self.play_pause_button.clicked.connect(self._toggle_gif_playback)
         
-        # 将结果显示移动到开始按钮上方（左侧面板内）
-        self.result_label = QLabel("")
-        self.result_label.setObjectName("subtitle")
-        self.result_label.setAlignment(Qt.AlignLeft)
-        self.result_label.setVisible(False)
+        # 安装事件过滤器来监听鼠标悬停
+        self.gif_container.installEventFilter(self)
         
-        left_layout.addWidget(rule_title)
-        left_layout.addWidget(rule_text)
-        left_layout.addStretch(1)
-        left_layout.addWidget(self.result_label)
-        left_layout.addSpacing(8)
+        # 创建QMovie对象用于播放GIF
+        # 使用绝对路径确保能找到文件
+        gif_path = Path(__file__).resolve().parent.parent / "assets" / "gif" / "shuerte.gif"
+        logger.info(f"🔍 尝试加载GIF: {gif_path}")
         
-        # 下一阶段按钮（测试完成后显示）
-        self.next_button = QPushButton("进入下一阶段")
-        self.next_button.setObjectName("finishButton")
-        self.next_button.setFixedWidth(200)
-        self.next_button.setVisible(False)
-        self.next_button.clicked.connect(self._on_next_stage)
+        if gif_path.exists():
+            self.gif_movie = QMovie(str(gif_path))
+            if self.gif_movie.isValid():
+                self.gif_label.setMovie(self.gif_movie)
+                # 显示第一帧但不自动播放
+                self.gif_movie.jumpToFrame(0)  # 跳到第一帧
+                self.gif_playing = False
+                logger.info(f"✅ 舒尔特GIF已加载成功: {gif_path}")
+            else:
+                logger.error(f"❌ GIF文件无效: {gif_path}")
+                self.gif_movie = None
+                self.gif_playing = False
+        else:
+            logger.error(f"❌ GIF文件不存在: {gif_path}")
+            self.gif_movie = None
+            self.gif_playing = False
         
-        # 两个按钮放在左框底部居中
-        buttons_container = QWidget(left_panel)
-        buttons_layout = QVBoxLayout(buttons_container)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(8)
-        buttons_layout.addWidget(self.start_button, 0, Qt.AlignHCenter)
-        buttons_layout.addWidget(self.next_button, 0, Qt.AlignHCenter)
-        left_layout.addWidget(buttons_container, 0, Qt.AlignBottom)
+        center_layout.addWidget(self.gif_container, 0, Qt.AlignCenter)
         
-        # 右侧：紧凑5x5网格（正方形）
+        # 5x5网格（正方形）- 初始隐藏
         self.grid_container = QWidget()
         self.grid_container.setObjectName("card")
         self.grid_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.grid_container.setVisible(False)  # 初始隐藏网格
         grid_layout = QGridLayout(self.grid_container)
         grid_layout.setSpacing(0)  # 关键：0间距
         grid_layout.setContentsMargins(0, 0, 0, 0)  # 关键：0边距
@@ -451,41 +498,121 @@ class SchulteGridDialog(QDialog):
                 self.buttons.append(button)
                 grid_layout.addWidget(button, i, j)
         
-        # 将左右面板加入分栏，右侧给予更大伸展比（右侧容器本身为固定正方形）
-        center_layout.addWidget(left_panel, 1)
         center_layout.addWidget(self.grid_container, 0, Qt.AlignCenter)
+        
+        # 添加间距，把开始按钮往下推
+        center_layout.addSpacing(40)
+        
+        # 开始按钮放在网格下方 - 使用水绿色（与基线校准按钮一致）
+        # 高度设置为60px与底部按钮对齐
+        self.start_button = QPushButton("我已了解规则,开始测试")
+        self.start_button.setObjectName("primaryButton")
+        self.start_button.setFixedSize(400, 60)  # 高度改为60px与底部按钮一致
+        self.start_button.clicked.connect(self._start_test)
+        self.start_button.setCursor(Qt.PointingHandCursor)
+        # 使用与基线校准按钮相同的水绿色
+        self.start_button.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                font-size: 24px;
+                font-weight: bold;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        
+        # 开始按钮先添加到中间区域
+        center_layout.addWidget(self.start_button, 0, Qt.AlignCenter)
         
         layout.addWidget(center_container, 1)
         
-        # 结果显示已移动到左侧面板中
+        # 添加弹性空间，把底部按钮往下推
+        layout.addStretch(1)
         
-        # 底部按钮区域（已移除“进入下一阶段”按钮）
-        bottom_button_layout = QHBoxLayout()
-        bottom_button_layout.setSpacing(20)
-        bottom_button_layout.addStretch()
-        layout.addLayout(bottom_button_layout)
+        # 底部区域：结果显示、重新开始按钮和下一阶段按钮（同一行，靠下显示）
+        bottom_container = QWidget()
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(0, 20, 0, 0)  # 顶部留出空间
+        bottom_layout.setSpacing(30)
+        bottom_layout.setAlignment(Qt.AlignCenter)
+        
+        # 结果显示标签
+        self.result_label = QLabel("")
+        self.result_label.setObjectName("subtitle")
+        self.result_label.setAlignment(Qt.AlignCenter)
+        self.result_label.setVisible(False)
+        try:
+            result_px = max(24, int(24 * getattr(self, 'ui_scale', 1.0)))
+            self.result_label.setStyleSheet(f"font-size: {result_px}px; font-weight: 600; color: #27ae60;")
+        except Exception:
+            self.result_label.setStyleSheet("font-size: 24px; font-weight: 600; color: #27ae60;")
+        bottom_layout.addWidget(self.result_label)
+        
+        # 创建"重新开始测试"按钮（完成后显示在底部）
+        self.restart_button = QPushButton("重新开始测试")
+        self.restart_button.setObjectName("primaryButton")
+        self.restart_button.setFixedSize(200, 60)
+        self.restart_button.clicked.connect(self._start_test)
+        self.restart_button.setCursor(Qt.PointingHandCursor)
+        self.restart_button.setVisible(False)
+        self.restart_button.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 20px;
+                font-weight: bold;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        bottom_layout.addWidget(self.restart_button)
+        
+        # 下一阶段按钮（测试完成后显示，与结果在同一行）
+        self.next_button = QPushButton("进入下一阶段")
+        self.next_button.setObjectName("finishButton")
+        self.next_button.setFixedSize(200, 60)
+        self.next_button.setVisible(False)
+        self.next_button.clicked.connect(self._on_next_stage)
+        bottom_layout.addWidget(self.next_button)
+        
+        layout.addWidget(bottom_container, 0)
         
         # 保存引用用于缩放布局
-        self.left_panel = left_panel
         self.center_container = center_container
-        self.center_layout = center_layout
         
     def _apply_scaled_layout(self):
-        """根据 ui_scale 固定左侧宽度，并将右侧网格设为正方形，禁止用户拉伸时仍保持比例。"""
+        """根据 ui_scale 设置网格和GIF为正方形，保持比例。"""
         try:
-            # 固定左侧面板宽度（随缩放变化）
-            left_w = int(380 * self.ui_scale)
-            self.left_panel.setFixedWidth(left_w)
-            # 调整左右间距随缩放
-            self.center_layout.setSpacing(int(20 * self.ui_scale))
-            
-            # 计算中心区域内可用于网格的宽高
-            # 使用已布局后的尺寸，确保测得的是最终可用空间
-            available_w = max(200, self.center_container.width() - self.left_panel.width() - self.center_layout.spacing())
-            available_h = max(200, self.center_container.height())
-            side = min(available_w, available_h)
+            # 计算可用空间并设置为正方形（增大尺寸适合老年人）
+            available_w = max(600, self.center_container.width() - 50)
+            available_h = max(600, self.center_container.height() - 100)
+            # 进一步增大最大尺寸限制，使网格更大
+            side = min(available_w, available_h, int(850 * self.ui_scale))
             # 设为正方形固定尺寸
             self.grid_container.setFixedSize(side, side)
+            # GIF容器与网格等大
+            self.gif_container.setFixedSize(side, side)
+            self.gif_label.setFixedSize(side, side)
+            # 同时缩放GIF内容
+            if self.gif_movie:
+                self.gif_movie.setScaledSize(QSize(side, side))
+            # 将播放按钮居中放置
+            button_x = (side - self.play_pause_button.width()) // 2
+            button_y = (side - self.play_pause_button.height()) // 2
+            self.play_pause_button.move(button_x, button_y)
         except Exception as e:
             logger.warning(f"应用缩放布局失败: {e}")
     
@@ -493,9 +620,43 @@ class SchulteGridDialog(QDialog):
         """连接信号"""
         self.timer.timeout.connect(self._update_timer)
         
+    def _toggle_gif_playback(self):
+        """点击按钮播放/暂停GIF"""
+        if not self.gif_movie:
+            logger.warning("GIF动画未加载")
+            return
+        
+        try:
+            if self.gif_playing:
+                # 暂停播放
+                self.gif_movie.stop()
+                self.gif_playing = False
+                self.play_pause_button.setText("▶")  # 显示播放图标
+                self.play_pause_button.setVisible(True)  # 暂停时显示按钮
+                logger.info("⏸️ 舒尔特GIF已暂停")
+            else:
+                # 开始播放
+                self.gif_movie.start()
+                self.gif_playing = True
+                self.play_pause_button.setText("⏸")  # 显示暂停图标
+                # 播放时不自动隐藏按钮，由鼠标悬停控制
+                logger.info("▶️ 舒尔特GIF开始播放")
+        except Exception as e:
+            logger.error(f"❌ GIF播放控制失败: {e}", exc_info=True)
+    
     def _start_test(self):
         """开始测试"""
         logger.info("舒特格测试开始")
+        
+        # 停止并隐藏GIF容器
+        if self.gif_movie and self.gif_playing:
+            self.gif_movie.stop()
+            self.gif_playing = False
+            self.play_pause_button.setText("▶")  # 重置为播放图标
+        self.gif_container.setVisible(False)
+        
+        # 显示网格
+        self.grid_container.setVisible(True)
         
         # 如果之前有未完成的测试，先保存它
         if self.test_started and not self.test_completed_flag:
@@ -523,11 +684,13 @@ class SchulteGridDialog(QDialog):
         self.timer.start(100)  # 每100ms更新一次
         
         # 更新UI状态（不再提示下一个应点击数字）
-        self.start_button.setText("重新开始")
         self.status_label.setText("")
         self.status_label.setStyleSheet("")
         self.result_label.setVisible(False)
+        self.restart_button.setVisible(False)
         self.next_button.setVisible(False)
+        # 隐藏开始按钮（测试进行中）
+        self.start_button.setVisible(False)
         
         # 固定窗口下仍确保右侧为正方形（某些平台首次布局后需要再调整一次）
         QTimer.singleShot(0, self._apply_scaled_layout)
@@ -619,7 +782,7 @@ class SchulteGridDialog(QDialog):
         # 计算结果
         accuracy = (25 / self.total_clicks) * 100 if self.total_clicks > 0 else 0
         
-        # 显示结果（移动至左侧按钮上方）
+        # 显示结果（底部同一行显示）
         result_text = f"用时: {self.elapsed_time:.2f}秒    准确率: {accuracy:.1f}%"
         self.result_label.setText(result_text)
         self.result_label.setVisible(True)
@@ -635,7 +798,8 @@ class SchulteGridDialog(QDialog):
         # 保存结果
         self._save_result(self.elapsed_time, accuracy, self.total_clicks, True)
         
-        # 显示进入下一阶段按钮
+        # 显示重新开始按钮和进入下一阶段按钮（底部同一行）
+        self.restart_button.setVisible(True)
         self.next_button.setVisible(True)
         
         # 禁用所有测试按钮
@@ -703,6 +867,35 @@ class SchulteGridDialog(QDialog):
             
             # 重置状态
             self.test_started = False
+        
+        # 重置UI：隐藏网格，显示GIF
+        self.grid_container.setVisible(False)
+        self.gif_container.setVisible(True)
+        # 重置GIF到第一帧并停止播放
+        if self.gif_movie:
+            self.gif_movie.stop()
+            self.gif_movie.jumpToFrame(0)
+            self.gif_playing = False
+            self.play_pause_button.setText("▶")
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器：处理GIF容器的鼠标进入/离开事件"""
+        if obj == self.gif_container:
+            if event.type() == QEvent.Enter:
+                # 鼠标进入GIF区域，显示播放/暂停按钮
+                if hasattr(self, 'play_pause_button'):
+                    self.play_pause_button.setVisible(True)
+            elif event.type() == QEvent.Leave:
+                # 鼠标离开GIF区域，隐藏播放/暂停按钮
+                if hasattr(self, 'play_pause_button'):
+                    self.play_pause_button.setVisible(False)
+        
+        return super().eventFilter(obj, event)
+    
+    def showEvent(self, event):
+        """对话框显示时的事件处理"""
+        super().showEvent(event)
+        # GIF已经在初始化时加载，无需额外处理
 
     def closeEvent(self, event):
         """弹窗关闭事件处理"""
@@ -713,6 +906,11 @@ class SchulteGridDialog(QDialog):
         # 停止计时器
         if self.timer.isActive():
             self.timer.stop()
+        
+        # 停止GIF播放
+        if hasattr(self, 'gif_movie') and self.gif_movie and self.gif_playing:
+            self.gif_movie.stop()
+            self.gif_playing = False
         
         super().closeEvent(event)
 
