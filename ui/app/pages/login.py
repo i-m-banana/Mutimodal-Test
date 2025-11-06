@@ -6,7 +6,7 @@ from .. import config
 from ..qt import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QSpacerItem, QSizePolicy, QFrame, QDialog,
-    Qt, QFont, qta, QPainter, QLinearGradient, QColor, QMessageBox
+    Qt, QFont, qta, QPainter, QLinearGradient, QColor, QMessageBox,QPixmap,QApplication
 )
 from ..utils.widgets import create_shadow_effect
 from ..utils.responsive import scale
@@ -25,91 +25,309 @@ class LoginPage(QWidget):
     def _init_ui(self) -> None:
         self.setAutoFillBackground(True)
         main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignCenter)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ========== 🎯 顶部标题区域 ==========
+        title_h_layout = QHBoxLayout()
+        title_h_layout.setContentsMargins(0, 0, 0, 0)
+        title_h_layout.addStretch()  # 左侧自动填充
+
+        # 创建独立的标题容器
+        title_container = self._create_title_container()
+        title_h_layout.addWidget(title_container)
+
+        title_h_layout.addSpacing(100)  # 距离右边100px，与登录框对齐
+
+        # ========== 登录表单区域 ==========
+        form_h_layout = QHBoxLayout()
+        form_h_layout.setContentsMargins(0, 0, 0, 0)
+        form_h_layout.addStretch()  # 左侧自动填充
+
         form_container = self._create_login_form()
-        main_layout.addWidget(form_container)
+        form_h_layout.addWidget(form_container)
+        form_h_layout.addSpacing(100)  # 距离右边100px
+
+        # ========== 组合到主布局 ==========
+        main_layout.addStretch()  # 顶部自动填充
+        main_layout.addLayout(title_h_layout)  # 添加标题
+        main_layout.addSpacing(20)  # 标题和登录框之间的间距
+        main_layout.addLayout(form_h_layout)  # 添加登录表单
+        main_layout.addStretch()  # 底部自动填充
+
+    def _create_title_container(self) -> QWidget:
+        """创建独立的系统标题容器（透明背景）"""
+        container = QFrame()
+        container.setObjectName("titleFrame")
+        container.setStyleSheet("""
+            QFrame#titleFrame {
+                background-color: transparent;  /* 透明背景 */
+                border: none;
+            }
+        """)
+
+        # 设置固定宽度（与登录框保持一致）
+        container.setFixedWidth(700)
+
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(scale(30), scale(20), scale(30), scale(20))
+        layout.setSpacing(0)
+
+        # ========== 标题行（图标 + 文字横向排列）==========
+        title_row = QHBoxLayout()
+        title_row.setSpacing(scale(15))
+        title_row.setAlignment(Qt.AlignCenter)
+
+        # 图标
+        icon_label = QLabel()
+        icon_label.setPixmap(qta.icon('fa5s.user-shield', color='#00BCFE').pixmap(60, 60))
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setFixedSize(60, 60)
+        title_row.addWidget(icon_label)
+
+        # 标题文字
+        title = QLabel('多模态状态评估系统')
+        title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        title.setFont(QFont("阿里健康体2.0 中文 45 R", 36, 50))
+        title.setStyleSheet("""
+            QLabel {
+                color: #00BCFE;
+                letter-spacing: 3px;
+                font-weight: bold; 
+                background: transparent;
+                font-size: 60px;
+            }
+        """)
+
+        title_row.addWidget(title)
+        layout.addLayout(title_row)
+
+        return container
 
     def _create_login_form(self) -> QWidget:
         container = QFrame()
         container.setObjectName("loginFrame")
-        # 使用固定尺寸，不进行响应式缩放
-        container.setFixedSize(450, 550)
+        container.setStyleSheet("""
+            QFrame#loginFrame {
+               background-color: rgba(12, 58, 98, 178);
+               border: 3px solid #1794E3;
+               border-radius: 20px;
+            }
+        """)
+
+        container.setFixedSize(700, 600)
         container.setGraphicsEffect(create_shadow_effect())
 
         layout = QVBoxLayout(container)
-        # 使用响应式边距和间距
-        layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
-        layout.setSpacing(scale(15))
+        layout.setContentsMargins(scale(40), scale(50), scale(40), scale(50))  # 增加上下边距
+        layout.setSpacing(0)  # 手动控制间距
 
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.user-shield', color='#1565C0').pixmap(60, 60))
-        icon_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(icon_label)
+        # ========== 🎯 新增：用户登录小标题 ==========
+        login_header = QHBoxLayout()
+        login_header.setSpacing(scale(10))
 
-        title = QLabel('非接触人员状态评估系统')
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("loginTitle")
-        layout.addWidget(title)
+        # 用户图标（使用系统内置图标）
+        user_icon_label = QLabel()
+        # 使用 QtAwesome 图标
+        user_icon_label.setPixmap(qta.icon('fa5s.user-circle', color='#00BCFE').pixmap(28, 28))
+        # 或者使用 Qt 内置图标（备选方案）
+        # from PyQt5.QtWidgets import QStyle
+        # user_icon = self.style().standardIcon(QStyle.SP_UserIcon)
+        # user_icon_label.setPixmap(user_icon.pixmap(28, 28))
 
-        layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        # "用户登录" 文字
+        login_title = QLabel('用户登录')
+        login_title.setFont(QFont("阿里健康体2.0 中文 45 R", 18, 75))
+        login_title.setStyleSheet("""
+                QLabel {
+                    color: #00BCFE;
+                    letter-spacing: 2px;
+                    font-size: 44px;
+                }
+            """)
 
-        self.username_input = QLineEdit('')
-        self.username_input.setPlaceholderText('用户名')
-        self.username_input.setObjectName("loginInput")
-        # 不设置 textMargins，让 CSS 的 padding 来控制
-        self.username_input.setFixedHeight(50)
+        # 组合图标和文字
+        login_header.addWidget(user_icon_label)
+        login_header.addWidget(login_title)
+        login_header.addStretch()
 
+        layout.addLayout(login_header)
+        layout.addSpacing(scale(40))  # 标题和用户名之间
+        # ========== 用户登录标题结束 ==========
+
+        # ========== 用户名输入框 ==========
+        self.username_input = QLineEdit('admin')
+        self.username_input.setPlaceholderText('👤 用户名')
+        self.username_input.setFont(QFont("阿里健康体2.0 中文 45 R", 22))  # 增大字体从14到22
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(255, 255, 255, 200);
+                height: 80px;
+                width: 150px;
+                border: 2px solid #BBDEFB;
+                border-radius: 10px;
+                padding: 0 15px;
+                font-size: 28px;
+                color: #0D47A1;
+            }
+            QLineEdit:focus {
+                border: 2px solid #1565C0;
+                background-color: rgba(255, 255, 255, 240);
+            }
+            QLineEdit::placeholder {
+                color: #64B5F6;
+                font-size: 24px;
+            }
+        """)
+        layout.addWidget(self.username_input)
+        layout.addSpacing(scale(20))  # 用户名和密码之间
+
+        # ========== 密码输入框 ==========
         self.password_input = QLineEdit('123456')
-        self.password_input.setPlaceholderText('密码')
+        self.password_input.setPlaceholderText('🔒 密码')
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setObjectName("loginInput")
-        self.password_input.setFixedHeight(50)
+        self.password_input.setFont(QFont("阿里健康体2.0 中文 45 R", 22))  # 增大字体从14到22
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                background-color: rgba(255, 255, 255, 200);
+                height: 80px;
+                width: 150px;
+                border: 2px solid #BBDEFB;
+                border-radius: 10px;
+                padding: 0 15px 0 15px;
+                font-size: 28px;
+                color: #0D47A1;
+            }
+            QLineEdit:focus {
+                border: 2px solid #1565C0;
+                background-color: rgba(255, 255, 255, 240);
+            }
+            QLineEdit::placeholder {
+                color: #64B5F6;
+                font-size: 24px;
+            }
+        """)
 
+        # 密码显示/隐藏按钮
         password_layout = QHBoxLayout(self.password_input)
         password_layout.setContentsMargins(0, 0, 5, 0)
         password_layout.addStretch()
         self.toggle_password_button = QPushButton()
-        self.toggle_password_button.setIcon(qta.icon('fa5s.eye-slash', color='grey'))
+        self.toggle_password_button.setIcon(qta.icon('fa5s.eye-slash', color='#1976D2'))
         self.toggle_password_button.setCursor(Qt.PointingHandCursor)
         self.toggle_password_button.setFlat(True)
         self.toggle_password_button.setCheckable(True)
         self.toggle_password_button.clicked.connect(self._toggle_password_visibility)
         password_layout.addWidget(self.toggle_password_button)
 
-        layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
-        layout.addSpacing(20)
+        layout.addSpacing(scale(20))  # 密码和注册之间
 
-        login_button = QPushButton('登 录')
-        login_button.setObjectName("loginButton")
-        login_button.setFixedHeight(50)
-        login_button.setCursor(Qt.PointingHandCursor)
-        login_button.clicked.connect(self._perform_login)
-        layout.addWidget(login_button)
+        # ========== 注册按钮 ==========
+        # 1. 创建一个水平布局容器
+        register_layout = QHBoxLayout()
 
-        # 添加注册按钮
+        # 2. 添加弹簧（把按钮推到右边）
+        register_layout.addStretch()
+
+        # 3. 创建缩小版的注册按钮
         register_button = QPushButton('注 册')
-        register_button.setObjectName("successButton")
-        register_button.setFixedHeight(50)
+        register_button.setFixedHeight(55)  # 增大高度从45到55
+        register_button.setMinimumWidth(100)  # 增大宽度从80到100
         register_button.setCursor(Qt.PointingHandCursor)
+        register_button.setFont(QFont("阿里健康体2.0 中文 45 R", 20, 75))  # 增大字体从15到20
         register_button.clicked.connect(self._show_register_dialog)
-        layout.addWidget(register_button)
+        register_button.setStyleSheet("""
+                  QPushButton {
+                      background: transparent;
+                      color: white;
+                      border-radius: 8px;
+                      font-size: 24px;
+                      font-weight: bold;
+                      letter-spacing: 1px;
+                  }
+                  QPushButton:hover {
+                      background-color: rgba(21, 101, 192, 0.1);
+                      border: 2px solid #1E88E5;
+                      color: #1E88E5;
+                  }
+                  QPushButton:pressed {
+                      background-color: rgba(13, 71, 161, 0.2);
+                      border: 2px solid #0D47A1;
+                      color: #0D47A1;
+                  }
+              """)
 
-        layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        # 4. 把按钮添加到水平布局
+        register_layout.addWidget(register_button)
 
-        copyright_label = QLabel("© 2025 智能评估系统. All Rights Reserved.")
-        copyright_label.setAlignment(Qt.AlignCenter)
-        copyright_label.setObjectName("copyrightLabel")
-        layout.addWidget(copyright_label)
+        # 5. 把水平布局添加到主布局
+        layout.addLayout(register_layout)
+        layout.addSpacing(scale(40))  # 注册和登录之间
+
+        # ========== 登录按钮 ==========
+        login_button = QPushButton('登 录')
+        login_button.setFixedHeight(150)
+        login_button.setMinimumWidth(10)  # ✅ 设置最小宽度为600
+        login_button.setCursor(Qt.PointingHandCursor)
+        login_button.setFont(QFont("阿里健康体2.0 中文 45 R", 15, 75))
+        login_button.clicked.connect(self._perform_login)
+        login_button.setStyleSheet("""
+            QPushButton {
+                 background-color: rgba(0, 188, 254, 0.9);
+                height: 80px;
+                width: 150px;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 40px;
+                font-weight: bold;
+                letter-spacing: 5px;
+            }
+            QPushButton:hover {
+                 background: qlineargradient(x1:0, y1:0, x4:1, y4:0,
+                    stop:0 #0D47A1, stop:1 #1565C0);
+            }
+            QPushButton:pressed {
+                 background: qlineargradient(x1:0, y1:0, x4:1, y4:0,
+                    stop:0 #0D47A1, stop:1 #1565C0);
+            }
+        """)
+        layout.addWidget(login_button)
+        layout.addSpacing(scale(30))  # 底部留白
+
+        layout.addSpacerItem(QSpacerItem(20, 30, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # # ========== 版权信息 ==========
+        # copyright_label = QLabel("© 2025 多模态状态评估系统. All Rights Reserved.")
+        # copyright_label.setAlignment(Qt.AlignCenter)
+        # copyright_label.setFont(QFont("阿里健康体2.0 中文 45 R", 10))
+        # copyright_label.setStyleSheet("""
+        #     QLabel {
+        #         color: #00B5FE;
+        #         font-size: 36px;
+        #         margin-top: 10px;
+        #     }
+        # """)
+        # layout.addWidget(copyright_label)
 
         return container
 
     def paintEvent(self, event):  # type: ignore[override]
+        from PyQt5.QtGui import QPainter, QPixmap
+        import os
+        bg_path = str(config.BASE_DIR / "assets" / "login.png")
+
         painter = QPainter(self)
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0, QColor("#F4F6F7"))
-        gradient.setColorAt(1, QColor("#EAECEE"))
-        painter.fillRect(self.rect(), gradient)
+        pixmap = QPixmap(bg_path)
+        if not pixmap.isNull():
+            painter.drawPixmap(self.rect(), pixmap)
+        else:
+            from PyQt5.QtGui import QLinearGradient, QColor
+            gradient = QLinearGradient(0, 0, 0, self.height())
+            gradient.setColorAt(0, QColor("#F4F6F7"))
+            gradient.setColorAt(1, QColor("#EAECEE"))
+            painter.fillRect(self.rect(), gradient)
         super().paintEvent(event)
 
     def _toggle_password_visibility(self, checked: bool) -> None:
@@ -154,7 +372,7 @@ class RegisterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("用户注册")
         self.setModal(True)
-        self.setFixedSize(400, 450)
+        self.setFixedSize(450, 520)  # 增大尺寸以适应更大的字体（从400x450增大到450x520）
         self._init_ui()
     
     def _init_ui(self) -> None:
@@ -166,51 +384,54 @@ class RegisterDialog(QDialog):
         # 标题
         title = QLabel("创建新账户")
         title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("阿里健康体2.0 中文 45 R", 22, QFont.Bold))
+        title.setFont(QFont("阿里健康体2.0 中文 45 R", 22, 75))
         title.setStyleSheet("color: #1565C0; margin-bottom: 10px;")
         layout.addWidget(title)
         
         # 提示文字
         hint = QLabel("请填写以下信息完成注册")
         hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet("color: #666; font-size: 15px; margin-bottom: 10px;")
+        hint.setStyleSheet("color: #666; font-size: 18px; margin-bottom: 10px;")  # 从15px增大到18px
         layout.addWidget(hint)
         
         layout.addSpacing(10)
         
         # 用户名输入
         username_label = QLabel("用户名:")
-        username_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
+        username_label.setStyleSheet("color: #333; font-size: 20px; font-weight: bold;")  # 从16px增大到20px
         layout.addWidget(username_label)
         
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("请输入用户名 (3-20个字符)")
         self.username_input.setObjectName("loginInput")
-        self.username_input.setFixedHeight(45)
+        self.username_input.setFixedHeight(50)  # 从45增大到50
+        self.username_input.setStyleSheet("font-size: 18px;")  # 添加字体大小
         layout.addWidget(self.username_input)
         
         # 密码输入
         password_label = QLabel("密码:")
-        password_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
+        password_label.setStyleSheet("color: #333; font-size: 20px; font-weight: bold;")  # 从16px增大到20px
         layout.addWidget(password_label)
         
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("请输入密码 (6-20个字符)")
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setObjectName("loginInput")
-        self.password_input.setFixedHeight(45)
+        self.password_input.setFixedHeight(50)  # 从45增大到50
+        self.password_input.setStyleSheet("font-size: 18px;")  # 添加字体大小
         layout.addWidget(self.password_input)
         
         # 确认密码输入
         confirm_label = QLabel("确认密码:")
-        confirm_label.setStyleSheet("color: #333; font-size: 16px; font-weight: bold;")
+        confirm_label.setStyleSheet("color: #333; font-size: 20px; font-weight: bold;")  # 从16px增大到20px
         layout.addWidget(confirm_label)
         
         self.confirm_input = QLineEdit()
         self.confirm_input.setPlaceholderText("请再次输入密码")
         self.confirm_input.setEchoMode(QLineEdit.Password)
         self.confirm_input.setObjectName("loginInput")
-        self.confirm_input.setFixedHeight(45)
+        self.confirm_input.setFixedHeight(50)  # 从45增大到50
+        self.confirm_input.setStyleSheet("font-size: 18px;")  # 添加字体大小
         layout.addWidget(self.confirm_input)
         
         layout.addSpacing(10)
@@ -222,16 +443,18 @@ class RegisterDialog(QDialog):
         # 取消按钮
         cancel_button = QPushButton("取消")
         cancel_button.setObjectName("finishButton")
-        cancel_button.setFixedHeight(45)
+        cancel_button.setFixedHeight(50)  # 从45增大到50
         cancel_button.setCursor(Qt.PointingHandCursor)
+        cancel_button.setStyleSheet("font-size: 20px; font-weight: bold;")  # 添加字体样式
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
         
         # 注册按钮
         register_button = QPushButton("注册")
         register_button.setObjectName("successButton")
-        register_button.setFixedHeight(45)
+        register_button.setFixedHeight(50)  # 从45增大到50
         register_button.setCursor(Qt.PointingHandCursor)
+        register_button.setStyleSheet("font-size: 20px; font-weight: bold;")  # 添加字体样式
         register_button.clicked.connect(self._perform_register)
         button_layout.addWidget(register_button)
         

@@ -99,7 +99,7 @@ class SARTPage(QWidget):
         # 数字刺激显示 - 中央
         self.digit_label = QLabel("")
         self.digit_label.setAlignment(Qt.AlignCenter)
-        digit_font = QFont("阿里健康体2.0 中文 45 R", 250, QFont.Bold)  # 固定250px超大字号
+        digit_font = QFont("阿里健康体2.0 中文 45 R", 250, 75)  # 固定250px超大字号
         self.digit_label.setFont(digit_font)
         self.digit_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
@@ -107,10 +107,10 @@ class SARTPage(QWidget):
         self.digit_label.setVisible(False)
         layout.addWidget(self.digit_label, stretch=1)  # 占据主要空间
         
-        # 完成提示标签（初始隐藏）- 居中显示
+        # 完成提示标签(初始隐藏)- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, 75)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"

@@ -24,23 +24,13 @@ logger = logging.getLogger()
 # 强制使用 Qt5Agg 后端
 plt.switch_backend('Qt5Agg')
 
-# 字体配置（优先使用阿里健康体2.0，fallback到微软雅黑）
-alibaba_health_font_path = "C:/Windows/Fonts/Alibaba-PuHuiTi-2.0-55-Regular.ttf"
-msyh_font_path = "C:/Windows/Fonts/msyh.ttc"
+# 系统字体路径（Windows 微软雅黑）
+font_path = "C:/Windows/Fonts/msyh.ttc"
+if not os.path.exists(font_path):
+    print("警告: 微软雅黑字体未找到，中文可能显示方块")
+zh_font = font_manager.FontProperties(fname=font_path)
 
-if os.path.exists(alibaba_health_font_path):
-    zh_font = font_manager.FontProperties(fname=alibaba_health_font_path)
-    plt.rcParams['font.sans-serif'] = ['Alibaba PuHuiTi 2.0']
-    print("✓ 使用阿里健康体2.0字体")
-elif os.path.exists(msyh_font_path):
-    zh_font = font_manager.FontProperties(fname=msyh_font_path)
-    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
-    print("⚠ 阿里健康体未找到，使用微软雅黑")
-else:
-    zh_font = font_manager.FontProperties(family="sans-serif")
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial']
-    print("⚠ 字体未找到，使用系统默认字体")
-
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 
@@ -127,7 +117,7 @@ class ModernGaugeWidget(QWidget):
 
         # 绘制分数
         painter.setPen(QPen(main_color, 3))
-        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 56, QFont.Bold))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 56, 75))
         score_text = str(int(self.value))
         painter.drawText(-60, -20, 120, 60, Qt.AlignCenter, score_text)
 
@@ -206,18 +196,19 @@ class HistoryDialog(QDialog):
                 QPushButton {
                     font-size: 16px;
                     font-weight: bold;
-                    background-color: #f0f0f0;
-                    border: 2px solid #ddd;
+                    background-color: #4DA5C9;
+                    color: white;
+                    border: 2px solid #4DA5C9;
                     border-radius: 22px;
                     padding: 0 30px;
                 }
                 QPushButton:hover {
-                    background-color: #e0e0e0;
-                    border-color: #bbb;
+                    background-color: #3d8bb0;
+                    border-color: #3d8bb0;
                 }
                 QPushButton:pressed {
-                    background-color: #4CAF50;
-                    color: white;
+                    background-color: #2d7a9a;
+                    border-color: #2d7a9a;
                 }
             """)
             btn.clicked.connect(lambda checked, metric=m: self._draw_chart(metric))
@@ -265,9 +256,9 @@ class HistoryDialog(QDialog):
                     QPushButton {
                         font-size: 16px;
                         font-weight: bold;
-                        background-color: #4CAF50;
+                        background-color: #2d7a9a;
                         color: white;
-                        border: 2px solid #4CAF50;
+                        border: 2px solid #2d7a9a;
                         border-radius: 22px;
                         padding: 0 30px;
                     }
@@ -277,14 +268,15 @@ class HistoryDialog(QDialog):
                     QPushButton {
                         font-size: 16px;
                         font-weight: bold;
-                        background-color: #f0f0f0;
-                        border: 2px solid #ddd;
+                        background-color: #4DA5C9;
+                        color: white;
+                        border: 2px solid #4DA5C9;
                         border-radius: 22px;
                         padding: 0 30px;
                     }
                     QPushButton:hover {
-                        background-color: #e0e0e0;
-                        border-color: #bbb;
+                        background-color: #3d8bb0;
+                        border-color: #3d8bb0;
                     }
                 """)
 
@@ -585,8 +577,8 @@ class ScorePage(QWidget):
         self._loading_timer.timeout.connect(self._update_loading_animation)
         self._is_loading = False
         
-        # 中文字体（使用全局配置的字体）
-        self.zh_font = zh_font
+        # 中文字体
+        self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
         
         # 等待疲劳度评估完成的标志
         self._waiting_for_fatigue = False
@@ -599,51 +591,70 @@ class ScorePage(QWidget):
         
         # 不在初始化时更新分数，等待数据加载完成后再更新
         # self._update_scores()  # ← 删除此行，避免重复调用
-        QTimer.singleShot(0, self._refresh_data)
+        # QTimer.singleShot(0, self._refresh_data)  # ← 注释掉初始化时的刷新，改为 showEvent 中刷新
+
+    def showEvent(self, event):
+        """每次页面显示时触发，确保数据是最新的"""
+        super().showEvent(event)
+        # 异步刷新数据，避免阻塞UI
+        QTimer.singleShot(100, self._on_page_shown)
+    
+    def _on_page_shown(self):
+        """页面显示后的处理：刷新数据并更新显示"""
+        try:
+            logger.info("📊 分数页面显示，开始刷新数据...")
+            # 刷新历史数据（异步从数据库获取）
+            self._refresh_data()
+            # 更新分数显示
+            self._update_scores()
+            logger.info("✅ 分数页面数据刷新完成")
+        except Exception as e:
+            logger.error(f"分数页面刷新失败: {e}", exc_info=True)
 
     def _init_ui(self):
-        # 设置窗口背景（更柔和的背景色）
-        self.setStyleSheet("QWidget { background-color: #f8f9fa; }")
+        # 设置窗口背景
+        self.setStyleSheet("QWidget { background-color: #f5f5f5; }")
 
-        # 主布局（优化间距）
+        # 主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(35, 35, 35, 35)
-        main_layout.setSpacing(25)
+        main_layout.setContentsMargins(40, 40, 40, 40)
+        main_layout.setSpacing(30)
 
         # 内容区域
         content_layout = QHBoxLayout()
         content_layout.setSpacing(30)
 
-        # 左侧雷达图容器（优化阴影和圆角）
+        # 左侧雷达图容器
         left_container = QWidget()
         left_container.setStyleSheet("""
             QWidget {
                 background-color: white;
-                border-radius: 16px;
+                border-radius: 20px;
             }
         """)
         left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        left_container.setMaximumHeight(900)  # 限制最大高度防止超出1080p屏幕
         left_shadow = QGraphicsDropShadowEffect()
-        left_shadow.setBlurRadius(15)
-        left_shadow.setColor(QColor(0, 0, 0, 25))
-        left_shadow.setOffset(0, 3)
+        left_shadow.setBlurRadius(20)
+        left_shadow.setColor(QColor(0, 0, 0, 40))
+        left_shadow.setOffset(0, 5)
         left_container.setGraphicsEffect(left_shadow)
 
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(28, 28, 28, 28)
-        left_layout.setSpacing(18)
+        left_layout.setContentsMargins(30, 30, 30, 30)
+        left_layout.setSpacing(20)
 
-        # 左侧标题（使用阿里健康体）
+        # 左侧标题
         left_title = QLabel("各项指标对比")
         left_title.setAlignment(Qt.AlignCenter)
-        left_title.setStyleSheet("font-size:26px; font-weight:500; color:#2c3e50; letter-spacing:1px;")
+        left_title.setStyleSheet("font-size:28px; font-weight:bold; color:#333;")
         left_layout.addWidget(left_title)
 
-        # 添加分隔线（更细更淡）
+        # 添加分隔线
         line1 = QFrame()
         line1.setFrameShape(QFrame.HLine)
         line1.setFrameShadow(QFrame.Sunken)
-        line1.setStyleSheet("background-color: #ecf0f1; height: 1px;")
+        line1.setStyleSheet("background-color: #e0e0e0;")
         left_layout.addWidget(line1)
 
         # 雷达图容器
@@ -660,96 +671,96 @@ class ScorePage(QWidget):
 
         left_layout.addWidget(radar_widget, 1)
 
-        # 底部说明（优化文字样式）
-        info_label = QLabel("🔵 蓝色=本次测试 | 🔴 红色虚线=理想基准 (80分)")
+        # 底部说明
+        info_label = QLabel("🔵 蓝色=已测试 | 🔴 红色虚线=理想基准 (80分) | ⚫ 灰色=未测试")
         info_label.setAlignment(Qt.AlignCenter)
-        info_label.setStyleSheet("font-size:13px; color:#7f8c8d; font-weight:400; letter-spacing:0.5px;")
+        info_label.setStyleSheet("font-size:13px; color:#666; font-weight:500;")
         left_layout.addWidget(info_label)
         
-        # 指标说明（更淡的颜色）
-        metric_info = QLabel("※ 得分相对于首次测试换算，蓝色区域越接近红色正七边形表示状态越好")
+        # 指标说明
+        metric_info = QLabel("※ 七维指标全部显示，未测试的部分显示为0分且标记为灰色")
         metric_info.setAlignment(Qt.AlignCenter)
-        metric_info.setStyleSheet("font-size:11px; color:#95a5a6;")
+        metric_info.setStyleSheet("font-size:11px; color:#999;")
         left_layout.addWidget(metric_info)
 
         content_layout.addWidget(left_container, 5)
 
-        # 右侧综合得分容器（优化阴影和圆角）
+        # 右侧综合得分容器
         right_container = QWidget()
         right_container.setStyleSheet("""
             QWidget {
                 background-color: white;
-                border-radius: 16px;
+                border-radius: 20px;
             }
         """)
         right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        right_container.setMaximumHeight(900)  # 限制最大高度防止超出1080p屏幕
         right_shadow = QGraphicsDropShadowEffect()
-        right_shadow.setBlurRadius(15)
-        right_shadow.setColor(QColor(0, 0, 0, 25))
-        right_shadow.setOffset(0, 3)
+        right_shadow.setBlurRadius(20)
+        right_shadow.setColor(QColor(0, 0, 0, 40))
+        right_shadow.setOffset(0, 5)
         right_container.setGraphicsEffect(right_shadow)
 
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(28, 28, 28, 28)
-        right_layout.setSpacing(18)
+        right_layout.setContentsMargins(30, 30, 30, 30)
+        right_layout.setSpacing(20)
 
-        # 右侧标题（使用阿里健康体）
+        # 右侧标题
         right_title = QLabel("综合评估")
         right_title.setAlignment(Qt.AlignCenter)
-        right_title.setStyleSheet("font-size:26px; font-weight:500; color:#2c3e50; letter-spacing:1px;")
+        right_title.setStyleSheet("font-size:28px; font-weight:bold; color:#333;")
         right_layout.addWidget(right_title)
 
-        # 添加分隔线（更细更淡）
+        # 添加分隔线
         line2 = QFrame()
         line2.setFrameShape(QFrame.HLine)
         line2.setFrameShadow(QFrame.Sunken)
-        line2.setStyleSheet("background-color: #ecf0f1; height: 1px;")
+        line2.setStyleSheet("background-color: #e0e0e0;")
         right_layout.addWidget(line2)
 
         # 添加上部空间
-        right_layout.addSpacing(15)
+        right_layout.addSpacing(20)
 
         # 仪表盘
         self.gauge = ModernGaugeWidget()
         right_layout.addWidget(self.gauge, alignment=Qt.AlignCenter)
 
         # 添加中间空间
-        right_layout.addSpacing(15)
+        right_layout.addSpacing(20)
 
-        # 等级评价（优化字体样式）
+        # 等级评价
         self.lbl_level = QLabel("")
         self.lbl_level.setAlignment(Qt.AlignCenter)
-        self.lbl_level.setStyleSheet("font-size:34px; font-weight:500; letter-spacing:2px;")
+        self.lbl_level.setStyleSheet("font-size:36px; font-weight:bold;")
         right_layout.addWidget(self.lbl_level)
-        
-        # 评语标签（新增）
+
+        # 评语
         self.lbl_comment = QLabel("")
         self.lbl_comment.setAlignment(Qt.AlignCenter)
         self.lbl_comment.setWordWrap(True)
-        self.lbl_comment.setStyleSheet("font-size:15px; color:#7f8c8d; font-weight:400; padding:8px;")
+        self.lbl_comment.setStyleSheet("font-size:16px; color:#666; line-height:1.5;")
         right_layout.addWidget(self.lbl_comment)
 
         # 添加下部空间
-        right_layout.addSpacing(20)
+        right_layout.addSpacing(30)
 
-        # 历史数据按钮（优化样式）
+        # 历史数据按钮
         self.btn_history = QPushButton("查看历史数据")
-        self.btn_history.setFixedSize(200, 46)
+        self.btn_history.setFixedSize(220, 50)
         self.btn_history.setStyleSheet("""
             QPushButton {
-                font-size: 16px;
-                font-weight: 400;
-                background-color: #5dade2;
+                font-size: 18px;
+                font-weight: bold;
+                background-color: #4DA5C9;
                 color: white;
                 border: none;
-                border-radius: 23px;
-                letter-spacing: 1px;
+                border-radius: 25px;
             }
             QPushButton:hover {
-                background-color: #3498db;
+                background-color: #3d8bb0;
             }
             QPushButton:pressed {
-                background-color: #2980b9;
+                background-color: #2d7a9a;
             }
         """)
         self.btn_history.clicked.connect(self._show_history)
@@ -759,9 +770,9 @@ class ScorePage(QWidget):
 
         main_layout.addLayout(content_layout)
 
-        # 添加加载覆盖层（初始隐藏，优化样式）
+        # 添加加载覆盖层（初始隐藏）
         self.loading_overlay = QWidget(self)
-        self.loading_overlay.setStyleSheet("background-color: rgba(248, 249, 250, 200);")
+        self.loading_overlay.setStyleSheet("background-color: rgba(255, 255, 255, 180);")
         self.loading_overlay.setVisible(False)
 
         loading_layout = QVBoxLayout(self.loading_overlay)
@@ -769,13 +780,13 @@ class ScorePage(QWidget):
 
         self.loading_label = QLabel("正在加载历史数据...")
         self.loading_label.setAlignment(Qt.AlignCenter)
-        self.loading_label.setStyleSheet("font-size:22px; font-weight:400; color:#2c3e50; background:transparent; letter-spacing:1px;")
+        self.loading_label.setStyleSheet("font-size:24px; font-weight:bold; color:#333; background:transparent;")
         loading_layout.addWidget(self.loading_label)
 
         # 加载动画标签
         self.loading_spinner = QLabel("⏳")
         self.loading_spinner.setAlignment(Qt.AlignCenter)
-        self.loading_spinner.setStyleSheet("font-size:44px; background:transparent;")
+        self.loading_spinner.setStyleSheet("font-size:48px; background:transparent;")
         loading_layout.addWidget(self.loading_spinner)
 
     def _get_score_level(self, score):
@@ -968,6 +979,11 @@ class ScorePage(QWidget):
                        "收缩压", "舒张压", "脉搏", "舒尔特综合得分"]:
                 if key in self._test_results:
                     self._current_data[key] = self._test_results[key]
+            
+            # ✅ 合并阶段完成状态（关键！用于判断哪些指标有真实数据）
+            if "_stage_completed" in self._test_results:
+                self._current_data["_stage_completed"] = self._test_results["_stage_completed"]
+            
             return self._current_data
         
         # 没有测试结果时,使用模拟数据或空数据
@@ -1168,7 +1184,7 @@ class ScorePage(QWidget):
             diastolic = float(data.get("舒张压", 80))
             pulse = float(data.get("脉搏", 75))
             
-            # 1. 疲劳度得分 (越高越好)
+            # 1. 疲劳度得分 (越高越疲劳，反转评分)
             fatigue_score = max(0, fatigue)
             
             # 2. 情绪得分 (越越高越好)
@@ -1218,10 +1234,10 @@ class ScorePage(QWidget):
             final_score = int(round(max(0, min(100, total_score))))
             
             logger.debug(
-                f"综合得分计算: 疲劳={fatigue_score:.1f}(20%), "
-                f"情绪={emotion_score:.1f}(20%), "
-                f"脑负荷={brain_load_score:.1f}(10%), "
-                f"专注度={attention_score:.1f}(30%), "
+                f"综合得分计算: 疲劳={fatigue_score:.1f}(22.5%), "
+                f"情绪={emotion_score:.1f}(22.5%), "
+                f"脑负荷={brain_load_score:.1f}(22.5%), "
+                f"专注度={attention_score:.1f}(22.5%), "
                 f"血压健康={bp_health_score:.1f}(10%) "
                 f"→ 综合={final_score}分"
             )
@@ -1293,7 +1309,17 @@ class ScorePage(QWidget):
                 logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
                 return record
         
-        # 策略3: 如果某些维度仍然没有有效值，用默认值补齐
+        # 策略3: 如果所有记录都不完整，尝试拼凑（每个维度取最早的有效值）
+        logger.warning("所有测试记录都不完整，尝试拼凑基准值")
+        for metric in metrics:
+            values = history.get(metric, [])
+            # 找到该维度最早的有效值
+            for val in values:
+                if val is not None and val > 0:
+                    baseline[metric] = val
+                    break
+        
+        # 策略4: 如果某些维度仍然没有有效值，用默认值补齐
         defaults = {
             "疲劳检测": 30,
             "情绪": 30,
@@ -1318,25 +1344,52 @@ class ScorePage(QWidget):
         - 基准线固定为 80 分（正七边形红色虚线）
         - 本次测试值相对于首次测试表现进行换算
         - 通常本次测试会在正七边形内（视觉上更美观）
+        - ✅ 七维全部显示，没有真实数据的显示为0分且颜色不同
         """
         self.radar_figure.clear()
         
-        # 定义要展示的指标（不包括综合得分）
+        # 🔄 获取阶段完成状态
+        stage_completed = data.get("_stage_completed", {})
+        
+        # 定义指标与阶段的映射关系(新命名)
+        metric_stage_mapping = {
+            "疲劳检测": "多模态疲劳检测",      # 基线+SART阶段测试
+            "情绪": "情绪检测",                # 原朗读录音改名
+            "脑负荷": "多模态疲劳检测",        # 基线+SART阶段测试
+            "舒尔特综合得分": "舒尔特专注度检测",  # 原舒尔特测试改名
+            "收缩压": "血压脉搏检测",          # 原血压测试改名
+            "舒张压": "血压脉搏检测",          # 原血压测试改名
+            "脉搏": "血压脉搏检测"             # 原血压测试改名
+        }
+        
+        # ✅ 定义要展示的指标（七维全部显示）
         metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特综合得分", "收缩压", "舒张压", "脉搏"]
         metric_labels = ["疲劳", "情绪", "脑负荷", "专注度", "收缩压", "舒张压", "脉搏"]
         
+        # ✅ 标记每个指标是否有真实数据
+        has_real_data = []
+        for metric in metrics:
+            required_stage = metric_stage_mapping.get(metric)
+            # 检查对应阶段是否完成
+            is_completed = stage_completed.get(required_stage, False) if required_stage else True
+            has_real_data.append(is_completed)
+        
+        logger.info(f"雷达图七维显示: {metrics}")
+        logger.info(f"真实数据状态: {dict(zip(metric_labels, has_real_data))}")
+        
         # 获取本次测试值
         current_values = []
-        for metric in metrics:
-            raw_value = data.get(metric, 0)
-            try:
-                value = float(raw_value) if raw_value is not None else 0
-            except (ValueError, TypeError):
-                value = 0
-            current_values.append(value)
-        
-        # 诊断日志：显示原始值
-        logger.debug(f"雷达图原始值: {dict(zip(metric_labels, current_values))}")
+        for i, metric in enumerate(metrics):
+            # ✅ 如果该指标没有真实数据，强制设为0（但雷达图上会显示为30分）
+            if not has_real_data[i]:
+                current_values.append(0)
+            else:
+                raw_value = data.get(metric, 0)
+                try:
+                    value = float(raw_value) if raw_value is not None else 0
+                except (ValueError, TypeError):
+                    value = 0
+                current_values.append(value)
         
         # 计算首次测试基准值（用于相对比较）
         baseline = self._calculate_baseline()
@@ -1349,36 +1402,33 @@ class ScorePage(QWidget):
         
         for i, metric in enumerate(metrics):
             curr = current_values[i]
+            
+            # ✅ 没有真实数据的指标，雷达图上显示为30分（固定值）
+            if not has_real_data[i]:
+                normalized_current.append(30)
+                continue
+            
             base = baseline_values[i]
             
             # 避免除以零
             if base == 0:
                 base = 1
             
-            if metric in ["情绪", "脑负荷", "舒尔特综合得分", "疲劳检测"]:
-                # 原始值越大，表现越好
+            if metric == "疲劳检测":
+                # 疲劳分数越低越好，需要进行反转。
+                ratio = curr / base
+                score = BASELINE_SCORE * (2 - ratio)
+                score = max(0, min(100, score))
+                
+            elif metric in ["情绪", "脑负荷", "舒尔特综合得分"]:
+                # 准确率越高越好：原始值越大，表现越好
                 # 换算逻辑：
-                # - 如果本次 >= 首次：表现更好或持平，得分接近或超过 80
+                # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
                 # - 如果本次 < 首次：表现下降，得分 < 80
-                # 新公式：线性映射到 [50, 100] 区间
-                # 当 curr = base 时，score = 80
-                # 当 curr = 0 时，score = 50
-                # 当 curr = 100 时，score = 100 (上限)
-                
-                # 线性映射：score = 50 + (curr/100) * 50
-                # 但需要相对于基准值调整
-                if curr >= base:
-                    # 表现优于或等于基准：在 [80, 100] 区间
-                    # 当 curr = base 时，score = 80
-                    # 当 curr = 100 时，score = 100
-                    score = 80 + (curr - base) / (100 - base) * 20
-                else:
-                    # 表现低于基准：在 [50, 80) 区间
-                    # 当 curr = 0 时，score = 50
-                    # 当 curr = base 时，score = 80
-                    score = 50 + (curr / base) * 30
-                
-                score = max(50, min(100, score))
+                # 公式：80 * (curr/base)，限制在 [0, 100]
+                ratio = curr / base
+                score = BASELINE_SCORE * ratio
+                score = max(0, min(100, score))
                 
             elif metric in ["收缩压", "舒张压", "脉搏"]:
                 # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
@@ -1398,7 +1448,7 @@ class ScorePage(QWidget):
                 # 线性映射公式：score = 80 - (deviation / max_dev) * 30
                 # 即：score = 80 - 30 * (deviation / max_dev)
                 score = 80 - 30 * (deviation / max_dev)
-                score = max(30, min(80, score))  # 限制在 [50, 80] 范围
+                score = max(50, min(80, score))  # 限制在 [50, 80] 范围
             else:
                 # 其他未定义指标，默认按比例换算
                 ratio = curr / base
@@ -1410,49 +1460,102 @@ class ScorePage(QWidget):
         # 闭合雷达图
         normalized_current += normalized_current[:1]
         normalized_baseline += normalized_baseline[:1]
+        has_real_data += has_real_data[:1]  # 同步闭合
         
         # 计算角度
         num_vars = len(metric_labels)
         angles = [n / float(num_vars) * 2 * np.pi for n in range(num_vars)]
         angles += angles[:1]
         
-       # 创建极坐标子图（优化背景）
+        # 创建极坐标子图
         ax = self.radar_figure.add_subplot(111, projection='polar')
-        ax.set_facecolor('#fbfcfd')
+        ax.set_facecolor('#fafafa')
         
-        # 绘制基准线（优化颜色和透明度）
-        ax.plot(angles, normalized_baseline, color='#e74c3c', linestyle='--', linewidth=2.2, 
-                label='理想基准线 (80分)', alpha=0.75)
-        ax.fill(angles, normalized_baseline, color='#e74c3c', alpha=0.08)
+        # 绘制基准线（红色虚线正七边形，固定为 80 分）
+        ax.plot(angles, normalized_baseline, 'r--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7)
+        ax.fill(angles, normalized_baseline, 'r', alpha=0.1)
         
-        # 绘制本次测试值（优化颜色）
-        ax.plot(angles, normalized_current, color='#3498db', linestyle='-', linewidth=2.8, 
-                label='本次测试', marker='o', markersize=7, 
-                markerfacecolor='white', markeredgecolor='#3498db', markeredgewidth=2.2)
-        ax.fill(angles, normalized_current, color='#3498db', alpha=0.22)
+        # ✅ 分段绘制测试值：有真实数据用蓝色，无数据用灰色
+        for i in range(len(angles) - 1):
+            # 当前段的起点和终点
+            angle_start = angles[i]
+            angle_end = angles[i + 1]
+            value_start = normalized_current[i]
+            value_end = normalized_current[i + 1]
+            
+            # 根据数据状态选择颜色
+            if has_real_data[i] and has_real_data[i + 1]:
+                # 两端都有真实数据：蓝色实线
+                color = '#2196F3'
+                linestyle = '-'
+                alpha = 1.0
+                linewidth = 3
+            elif not has_real_data[i] and not has_real_data[i + 1]:
+                # 两端都无数据：灰色虚线
+                color = '#CCCCCC'
+                linestyle = '--'
+                alpha = 0.5
+                linewidth = 2
+            else:
+                # 一端有数据一端无数据：渐变色（简化为蓝色实线）
+                color = '#2196F3'
+                linestyle = '-'
+                alpha = 0.7
+                linewidth = 2.5
+            
+            # 绘制该段
+            ax.plot([angle_start, angle_end], [value_start, value_end], 
+                   color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha)
         
-        # 设置刻度标签（优化字体）
+        # 绘制数据点（区分有无真实数据）
+        for i, (angle, value, has_data) in enumerate(zip(angles[:-1], normalized_current[:-1], has_real_data[:-1])):
+            if has_data:
+                # 有真实数据：蓝色实心点
+                ax.plot(angle, value, 'o', markersize=8, markerfacecolor='white', 
+                       markeredgecolor='#2196F3', markeredgewidth=2)
+            else:
+                # 无数据：灰色空心点
+                ax.plot(angle, value, 'o', markersize=6, markerfacecolor='#EEEEEE', 
+                       markeredgecolor='#CCCCCC', markeredgewidth=1.5)
+        
+        # 填充区域（有真实数据的部分用蓝色，无数据的用灰色）
+        # 简化处理：整体填充，透明度根据数据完整度调整
+        data_completeness = sum(has_real_data[:-1]) / len(has_real_data[:-1])  # 数据完整度
+        ax.fill(angles, normalized_current, '#2196F3', alpha=0.15 * data_completeness)
+        
+        # 设置刻度标签
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12.5, color='#34495e')
+        ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
         
-        # 设置Y轴范围和刻度（优化颜色）
+        # 设置Y轴范围和刻度
         ax.set_ylim(0, 100)
         ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=9.5, color='#7f8c8d')
+        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=10, color='#666')
         
-        # 添加网格（更淡的网格线）
-        ax.grid(True, linestyle=':', alpha=0.4, color='#bdc3c7')
+        # 添加网格
+        ax.grid(True, linestyle=':', alpha=0.5)
         
-        # 添加图例（优化样式）
-        ax.legend(loc='upper right', bbox_to_anchor=(1.28, 1.1), 
-                prop=self.zh_font, fontsize=10.5, framealpha=0.95, 
-                edgecolor='#ecf0f1', fancybox=True)
+        # ✅ 更新图例：添加灰色虚线说明
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], color='r', linestyle='--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7),
+            Line2D([0], [0], color='#2196F3', linestyle='-', linewidth=3, label='本次测试（有数据）', marker='o', 
+                   markersize=8, markerfacecolor='white', markeredgecolor='#2196F3', markeredgewidth=2),
+            Line2D([0], [0], color='#CCCCCC', linestyle='--', linewidth=2, label='未测试（30分）', marker='o',
+                   markersize=6, markerfacecolor='#EEEEEE', markeredgecolor='#CCCCCC', markeredgewidth=1.5, alpha=0.5)
+        ]
+        ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.3, 1.1), 
+                prop=self.zh_font, fontsize=11, framealpha=0.9)
         
-        # 在每个数据点旁边显示实际数值
-        for angle, curr_val, metric in zip(angles[:-1], current_values, metrics):
+        # 在每个数据点旁边显示实际数值（只显示有真实数据的点，未测试的不显示文字）
+        for i, (angle, curr_val, metric, has_data) in enumerate(zip(angles[:-1], current_values, metrics, has_real_data[:-1])):
+            if not has_data:
+                # ✅ 无数据的点不显示任何文字，只通过灰色标记区分
+                continue
+            
             # 计算文本位置
             x = angle
-            y = normalized_current[angles.index(angle)] + 8
+            y = normalized_current[i] + 8
             
             # 格式化显示文本
             if metric in ["收缩压", "舒张压"]:
@@ -1462,6 +1565,7 @@ class ScorePage(QWidget):
             elif metric == "舒尔特综合得分":
                 text = f"{int(curr_val)}%"
             elif metric in ["疲劳检测", "情绪", "脑负荷"]:
+                # 这些指标越低越好，但雷达图上显示的是反转后的值（越大越好）
                 # 标签显示原始值，便于理解
                 text = f"{int(curr_val)}分"
             else:
@@ -1469,11 +1573,11 @@ class ScorePage(QWidget):
             
             ax.text(x, y, text, ha='center', va='center', 
                 fontproperties=self.zh_font, fontsize=9, 
-                color='#3498db', fontweight='normal',
-                bbox=dict(boxstyle='round,pad=0.35', facecolor='white', 
-                            edgecolor='#5dade2', alpha=0.92, linewidth=1.2))
+                color='#2196F3', fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                            edgecolor='#2196F3', alpha=0.8))
         
-        self.radar_figure.tight_layout(pad=0.8)
+        self.radar_figure.tight_layout()
         self.radar_canvas.draw()
         
         # 保存zh_font供雷达图使用

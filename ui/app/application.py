@@ -97,6 +97,16 @@ class MainWindow(QMainWindow):
 
     def _setup_main_window(self) -> None:
         self.setWindowTitle('非接触人员状态评估系统')
+        self.setStyleSheet("""
+                   QStackedWidget {
+                       background: qlineargradient(
+                           x1:0, y1:0, x2:1, y2:1,
+                           stop:0 #E5F7F9,
+                           stop:0.5 #F2FBFC,
+                           stop:1 white
+                       );
+                   }
+               """)
         
         # 使用响应式缩放
         scaler = get_scaler()
@@ -112,6 +122,16 @@ class MainWindow(QMainWindow):
     def _create_pages(self) -> None:
         self.stack = FadingStackedWidget()
         self.stack.set_animation_duration(400)
+        # ⭐ 设置从左上到右下的渐变背景
+        self.stack.setStyleSheet("""
+                         QStackedWidget {
+                             background: qlineargradient(
+                                 x1:0, y1:0, x2:1, y2:1,
+                                 stop:0 #E5F7F9,
+                                 stop:1 white
+                             );
+                         }
+                     """)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)

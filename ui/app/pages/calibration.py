@@ -17,10 +17,13 @@ from ..qt import (
     QWidget,
     pyqtSignal,
     qta,
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QColor,
 )
 from ..utils.helpers import init_camera
 from ..utils.responsive import scale, scale_font, scale_size
-from ui.widgets.camera_preview import CameraPreviewWidget
+from ...widgets.camera_preview import CameraPreviewWidget
 
 try:
     from ui.services.backend_proxy import eeg_get_diagnostics
@@ -50,6 +53,44 @@ class CalibrationPage(QWidget):
         self.eeg_status_timer.timeout.connect(self._update_eeg_status)
         self.eeg_status_timer.setInterval(1000)  # 每秒更新一次
 
+        self.setStyleSheet("""
+                QLabel {
+                    font-family: "阿里健康体2.0 中文 45 R";
+                    font-size: 18pt;
+                }
+
+                QLabel#titleLabel {
+                    font-size: 28pt;
+                    font-weight: bold;
+                }
+
+                QLabel#loadingLabel {
+                    font-size: 28pt;
+                }
+
+                QLabel#eegLabel {
+                    font-size: 28pt;
+                }
+
+                QLabel#statusIcon {
+                    font-size: 22pt;
+                }
+
+                QLabel#statusText {
+                    font-size: 28pt;
+                }
+
+                QPushButton {
+                    font-family: "阿里健康体2.0 中文 45 R";
+                    font-size: 24pt;
+                }
+
+                QPushButton#finishButton {
+                    font-size: 24pt;
+                    font-weight: bold;
+                }
+            """)
+
     # ----------------- Loading Widget -----------------
     def _init_loading_widget(self) -> None:
         loading_widget = QWidget()
@@ -76,6 +117,7 @@ class CalibrationPage(QWidget):
         layout.setSpacing(scale(30))
 
         self.loading_label = QLabel("正在初始化摄像头...")
+        self.loading_label.setObjectName("loadingLabel")  # ✅ 添加这行
         self.loading_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.loading_label)
 
@@ -100,9 +142,9 @@ class CalibrationPage(QWidget):
 
     # ----------------- Calibration Widget -----------------
     def _init_calibration_widget(self) -> None:
+        """创建校准页面(卡片布局 - 所有元素在一个白色卡片中)"""
         calibration_widget = QWidget()
         calibration_widget.setObjectName("calibrationWidget")
-        # 设置校准页面的明显渐变背景（只应用到主容器，不影响子元素）
         calibration_widget.setStyleSheet("""
             #calibrationWidget {
                 background: qlineargradient(
@@ -113,47 +155,103 @@ class CalibrationPage(QWidget):
                 );
             }
         """)
-        layout = QVBoxLayout(calibration_widget)
-        layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
-        layout.setSpacing(scale(15))
 
+        # 页面主布局（用于居中卡片）
+        page_layout = QVBoxLayout(calibration_widget)
+        page_layout.setAlignment(Qt.AlignCenter)
+        page_layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
+
+        # 创建白色卡片容器（加大尺寸）
+        card_container = QFrame()
+        card_container.setObjectName("calibrationCardContainer")
+        card_container.setFixedSize(scale(1400), scale(950))  # ✅ 从1200×800增加到1400×950
+        card_container.setStyleSheet("""
+            QFrame#calibrationCardContainer {
+                background-color: #ffffff;
+                border: 2px solid #e0e0e0;
+                border-radius: 25px;
+                padding: 30px;
+            }
+        """)
+
+        # 添加底部阴影效果
+        card_shadow = QGraphicsDropShadowEffect()
+        card_shadow.setBlurRadius(15)
+        card_shadow.setXOffset(0)
+        card_shadow.setYOffset(5)
+        card_shadow.setColor(QColor(0, 0, 0, 60))
+        card_container.setGraphicsEffect(card_shadow)
+
+        # 卡片内的垂直布局
+        layout = QVBoxLayout(card_container)
+        layout.setContentsMargins(scale(40), scale(40), scale(40), scale(40))  # ✅ 从20增加到40
+        layout.setSpacing(scale(30))  # ✅ 从25增加到30
+        layout.setAlignment(Qt.AlignCenter)
+
+        # 标题（字体加大）
         title = QLabel("设备校准")
         title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(18)))
+        title.setObjectName("titleLabel")
+        title.setStyleSheet("font-size: 48px; font-weight: bold; color: #333;")  # ✅ 从40px增加到48px
         layout.addWidget(title)
 
-        cam_width, cam_height = scale_size(640, 480)
+        # 摄像头预览（尺寸加大）
+        cam_width, cam_height = scale_size(700, 525)  # ✅ 从560×420增加到700×525
         self.camera_preview = CameraPreviewWidget(cam_width, cam_height)
         layout.addWidget(self.camera_preview, alignment=Qt.AlignCenter)
-        
-        # EEG设备状态显示（居中显示在按钮上方）
+
+        # EEG设备状态显示（字体加大）
         eeg_status_container = QWidget()
         eeg_status_layout = QHBoxLayout(eeg_status_container)
         eeg_status_layout.setContentsMargins(0, 0, 0, 0)
         eeg_status_layout.setAlignment(Qt.AlignCenter)
-        
+        eeg_status_layout.setSpacing(scale(10))  # ✅ 从8增加到10
+
         eeg_label = QLabel("脑电设备:")
-        eeg_label.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(12)))
+        eeg_label.setObjectName("eegLabel")
+        eeg_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #333;")  # ✅ 从28px增加到32px
         eeg_status_layout.addWidget(eeg_label)
-        
+
         self.eeg_status_icon = QLabel("●")
-        self.eeg_status_icon.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(14)))
-        self.eeg_status_icon.setStyleSheet("color: gray;")
+        self.eeg_status_icon.setObjectName("statusIcon")
+        self.eeg_status_icon.setStyleSheet("color: gray; font-size: 32px;")  # ✅ 从28px增加到32px
         eeg_status_layout.addWidget(self.eeg_status_icon)
-        
+
         self.eeg_status_text = QLabel("检测中...")
-        self.eeg_status_text.setFont(QFont("阿里健康体2.0 中文 45 R", scale_font(12)))
+        self.eeg_status_text.setObjectName("statusText")
+        self.eeg_status_text.setStyleSheet("font-size: 32px; color: #666;")  # ✅ 从28px增加到32px
         eeg_status_layout.addWidget(self.eeg_status_text)
-        
+
         layout.addWidget(eeg_status_container, 0, Qt.AlignCenter)
 
-        self.finish_button = QPushButton("  校准完成")
-        self.finish_button.setObjectName("finishButton")  # 设置对象名以应用QSS样式
-        self.finish_button.setMinimumHeight(scale(50))
-        self.finish_button.setFixedWidth(scale(220))
+        # 校准完成按钮（尺寸加大）
+        self.finish_button = QPushButton("✓ 校准完成")
+        self.finish_button.setObjectName("primaryButton")
+        self.finish_button.setFixedSize(scale(280), scale(80))  # ✅ 从240×70增加到280×80
+        self.finish_button.setCursor(Qt.PointingHandCursor)
+        self.finish_button.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 32px;
+                font-weight: bold;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #2E86C1;
+            }
+        """)
         self.finish_button.clicked.connect(self._on_finish_calibration)
-        self.finish_button.setIcon(qta.icon("mdi.check-circle-outline"))
         layout.addWidget(self.finish_button, 0, Qt.AlignCenter)
+
+        # 将卡片添加到页面（居中显示）
+        page_layout.addStretch(1)
+        page_layout.addWidget(card_container, 0, Qt.AlignCenter)
+        page_layout.addStretch(1)
 
         self.stacked_layout.addWidget(calibration_widget)
 

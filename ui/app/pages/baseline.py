@@ -76,10 +76,10 @@ class BaselineCalibrationPage(QWidget):
         self.instruction_label.setVisible(False)  # 隐藏提示文字
         layout.addWidget(self.instruction_label)
         
-        # 十字注视点（直接显示）- 占据主要空间
+        # 十字注视点(直接显示)- 占据主要空间
         self.fixation_cross = QLabel("+")
         self.fixation_cross.setAlignment(Qt.AlignCenter)
-        cross_font = QFont("阿里健康体2.0 中文 45 R", 250, QFont.Bold)  # 固定250px超大字号
+        cross_font = QFont("阿里健康体2.0 中文 45 R", 250, 75)  # 固定250px超大字号
         self.fixation_cross.setFont(cross_font)
         self.fixation_cross.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
@@ -87,10 +87,10 @@ class BaselineCalibrationPage(QWidget):
         self.fixation_cross.setVisible(True)  # 直接显示
         layout.addWidget(self.fixation_cross, stretch=1)  # 占据主要空间
         
-        # 完成提示标签（初始隐藏）- 居中显示
+        # 完成提示标签(初始隐藏)- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, 75)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"

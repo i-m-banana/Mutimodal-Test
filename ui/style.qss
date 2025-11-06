@@ -111,13 +111,13 @@
 
     /* 完成评估按钮 */
     #finishButton {
-        background-color: #FF5722;
+        background-color: #4DA5C9;
     }
     #finishButton:hover {
-        background-color: #E64A19;
+        background-color: #3d8bb0;
     }
     #finishButton:pressed {
-        background-color: #D84315;
+        background-color: #2d7a9a;
     }
 
     /* --- 进度条 --- */
