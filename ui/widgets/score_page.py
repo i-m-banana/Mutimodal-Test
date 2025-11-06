@@ -671,14 +671,15 @@ class ScorePage(QWidget):
 
         left_layout.addWidget(radar_widget, 1)
 
+        # ✅ 需求3: 移除"未测试"相关说明，简化图例
         # 底部说明
-        info_label = QLabel("🔵 蓝色=已测试 | 🔴 红色虚线=理想基准 (80分) | ⚫ 灰色=未测试")
+        info_label = QLabel("🔵 蓝色=本次测试 | 🔴 红色虚线=理想基准 (80分)")
         info_label.setAlignment(Qt.AlignCenter)
         info_label.setStyleSheet("font-size:13px; color:#666; font-weight:500;")
         left_layout.addWidget(info_label)
         
         # 指标说明
-        metric_info = QLabel("※ 七维指标全部显示，未测试的部分显示为0分且标记为灰色")
+        metric_info = QLabel("※ 本次测试与首次测试基准对比，表现优于基准显示在基准线外")
         metric_info.setAlignment(Qt.AlignCenter)
         metric_info.setStyleSheet("font-size:11px; color:#999;")
         left_layout.addWidget(metric_info)
@@ -1191,7 +1192,7 @@ class ScorePage(QWidget):
             emotion_score = max(0, min(100, emotion))
             
             # 3. 脑负荷得分 (越高越好，反转评分)
-            brain_load_score = max(0, min(100, 100 - brain_load))
+            brain_load_score = max(0, min(100, brain_load))
             
             # 4. 专注度得分 (舒尔特综合得分率，越高越好)
             # 准确率范围 0-100%
@@ -1561,32 +1562,16 @@ class ScorePage(QWidget):
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
         
-        # 设置Y轴范围和刻度
-        # 保持0-100完整范围,但突出关键刻度线(40, 80, 90)
-        ax.set_ylim(0, 100)
-        ax.set_yticks([0, 40, 80, 90, 100])
-        ax.set_yticklabels(['0', '40\n(差)', '80\n(基准)', '90\n(优秀)', '100'], 
-                          fontsize=9, color='#666', va='center')
+        
+        ax.set_ylim(0, 110)
+        ax.set_yticks([0, 20, 40, 60, 80, 100])  
+        ax.set_yticklabels(["0", "20", "40", "60", "80", "100"], fontsize=9,color='black',va='center')
         
         # 添加网格(突出显示40和80的基准线)
         ax.grid(True, linestyle=':', alpha=0.3)
         # 在80分处绘制加粗的基准网格线
         for angle in angles:
             ax.plot([angle, angle], [0, 80], 'r-', linewidth=0.8, alpha=0.15)
-        
-        # ✅ 更新图例：说明新的评分范围
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], color='r', linestyle='--', linewidth=2.5, label='基准线 (80分)', alpha=0.7),
-            Line2D([0], [0], color='#2196F3', linestyle='-', linewidth=3, label='本次测试 (40-90分)', marker='o', 
-                   markersize=8, markerfacecolor='white', markeredgecolor='#2196F3', markeredgewidth=2),
-            Line2D([0], [0], color='#CCCCCC', linestyle='--', linewidth=2, label='未测试（30分）', marker='o',
-                   markersize=6, markerfacecolor='#EEEEEE', markeredgecolor='#CCCCCC', markeredgewidth=1.5, alpha=0.5)
-        ]
-        ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.3, 1.1), 
-                prop=self.zh_font, fontsize=11, framealpha=0.9, 
-                title='雷达图评分说明', 
-                title_fontproperties=self.zh_font)
         
         # 在每个数据点旁边显示实际数值（只显示有真实数据的点，未测试的不显示文字）
         for i, (angle, curr_val, metric, has_data) in enumerate(zip(angles[:-1], current_values, metrics, has_real_data[:-1])):
