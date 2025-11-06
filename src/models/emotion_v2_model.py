@@ -145,7 +145,7 @@ class EmotionV2Model(BaseInferenceModel):
                         user_name = first_video.parts[rec_idx + 1]
                         session_name = first_video.parts[rec_idx + 2]
                         session_dir = project_root / "recordings" / user_name / session_name
-                        csv_output = session_dir / "emotion_predictions.csv"
+                        csv_output = session_dir / "emotion" / "emotion_predictions.csv"
                 except (ValueError, IndexError):
                     pass
             

@@ -1309,17 +1309,7 @@ class ScorePage(QWidget):
                 logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
                 return record
         
-        # 策略3: 如果所有记录都不完整，尝试拼凑（每个维度取最早的有效值）
-        logger.warning("所有测试记录都不完整，尝试拼凑基准值")
-        for metric in metrics:
-            values = history.get(metric, [])
-            # 找到该维度最早的有效值
-            for val in values:
-                if val is not None and val > 0:
-                    baseline[metric] = val
-                    break
-        
-        # 策略4: 如果某些维度仍然没有有效值，用默认值补齐
+        # 策略3: 如果某些维度仍然没有有效值，用默认值补齐
         defaults = {
             "疲劳检测": 30,
             "情绪": 30,
@@ -1413,47 +1403,91 @@ class ScorePage(QWidget):
             # 避免除以零
             if base == 0:
                 base = 1
-            
-            if metric == "疲劳检测":
-                # 疲劳分数越低越好，需要进行反转。
-                ratio = curr / base
-                score = BASELINE_SCORE * (2 - ratio)
-                score = max(0, min(100, score))
                 
-            elif metric in ["情绪", "脑负荷", "舒尔特综合得分"]:
+            if metric in ["情绪", "脑负荷", "舒尔特综合得分", "疲劳检测"]:
                 # 准确率越高越好：原始值越大，表现越好
-                # 换算逻辑：
-                # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
-                # - 如果本次 < 首次：表现下降，得分 < 80
-                # 公式：80 * (curr/base)，限制在 [0, 100]
+                # 相对基准值的换算逻辑（避免突破上限）：
+                # - 基准线固定为 80 分（红色正七边形）
+                # - 本次测试与基准值比较，动态计算得分
+                # - 当本次 = 基准值时 → 80分（与基准线重合）
+                # - 当本次 > 基准值时 → >80分（在基准线外，但不超过90分）
+                # - 当本次 < 基准值时 → <80分（在基准线内，最低40分）
+                # 
+                # 公式设计：
+                # 1. 计算相对基准的比例：ratio = curr / base
+                # 2. 分段映射：
+                #    - 如果 ratio >= 1（本次 >= 基准）: 
+                #      score = 80 + (ratio - 1) * k1，上限90分
+                #      当 ratio=1 → score=80
+                #      当 ratio=1.25（超出25%）→ score=90（封顶）
+                #      即 k1 = 10/0.25 = 40
+                #    - 如果 ratio < 1（本次 < 基准）:
+                #      score = 80 * ratio，下限40分
+                #      当 ratio=1 → score=80
+                #      当 ratio=0.5 → score=40（最低）
+                
                 ratio = curr / base
-                score = BASELINE_SCORE * ratio
-                score = max(0, min(100, score))
+                if ratio >= 1.0:
+                    # 本次 >= 基准：映射到 [80, 90]，避免突破上限
+                    # 超出25%时封顶为90分
+                    score = 80 + min((ratio - 1.0) * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次 < 基准：映射到 [40, 80]
+                    score = BASELINE_SCORE * ratio
+                    score = max(40, score)
+                
+                score = max(40, min(90, score))  # 严格限制在 [40, 90] 范围
                 
             elif metric in ["收缩压", "舒张压", "脉搏"]:
-                # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
-                # 不相对于首次测试，而是直接评估当前值的健康程度
+                # 血压/脉搏：越接近理想值越好（相对于基准值比较健康度）
+                # 相对基准值的换算逻辑：
+                # - 基准线固定为 80 分
+                # - 比较本次偏离度 vs 基准偏离度，偏离越小越好
+                # - 如果本次偏离 <= 基准偏离 → >=80分（健康度改善或持平）
+                # - 如果本次偏离 > 基准偏离 → <80分（健康度下降）
+                
                 ideal_values = {"收缩压": 120, "舒张压": 80, "脉搏": 75}
-                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}  # 最大可接受偏离
+                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}
                 
                 ideal = ideal_values[metric]
                 max_dev = max_deviations[metric]
                 
-                # 计算本次测试的偏离度
-                deviation = abs(curr - ideal)
+                # 计算本次和基准的偏离度
+                curr_deviation = abs(curr - ideal)
+                base_deviation = abs(base - ideal)
                 
-                # 新换算逻辑：得分范围 [50, 80]
-                # - 偏离度 = 0（完美）: 得分 = 80
-                # - 偏离度 = max_dev（极差）: 得分 = 50
-                # 线性映射公式：score = 80 - (deviation / max_dev) * 30
-                # 即：score = 80 - 30 * (deviation / max_dev)
-                score = 80 - 30 * (deviation / max_dev)
-                score = max(50, min(80, score))  # 限制在 [50, 80] 范围
+                # 避免除以零
+                if base_deviation == 0:
+                    base_deviation = 0.1
+                
+                # 计算偏离度比例（越小越好）
+                deviation_ratio = curr_deviation / base_deviation
+                
+                if deviation_ratio <= 1.0:
+                    # 本次偏离 <= 基准偏离：健康度改善，映射到 [80, 90]
+                    # 偏离度减少25%时达到90分封顶
+                    improvement = 1.0 - deviation_ratio  # 0到1之间
+                    score = 80 + min(improvement * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次偏离 > 基准偏离：健康度下降，映射到 [40, 80]
+                    score = 80 / deviation_ratio
+                    score = max(40, score)
+                
+                score = max(40, min(90, score))  # 限制在 [40, 90] 范围
             else:
-                # 其他未定义指标，默认按比例换算
+                # 其他未定义指标，默认使用相对基准的换算逻辑
                 ratio = curr / base
-                score = BASELINE_SCORE * ratio
-                score = max(0, min(100, score))
+                if ratio >= 1.0:
+                    # 本次 >= 基准
+                    score = 80 + min((ratio - 1.0) * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次 < 基准
+                    score = 80 * ratio
+                    score = max(40, score)
+                score = max(40, min(90, score))
             
             normalized_current.append(score)
         
@@ -1528,24 +1562,31 @@ class ScorePage(QWidget):
         ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
         
         # 设置Y轴范围和刻度
+        # 保持0-100完整范围,但突出关键刻度线(40, 80, 90)
         ax.set_ylim(0, 100)
-        ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=10, color='#666')
+        ax.set_yticks([0, 40, 80, 90, 100])
+        ax.set_yticklabels(['0', '40\n(差)', '80\n(基准)', '90\n(优秀)', '100'], 
+                          fontsize=9, color='#666', va='center')
         
-        # 添加网格
-        ax.grid(True, linestyle=':', alpha=0.5)
+        # 添加网格(突出显示40和80的基准线)
+        ax.grid(True, linestyle=':', alpha=0.3)
+        # 在80分处绘制加粗的基准网格线
+        for angle in angles:
+            ax.plot([angle, angle], [0, 80], 'r-', linewidth=0.8, alpha=0.15)
         
-        # ✅ 更新图例：添加灰色虚线说明
+        # ✅ 更新图例：说明新的评分范围
         from matplotlib.lines import Line2D
         legend_elements = [
-            Line2D([0], [0], color='r', linestyle='--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7),
-            Line2D([0], [0], color='#2196F3', linestyle='-', linewidth=3, label='本次测试（有数据）', marker='o', 
+            Line2D([0], [0], color='r', linestyle='--', linewidth=2.5, label='基准线 (80分)', alpha=0.7),
+            Line2D([0], [0], color='#2196F3', linestyle='-', linewidth=3, label='本次测试 (40-90分)', marker='o', 
                    markersize=8, markerfacecolor='white', markeredgecolor='#2196F3', markeredgewidth=2),
             Line2D([0], [0], color='#CCCCCC', linestyle='--', linewidth=2, label='未测试（30分）', marker='o',
                    markersize=6, markerfacecolor='#EEEEEE', markeredgecolor='#CCCCCC', markeredgewidth=1.5, alpha=0.5)
         ]
         ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.3, 1.1), 
-                prop=self.zh_font, fontsize=11, framealpha=0.9)
+                prop=self.zh_font, fontsize=11, framealpha=0.9, 
+                title='雷达图评分说明', 
+                title_fontproperties=self.zh_font)
         
         # 在每个数据点旁边显示实际数值（只显示有真实数据的点，未测试的不显示文字）
         for i, (angle, curr_val, metric, has_data) in enumerate(zip(angles[:-1], current_values, metrics, has_real_data[:-1])):

@@ -1257,8 +1257,14 @@ class TestPage(QWidget):
         # 跳转到全屏基线校准页面
         try:
             main_window = self.window()
-            if hasattr(main_window, 'stack'):
-                main_window.stack.setCurrentIndex(2)  # 跳转到基线校准页面（全屏）
+            if hasattr(main_window, 'show_baseline_page'):
+                # ✅ 使用 show_baseline_page() 方法，会正确设置 session_info
+                main_window.show_baseline_page()
+                logger.info("✅ 已通过show_baseline_page()跳转到基线校准页面")
+            elif hasattr(main_window, 'stack'):
+                # 后备方案：直接跳转（但可能没有正确设置session_dir）
+                logger.warning("⚠️ show_baseline_page()不存在，使用后备方案")
+                main_window.stack.setCurrentIndex(2)
                 logger.info("✅ 已跳转到基线校准页面（全屏）")
             else:
                 logger.warning("⚠️ 无法找到主窗口堆栈")
@@ -1273,8 +1279,14 @@ class TestPage(QWidget):
         # 跳转到全屏SART实验页面
         try:
             main_window = self.window()
-            if hasattr(main_window, 'stack'):
-                main_window.stack.setCurrentIndex(3)  # 跳转到SART页面（全屏）
+            if hasattr(main_window, 'show_sart_page'):
+                # ✅ 使用 show_sart_page() 方法，会正确设置 session_info
+                main_window.show_sart_page()
+                logger.info("✅ 已通过show_sart_page()跳转到SART实验页面")
+            elif hasattr(main_window, 'stack'):
+                # 后备方案：直接跳转（但可能没有正确设置session_dir）
+                logger.warning("⚠️ show_sart_page()不存在，使用后备方案")
+                main_window.stack.setCurrentIndex(3)
                 logger.info("✅ 已跳转到SART实验页面（全屏）")
             else:
                 logger.warning("⚠️ 无法找到主窗口堆栈")
@@ -2061,7 +2073,7 @@ class TestPage(QWidget):
         self.btn_next.setFixedSize(scale(280), scale(90))  # 从200x70增加到280x90,更大更醒目
         self.btn_next.setStyleSheet("""
             QPushButton#successButton {
-                background-color: #4CAF50;
+                background-color: #5DADE2;
                 color: white;
                 border: none;
                 border-radius: 10px;
@@ -2280,7 +2292,7 @@ class TestPage(QWidget):
         self.bp_start_button = QPushButton("开始测试")
         self.bp_start_button.setObjectName("successButton")
         self.bp_start_button.setFixedSize(scale(220), scale(70))  # 增大按钮
-        self.bp_start_button.setStyleSheet("font-size: 26px; font-weight: bold;")  # 老年模式
+        self.bp_start_button.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #5DADE2;")  # 老年模式
         self.bp_start_button.clicked.connect(self._toggle_bp_test)
         self.bp_start_button.setEnabled(False)  # 初始禁用
 

@@ -296,6 +296,9 @@ class MainWindow(QMainWindow):
             self.baseline_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 传递会话信息（用于EEG采集）
+        logger.info(f"📂 传递会话信息到基线页面:")
+        logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        logger.info(f"   - current_user = {self.current_user}")
         self.baseline_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
@@ -422,6 +425,9 @@ class MainWindow(QMainWindow):
             logger.info(f"为 SART 创建会话目录: {session_dir}")
         
         # 传递会话信息（用于EEG采集和结果保存）
+        logger.info(f"📂 传递会话信息到SART页面:")
+        logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        logger.info(f"   - current_user = {self.current_user}")
         self.sart_page.set_session_info(
             self.test_page.session_dir,
             self.current_user

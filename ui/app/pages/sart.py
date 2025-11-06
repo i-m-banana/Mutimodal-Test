@@ -327,11 +327,16 @@ class SARTPage(QWidget):
         
         # 获取会话目录
         session_dir = getattr(self, 'session_dir', None)
-        config.logger.info(f"📂 SART：当前session_dir = {session_dir}")
+        config.logger.info(f"📂 SART _ensure_sart_directory()调用:")
+        config.logger.info(f"   - session_dir属性 = {session_dir}")
+        config.logger.info(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
+        config.logger.info(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
         
         if not session_dir:
             # 如果没有设置会话目录，使用默认路径
-            config.logger.warning("⚠️ SART 会话目录未设置，使用默认路径")
+            config.logger.error("❌ SART 会话目录未设置！")
+            config.logger.error("   这意味着 set_session_info() 从未被调用，或session_dir为None")
+            config.logger.error("   SART数据将保存到默认路径，这不应该发生！")
             session_dir = 'recordings/default'
         
         # 在会话目录下创建 sart 子目录
@@ -496,9 +501,18 @@ class SARTPage(QWidget):
             session_dir: 会话目录路径（例如：recordings/admin/20251024_185949）
             current_user: 当前用户名
         """
+        config.logger.info(f"🔧 SART.set_session_info()被调用:")
+        config.logger.info(f"   - 传入的session_dir = {session_dir}")
+        config.logger.info(f"   - 传入的current_user = {current_user}")
+        config.logger.info(f"   - session_dir是否为None? {session_dir is None}")
+        config.logger.info(f"   - session_dir是否为空字符串? {session_dir == ''}")
+        
         self.session_dir = session_dir
         self.current_user = current_user
-        config.logger.info(f"✅ SART页面已设置会话信息: user={current_user}, dir={session_dir}")
+        
+        config.logger.info(f"✅ SART页面已设置会话信息:")
+        config.logger.info(f"   - self.session_dir = {self.session_dir}")
+        config.logger.info(f"   - self.current_user = {self.current_user}")
         config.logger.info(f"📂 SART结果将保存到: {session_dir}/sart/")
     
     def reset(self) -> None:
