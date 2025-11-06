@@ -1304,10 +1304,10 @@ class ScorePage(QWidget):
             logger.info(f"用户 '{self.username}' 第一次测试数据不完整（仅{len(first_record)}/{len(metrics)}维度有效），搜索其他完整记录")
         
         # 策略2: 搜索最近一次7维度都完整的测试
-        for idx in range(len(history_dates) - 1, -1, -1):  # 从最新往前搜索
+        for idx in range(1, len(history_dates) - 1, 1):  # 从最新往前搜索
             record = get_record_at_index(idx)
             if len(record) == len(metrics):
-                logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
+                logger.info(f"使用第{idx}次测试（最早完整记录）作为基准: {record}")
                 return record
         
         # 策略3: 如果某些维度仍然没有有效值，用默认值补齐

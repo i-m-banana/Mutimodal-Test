@@ -28,10 +28,14 @@ def _get_callback_helper():
     return _callback_helper
 
 
-def init_camera(callback: Callable[[bool], None]) -> None:
+def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = None) -> None:
     """
     异步初始化 AV 预览管道（非阻塞）。
     使用后台线程执行初始化，完成后在主线程回调。
+    
+    Args:
+        callback: 初始化完成后的回调函数
+        session_dir: 会话目录路径,如果不提供则使用默认的 'recordings'
     """
     from ...utils_common.thread_process_manager import get_thread_manager
     
@@ -57,7 +61,9 @@ def init_camera(callback: Callable[[bool], None]) -> None:
                 config.logger.info("模拟摄像头初始化成功。")
                 return
 
-            preview_dir = os.path.join('recordings')
+            # 使用传入的 session_dir,如果没有则使用默认值
+            preview_dir = session_dir if session_dir else os.path.join('recordings')
+            config.logger.info(f"🎥 初始化摄像头，使用目录: {preview_dir}")
 
             primary_index = config.ACTIVE_CAMERA_INDEX if config.ACTIVE_CAMERA_INDEX is not None else 0
             camera_candidates = [primary_index]

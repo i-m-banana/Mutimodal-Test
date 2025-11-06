@@ -3237,13 +3237,11 @@ class TestPage(QWidget):
 
         # 🔄 重置朗读录音状态
         self.reading_completed = False
-        
-        # ✅ 标记多模态疲劳检测为已完成(因为是从主流程进入test页面，已完成基线+SART)
+
         self.mark_stage_completed('多模态疲劳检测')
         
         # 重置分数累积列表
         self._fatigue_scores_list = []
-        self._brain_load_scores_list = []
         self._emotion_score = None
         self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
         logger.info("已重置分数累积列表和情绪分析标志")
@@ -3326,6 +3324,7 @@ class TestPage(QWidget):
                 
                 # 尝试启动AV采集（即使后端未连接也尝试，可能使用本地摄像头）
                 try:
+                    logger.info(f"🎥 准备启动 AV 采集，session_dir={self.session_dir}")
                     av_start_collection(
                         save_dir=self.session_dir,
                         camera_index=config.ACTIVE_CAMERA_INDEX,
@@ -3379,6 +3378,9 @@ class TestPage(QWidget):
                 task_name="启动多模态采集"
             )
         
+
+    def start_eeg_collection(self) -> None:
+        self._brain_load_scores_list = []
         # EEG采集也使用异步方式（非阻塞），由后端统一管理硬件连接
         # ⚠️ 注意：如果EEG已经在基线/SART阶段启动，这里会返回 "already-running"，这是正常的
         def start_eeg_async():

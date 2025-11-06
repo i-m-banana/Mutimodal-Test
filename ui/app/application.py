@@ -69,7 +69,8 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._setup_debug_shortcuts()
         
-        # 延迟预加载摄像头资源（不阻塞UI启动）
+        # ✅ 恢复预加载：应用启动时预加载摄像头(使用临时目录)
+        # 在校准页面时会用正确的session_dir重新初始化
         from .qt import QTimer
         QTimer.singleShot(800, self._preload_camera)
 
@@ -262,6 +263,27 @@ class MainWindow(QMainWindow):
             self.test_page.session_dir = session_dir
             
             logger.info(f"🆕 创建整个测试会话的session目录: {session_dir}")
+            
+            # ✅ 更新session_dir：即使摄像头已预加载，也要用正确的session_dir重新初始化
+            # 这样可以确保后续录制的文件保存到正确的目录
+            logger.info(f"🎥 用正确的session_dir更新摄像头服务: {session_dir}")
+            from .utils.helpers import init_camera
+            
+            def on_camera_update_finished(success: bool) -> None:
+                if success:
+                    logger.info("✅ 摄像头session_dir更新成功")
+                    self.camera_preloaded = True
+                else:
+                    logger.warning("⚠️ 摄像头session_dir更新失败")
+                    self.camera_preloaded = False
+            
+            try:
+                # 传递正确的session_dir，更新后端AV服务的保存路径
+                init_camera(on_camera_update_finished, session_dir=session_dir)
+            except Exception as e:
+                logger.error(f"更新摄像头session_dir失败: {e}")
+                # 即使更新失败也标记为已加载，校准页面会fallback到自己初始化
+                self.camera_preloaded = False
         else:
             logger.info(f"✅ 已有session目录: {self.test_page.session_dir}")
         
@@ -367,6 +389,7 @@ class MainWindow(QMainWindow):
         # 切换到test页面
         self.brain_load_tip.setVisible(False)
         self.stack.fade_to_index(4)
+        self.test_page.start_eeg_collection()  # 启动SART阶段的EEG采集
         
         # 显示基线提示页面（answer_stack中的第0个widget）
         if hasattr(self.test_page, 'answer_stack'):
@@ -462,18 +485,20 @@ class MainWindow(QMainWindow):
         """在后台预加载摄像头，不阻塞UI"""
         from .utils.helpers import init_camera
         
-        logger.info("🎥 开始预加载摄像头（后台异步）...")
+        logger.info("🎥 开始预加载摄像头（后台异步，使用临时目录）...")
         
         def on_preload_finished(success: bool) -> None:
             if success:
-                logger.info("✅ 摄像头预加载成功，校准页面将立即就绪")
+                logger.info("✅ 摄像头预加载成功，校准页面将更新为正确的session_dir")
                 self.camera_preloaded = True
             else:
                 logger.warning("⚠️ 摄像头预加载失败，将在校准页重试")
                 self.camera_preloaded = False
         
         try:
-            init_camera(on_preload_finished)
+            # 预加载时不传session_dir，使用默认的'recordings'
+            # 在校准页面会用正确的session_dir重新初始化
+            init_camera(on_preload_finished, session_dir=None)
         except Exception as e:
             logger.error(f"启动摄像头预加载失败: {e}")
             self.camera_preloaded = False

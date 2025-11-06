@@ -294,7 +294,17 @@ class CalibrationPage(QWidget):
         
         # 异步初始化摄像头（非阻塞）
         try:
-            init_camera(self._on_camera_init_finished)
+            # ✅ 获取test_page的session_dir并传递给init_camera
+            main_window = self.window()
+            test_page = getattr(main_window, 'test_page', None)
+            session_dir = getattr(test_page, 'session_dir', None) if test_page else None
+            
+            if session_dir:
+                config.logger.info(f"🎥 校准页面使用session_dir初始化摄像头: {session_dir}")
+            else:
+                config.logger.warning("⚠️ 校准页面未获取到session_dir，使用默认目录")
+            
+            init_camera(self._on_camera_init_finished, session_dir=session_dir)
         except Exception as e:
             config.logger.error(f"启动摄像头初始化失败: {e}")
             self.loading_timer.stop()
@@ -464,6 +474,7 @@ class CalibrationPage(QWidget):
                         else:
                             config.logger.error(f"❌ 无法访问test_page，使用临时目录: {session_dir}")
                     
+                    # ✅ 第一步：启动EEG数据采集
                     result = eeg_start_collection(
                         username=current_user,
                         save_dir=session_dir,
@@ -474,6 +485,24 @@ class CalibrationPage(QWidget):
                         config.logger.info(f"✅ EEG预连接已启动，保存目录: {session_dir}")
                     else:
                         config.logger.warning(f"⚠️ EEG预连接启动失败: {result}")
+                    
+                    # ✅ 第二步：启动脑负荷推理（多模态数据采集）
+                    try:
+                        from ...services.backend_proxy import multidata_start_collection
+                        
+                        multidata_result = multidata_start_collection(
+                            current_user,
+                            part=1,
+                            save_dir=session_dir,
+                        )
+                        multidata_status = (multidata_result or {}).get("status", "").lower()
+                        if multidata_status in {"started", "running", "already-running"}:
+                            config.logger.info(f"🧠 脑负荷推理已在校准阶段启动，保存目录: {session_dir}")
+                        else:
+                            config.logger.warning(f"⚠️ 脑负荷推理启动失败: {multidata_result}")
+                    except Exception as e:
+                        config.logger.error(f"❌ 启动脑负荷推理失败: {e}", exc_info=True)
+                        
                 except Exception as e:
                     config.logger.error(f"❌ EEG预连接失败: {e}", exc_info=True)
             

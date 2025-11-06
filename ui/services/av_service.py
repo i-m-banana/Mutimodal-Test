@@ -118,6 +118,7 @@ class _RemoteAVProxy(QObject):
     # ------------------------------------------------------------------
     def start_collection(self, save_dir: str, *, camera_index: int = 0, video_fps: float = 30.0,
                          audio_rate: int = 8000, input_device_index: Optional[int] = None) -> None:
+        _logger.info(f"🎥 前端 start_collection: save_dir={save_dir}, camera_index={camera_index}")
         self._segment_index = 0
         self._paths = SessionPaths(audio_paths=[], video_paths=[])
         self._recording_active = False
