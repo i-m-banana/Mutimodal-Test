@@ -50,15 +50,23 @@ class BackendThreadPool:
             thread_name_prefix="backend-cpu-"
         )
 
+        # 推理任务线程池 (AI模型推理, 疲劳度评估 - 高耗时任务)
+        # 使用2个工作线程,避免多个视频推理同时进行导致资源竞争
+        self._inference_pool = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="backend-inference-"
+        )
+
         # 长时间运行的托管线程 (硬件采集循环)
         self._managed_threads: dict[str, threading.Thread] = {}
         self._thread_lock = threading.Lock()
 
         atexit.register(self.shutdown)
         self.logger.info(
-            "线程池初始化: IO工作线程=%d, CPU工作线程=%d",
+            "线程池初始化: IO工作线程=%d, CPU工作线程=%d, 推理线程=%d",
             2,
-            cpu_workers
+            cpu_workers,
+            2
         )
 
     def submit_io_task(
@@ -78,6 +86,22 @@ class BackendThreadPool:
     ) -> Future[Any]:
         """提交CPU密集型任务 (数据编码, 图像处理, 疲劳评分计算)."""
         return self._cpu_pool.submit(fn, *args, **kwargs)
+
+    def submit_inference_task(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any
+    ) -> Future[Any]:
+        """提交AI推理任务 (模型推理, 视频分析, 疲劳度评估 - 高耗时任务).
+        
+        使用专用推理线程池,避免长时间推理任务阻塞其他CPU任务。
+        特别适用于:
+        - RGB视频疲劳度推理 (MediaPipe, 30-60秒)
+        - EEG疲劳度推理 (特征提取和分类)
+        - 情绪识别推理 (深度学习模型)
+        """
+        return self._inference_pool.submit(fn, *args, **kwargs)
 
     def register_managed_thread(
         self,
@@ -159,6 +183,7 @@ class BackendThreadPool:
         # 关闭线程池
         self._io_pool.shutdown(wait=wait, cancel_futures=not wait)
         self._cpu_pool.shutdown(wait=wait, cancel_futures=not wait)
+        self._inference_pool.shutdown(wait=wait, cancel_futures=not wait)
         self.logger.info("线程池已关闭")
 
     def diagnostics(self) -> dict[str, Any]:
@@ -181,6 +206,10 @@ class BackendThreadPool:
             "cpu_pool": {
                 "max_workers": self._cpu_pool._max_workers,  # type: ignore[attr-defined]
                 "_shutdown": self._cpu_pool._shutdown  # type: ignore[attr-defined]
+            },
+            "inference_pool": {
+                "max_workers": 2,
+                "_shutdown": self._inference_pool._shutdown  # type: ignore[attr-defined]
             },
             "managed_threads": managed_info
         }

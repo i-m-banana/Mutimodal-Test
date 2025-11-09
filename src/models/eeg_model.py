@@ -239,9 +239,9 @@ class EEGModel(BaseInferenceModel):
             # 最终分数使用EMA
             final_score = float(self.ema) if self.ema is not None else 0.0
             
-            # 单行输出推理结果
+            # 单行输出推理结果（debug级别）
             load_level = "正常😊" if final_score < 30 else "轻度负荷😐" if final_score < 60 else "重度负荷🔥"
-            self.logger.info(
+            self.logger.debug(
                 f"🧠 脑负荷: {round(final_score, 2)} ({load_level}, {self.state}, "
                 f"{len(window_results)}窗口, {round(inference_time, 1)}ms)"
             )

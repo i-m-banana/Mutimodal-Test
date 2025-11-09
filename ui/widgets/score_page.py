@@ -117,18 +117,18 @@ class ModernGaugeWidget(QWidget):
 
         # 绘制分数
         painter.setPen(QPen(main_color, 3))
-        painter.setFont(QFont("Arial", 56, QFont.Bold))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 56, 75))
         score_text = str(int(self.value))
         painter.drawText(-60, -20, 120, 60, Qt.AlignCenter, score_text)
 
         # 绘制"分"字
         painter.setPen(QPen(QColor(100, 100, 100), 2))
-        painter.setFont(QFont("Microsoft YaHei", 18))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 18))
         painter.drawText(-25, 30, 50, 30, Qt.AlignCenter, "分")
 
         # 绘制刻度
         painter.setPen(QPen(QColor(180, 180, 180), 1))
-        painter.setFont(QFont("Arial", 10))
+        painter.setFont(QFont("阿里健康体2.0 中文 45 R", 10))
         for i in range(0, 101, 20):
             angle = 225 - (i / 100.0 * 270)
             angle_rad = angle * np.pi / 180
@@ -187,7 +187,7 @@ class HistoryDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
         self.metric_buttons = {}
-        metrics = ["疲劳检测", "情绪", "收缩压", "舒张压", "脉搏", "脑负荷", "舒尔特准确率"]
+        metrics = ["疲劳检测", "情绪", "收缩压", "舒张压", "脉搏", "脑负荷", "舒尔特综合得分"]
 
         for m in metrics:
             btn = QPushButton(m, self)
@@ -196,18 +196,19 @@ class HistoryDialog(QDialog):
                 QPushButton {
                     font-size: 16px;
                     font-weight: bold;
-                    background-color: #f0f0f0;
-                    border: 2px solid #ddd;
+                    background-color: #4DA5C9;
+                    color: white;
+                    border: 2px solid #4DA5C9;
                     border-radius: 22px;
                     padding: 0 30px;
                 }
                 QPushButton:hover {
-                    background-color: #e0e0e0;
-                    border-color: #bbb;
+                    background-color: #3d8bb0;
+                    border-color: #3d8bb0;
                 }
                 QPushButton:pressed {
-                    background-color: #4CAF50;
-                    color: white;
+                    background-color: #2d7a9a;
+                    border-color: #2d7a9a;
                 }
             """)
             btn.clicked.connect(lambda checked, metric=m: self._draw_chart(metric))
@@ -255,9 +256,9 @@ class HistoryDialog(QDialog):
                     QPushButton {
                         font-size: 16px;
                         font-weight: bold;
-                        background-color: #4CAF50;
+                        background-color: #2d7a9a;
                         color: white;
-                        border: 2px solid #4CAF50;
+                        border: 2px solid #2d7a9a;
                         border-radius: 22px;
                         padding: 0 30px;
                     }
@@ -267,14 +268,15 @@ class HistoryDialog(QDialog):
                     QPushButton {
                         font-size: 16px;
                         font-weight: bold;
-                        background-color: #f0f0f0;
-                        border: 2px solid #ddd;
+                        background-color: #4DA5C9;
+                        color: white;
+                        border: 2px solid #4DA5C9;
                         border-radius: 22px;
                         padding: 0 30px;
                     }
                     QPushButton:hover {
-                        background-color: #e0e0e0;
-                        border-color: #bbb;
+                        background-color: #3d8bb0;
+                        border-color: #3d8bb0;
                     }
                 """)
 
@@ -332,7 +334,7 @@ class HistoryDialog(QDialog):
                             mock_values.append(random.randint(60, 90))
                         elif metric in ["脉搏"]:
                             mock_values.append(random.randint(60, 100))
-                        elif metric in ["舒尔特准确率"]:
+                        elif metric in ["舒尔特综合得分"]:
                             mock_values.append(random.randint(80, 100))
                         else:  # 疲劳、情绪、脑负荷等分数类指标
                             mock_values.append(random.randint(40, 100))
@@ -397,8 +399,8 @@ class HistoryDialog(QDialog):
                 ax.set_ylabel("血压 (mmHg)", fontproperties=self.zh_font, fontsize=16)
             elif metric == "脉搏":
                 ax.set_ylabel("脉搏 (次/分)", fontproperties=self.zh_font, fontsize=16)
-            elif metric == "舒尔特准确率":
-                ax.set_ylabel("准确率 (%)", fontproperties=self.zh_font, fontsize=16)
+            elif metric == "舒尔特综合得分":
+                ax.set_ylabel("专注度 (%)", fontproperties=self.zh_font, fontsize=16)
             else:
                 ax.set_ylabel("分数", fontproperties=self.zh_font, fontsize=16)
 
@@ -462,8 +464,8 @@ class HistoryDialog(QDialog):
                             text = f'{time_str}\n{metric}: {y_display} mmHg'
                         elif metric == "脉搏":
                             text = f'{time_str}\n脉搏: {y_display} 次/分'
-                        elif metric == "舒尔特准确率":
-                            text = f'{time_str}\n准确率: {y_display}%'
+                        elif metric == "舒尔特综合得分":
+                            text = f'{time_str}\n专注度: {y_display}%'
                         else:
                             text = f'{time_str}\n分数: {y_display}'
 
@@ -577,11 +579,37 @@ class ScorePage(QWidget):
         
         # 中文字体
         self.zh_font = font_manager.FontProperties(family="Microsoft YaHei")
+        
+        # 等待疲劳度评估完成的标志
+        self._waiting_for_fatigue = False
 
         self._init_ui()
+        
+        # 连接后端推理结果信号，以便在评估完成后实时更新
+        backend_client = get_backend_client()
+        backend_client.detection_result.connect(self._on_detection_result)
+        
         # 不在初始化时更新分数，等待数据加载完成后再更新
         # self._update_scores()  # ← 删除此行，避免重复调用
-        QTimer.singleShot(0, self._refresh_data)
+        # QTimer.singleShot(0, self._refresh_data)  # ← 注释掉初始化时的刷新，改为 showEvent 中刷新
+
+    def showEvent(self, event):
+        """每次页面显示时触发，确保数据是最新的"""
+        super().showEvent(event)
+        # 异步刷新数据，避免阻塞UI
+        QTimer.singleShot(100, self._on_page_shown)
+    
+    def _on_page_shown(self):
+        """页面显示后的处理：刷新数据并更新显示"""
+        try:
+            logger.info("📊 分数页面显示，开始刷新数据...")
+            # 刷新历史数据（异步从数据库获取）
+            self._refresh_data()
+            # 更新分数显示
+            self._update_scores()
+            logger.info("✅ 分数页面数据刷新完成")
+        except Exception as e:
+            logger.error(f"分数页面刷新失败: {e}", exc_info=True)
 
     def _init_ui(self):
         # 设置窗口背景
@@ -605,6 +633,7 @@ class ScorePage(QWidget):
             }
         """)
         left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        left_container.setMaximumHeight(900)  # 限制最大高度防止超出1080p屏幕
         left_shadow = QGraphicsDropShadowEffect()
         left_shadow.setBlurRadius(20)
         left_shadow.setColor(QColor(0, 0, 0, 40))
@@ -642,6 +671,7 @@ class ScorePage(QWidget):
 
         left_layout.addWidget(radar_widget, 1)
 
+        # ✅ 需求3: 移除"未测试"相关说明，简化图例
         # 底部说明
         info_label = QLabel("🔵 蓝色=本次测试 | 🔴 红色虚线=理想基准 (80分)")
         info_label.setAlignment(Qt.AlignCenter)
@@ -649,7 +679,7 @@ class ScorePage(QWidget):
         left_layout.addWidget(info_label)
         
         # 指标说明
-        metric_info = QLabel("※ 得分相对于首次测试换算，蓝色区域越接近红色正七边形表示状态越好")
+        metric_info = QLabel("※ 本次测试与首次测试基准对比，表现优于基准显示在基准线外")
         metric_info.setAlignment(Qt.AlignCenter)
         metric_info.setStyleSheet("font-size:11px; color:#999;")
         left_layout.addWidget(metric_info)
@@ -665,6 +695,7 @@ class ScorePage(QWidget):
             }
         """)
         right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        right_container.setMaximumHeight(900)  # 限制最大高度防止超出1080p屏幕
         right_shadow = QGraphicsDropShadowEffect()
         right_shadow.setBlurRadius(20)
         right_shadow.setColor(QColor(0, 0, 0, 40))
@@ -721,16 +752,16 @@ class ScorePage(QWidget):
             QPushButton {
                 font-size: 18px;
                 font-weight: bold;
-                background-color: #4CAF50;
+                background-color: #4DA5C9;
                 color: white;
                 border: none;
                 border-radius: 25px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #3d8bb0;
             }
             QPushButton:pressed {
-                background-color: #3d8b40;
+                background-color: #2d7a9a;
             }
         """)
         self.btn_history.clicked.connect(self._show_history)
@@ -949,6 +980,11 @@ class ScorePage(QWidget):
                        "收缩压", "舒张压", "脉搏", "舒尔特综合得分"]:
                 if key in self._test_results:
                     self._current_data[key] = self._test_results[key]
+            
+            # ✅ 合并阶段完成状态（关键！用于判断哪些指标有真实数据）
+            if "_stage_completed" in self._test_results:
+                self._current_data["_stage_completed"] = self._test_results["_stage_completed"]
+            
             return self._current_data
         
         # 没有测试结果时,使用模拟数据或空数据
@@ -1047,6 +1083,65 @@ class ScorePage(QWidget):
                 
         except Exception as e:
             logger.error(f"处理测试结果数据失败: {e}", exc_info=True)
+    
+    def _on_detection_result(self, payload: Dict) -> None:
+        """处理后端推理结果（监听疲劳度评估完成事件）
+        
+        Args:
+            payload: 推理结果载荷，格式:
+                {
+                    "detector": "model_fatigue",
+                    "status": "detected",
+                    "predictions": {
+                        "fatigue_score": 85.0,
+                        "prediction_class": "重度疲劳",
+                        "inference_mode": "session_assessment"
+                    }
+                }
+        """
+        try:
+            detector = payload.get("detector", "")
+            status = payload.get("status", "")
+            predictions = payload.get("predictions", {})
+            
+            # 只处理疲劳度评估结果
+            if detector == "model_fatigue" and status == "detected":
+                # 检查是否是会话评估结果（而不是实时流式推理）
+                inference_mode = predictions.get("inference_mode", "")
+                if inference_mode == "session_assessment":
+                    fatigue_score = predictions.get("fatigue_score")
+                    prediction_class = predictions.get("prediction_class", "")
+                    fusion_method = predictions.get("fusion_method", "")
+                    confidence = predictions.get("confidence", 0.0)
+                    
+                    if fatigue_score is not None:
+                        logger.info(f"📊 分数页面收到疲劳度评估结果: score={fatigue_score:.2f}/90, class={prediction_class}")
+                        logger.info(f"   融合方法={fusion_method}, 置信度={confidence:.2%}")
+                        
+                        # 更新测试结果中的疲劳度分数
+                        if not self._test_results:
+                            self._test_results = {}
+                        
+                        self._test_results["疲劳检测"] = fatigue_score
+                        
+                        # 添加元数据
+                        if "_metadata" not in self._test_results:
+                            self._test_results["_metadata"] = {}
+                        
+                        self._test_results["_metadata"]["fatigue_sample_count"] = 1
+                        self._test_results["_metadata"]["fusion_method"] = fusion_method
+                        self._test_results["_metadata"]["fusion_confidence"] = confidence
+                        
+                        # 立即更新显示
+                        self._waiting_for_fatigue = False
+                        self._update_scores()
+                        
+                        logger.info("✅ 疲劳度评估结果已更新到分数页面")
+                    else:
+                        logger.warning("⚠️ 疲劳度评估结果中没有 fatigue_score 字段")
+                        
+        except Exception as e:
+            logger.error(f"处理疲劳度评估结果失败: {e}", exc_info=True)
 
     def _update_scores(self):
         """更新分数显示"""
@@ -1055,12 +1150,8 @@ class ScorePage(QWidget):
         # 更新雷达图
         self._draw_radar_chart(data)
 
-        # 更新仪表盘（取整显示）
-        raw_total = data.get("舒尔特综合得分", 0)
-        try:
-            total_score = int(round(float(raw_total))) if raw_total is not None else 0
-        except (ValueError, TypeError):
-            total_score = 0
+        # 计算综合得分（基于4项核心指标+血压）
+        total_score = self._calculate_comprehensive_score(data)
         self.gauge.setValue(total_score)
 
         # 更新等级评价和评语
@@ -1068,6 +1159,95 @@ class ScorePage(QWidget):
         self.lbl_level.setText(f"{level}")
         self.lbl_level.setStyleSheet(f"font-size:36px; font-weight:bold; color:{color};")
         self.lbl_comment.setText(comment)
+    
+    def _calculate_comprehensive_score(self, data: dict) -> int:
+        """
+        计算综合得分（整合多维度指标）
+        
+        评分维度和权重分配：
+        - 疲劳检测: 22.5% (疲劳度越低越好)
+        - 情绪: 22.5% (情绪压力越低越好)
+        - 脑负荷: 22.5% (脑负荷越低越好)
+        - 舒尔特综合得分: 22.5% (专注度，准确率越高越好)
+        - 血压/脉搏健康度: 10% (生理指标健康度)
+        
+        合计: 前4项占90%, 血压脉搏占10%
+        
+        返回: 0-100的综合得分
+        """
+        try:
+            # 获取各维度原始值
+            fatigue = float(data.get("疲劳检测", 50))
+            emotion = float(data.get("情绪", 50))
+            brain_load = float(data.get("脑负荷", 50))
+            schulte_accuracy = float(data.get("舒尔特综合得分", 85))
+            systolic = float(data.get("收缩压", 120))
+            diastolic = float(data.get("舒张压", 80))
+            pulse = float(data.get("脉搏", 75))
+            
+            # 1. 疲劳度得分 (越高越疲劳，反转评分)
+            fatigue_score = max(0, fatigue)
+            
+            # 2. 情绪得分 (越越高越好)
+            emotion_score = max(0, min(100, emotion))
+            
+            # 3. 脑负荷得分 (越高越好，反转评分)
+            brain_load_score = max(0, min(100, brain_load))
+            
+            # 4. 专注度得分 (舒尔特综合得分率，越高越好)
+            # 准确率范围 0-100%
+            attention_score = max(0, min(100, schulte_accuracy))
+            
+            # 5. 血压脉搏健康度得分
+            # 理想值：收缩压120, 舒张压80, 脉搏75
+            # 计算偏离度，偏离越小得分越高
+            systolic_ideal = 120
+            diastolic_ideal = 80
+            pulse_ideal = 75
+            
+            # 收缩压得分 (偏离±20为可接受范围)
+            systolic_deviation = abs(systolic - systolic_ideal)
+            systolic_score = max(0, 100 - (systolic_deviation / 20.0) * 100)
+            
+            # 舒张压得分 (偏离±15为可接受范围)
+            diastolic_deviation = abs(diastolic - diastolic_ideal)
+            diastolic_score = max(0, 100 - (diastolic_deviation / 15.0) * 100)
+            
+            # 脉搏得分 (偏离±25为可接受范围)
+            pulse_deviation = abs(pulse - pulse_ideal)
+            pulse_score = max(0, 100 - (pulse_deviation / 25.0) * 100)
+            
+            # 血压脉搏综合健康度 (三者平均)
+            bp_health_score = (systolic_score + diastolic_score + pulse_score) / 3.0
+
+            print(f"-------------------------------- {fatigue_score} {emotion_score} {brain_load_score} {attention_score} {bp_health_score} ")
+            
+            # 6. 加权计算综合得分
+            total_score = 40+ (
+                fatigue_score * 0.2 +      # 疲劳检测 22.5%
+                emotion_score * 0.2 +      # 情绪 22.5%
+                brain_load_score * 0.10 +   # 脑负荷 10%
+                attention_score * 0.3 +    # 专注度 22.5%
+                bp_health_score * 0.2       # 血压脉搏健康度 10%
+            )*0.6
+            
+            # 取整并限制在 0-100 范围
+            final_score = int(round(max(0, min(100, total_score))))
+            
+            logger.debug(
+                f"综合得分计算: 疲劳={fatigue_score:.1f}(22.5%), "
+                f"情绪={emotion_score:.1f}(22.5%), "
+                f"脑负荷={brain_load_score:.1f}(22.5%), "
+                f"专注度={attention_score:.1f}(22.5%), "
+                f"血压健康={bp_health_score:.1f}(10%) "
+                f"→ 综合={final_score}分"
+            )
+            
+            return final_score
+            
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"综合得分计算异常: {e}，使用默认值50分")
+            return 50
     
     def _calculate_baseline(self):
         """
@@ -1086,7 +1266,7 @@ class ScorePage(QWidget):
         logger.debug(f"计算基准值 - 当前用户: {self.username}, 历史记录数: {len(history_dates)}")
         
         # 需要计算基准的指标
-        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", "收缩压", "舒张压", "脉搏"]
+        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特综合得分", "收缩压", "舒张压", "脉搏"]
         baseline = {}
         
         # 如果没有历史数据，返回健康标准默认值
@@ -1096,7 +1276,7 @@ class ScorePage(QWidget):
                 "疲劳检测": 30,      # 疲劳度低表示状态好
                 "情绪": 30,          # 情绪压力低表示状态好
                 "脑负荷": 30,        # 脑负荷低表示状态好
-                "舒尔特准确率": 95,  # 准确率高表示状态好
+                "舒尔特综合得分": 95,  # 准确率高表示状态好
                 "收缩压": 120,
                 "舒张压": 80,
                 "脉搏": 75
@@ -1124,28 +1304,18 @@ class ScorePage(QWidget):
             logger.info(f"用户 '{self.username}' 第一次测试数据不完整（仅{len(first_record)}/{len(metrics)}维度有效），搜索其他完整记录")
         
         # 策略2: 搜索最近一次7维度都完整的测试
-        for idx in range(len(history_dates) - 1, -1, -1):  # 从最新往前搜索
+        for idx in range(1, len(history_dates) - 1, 1):  # 从最新往前搜索
             record = get_record_at_index(idx)
             if len(record) == len(metrics):
-                logger.info(f"使用第{idx}次测试（最近完整记录）作为基准: {record}")
+                logger.info(f"使用第{idx}次测试（最早完整记录）作为基准: {record}")
                 return record
         
-        # 策略3: 如果所有记录都不完整，尝试拼凑（每个维度取最早的有效值）
-        logger.warning("所有测试记录都不完整，尝试拼凑基准值")
-        for metric in metrics:
-            values = history.get(metric, [])
-            # 找到该维度最早的有效值
-            for val in values:
-                if val is not None and val > 0:
-                    baseline[metric] = val
-                    break
-        
-        # 策略4: 如果某些维度仍然没有有效值，用默认值补齐
+        # 策略3: 如果某些维度仍然没有有效值，用默认值补齐
         defaults = {
             "疲劳检测": 30,
             "情绪": 30,
             "脑负荷": 30,
-            "舒尔特准确率": 95,
+            "舒尔特综合得分": 95,
             "收缩压": 120,
             "舒张压": 80,
             "脉搏": 75
@@ -1165,22 +1335,52 @@ class ScorePage(QWidget):
         - 基准线固定为 80 分（正七边形红色虚线）
         - 本次测试值相对于首次测试表现进行换算
         - 通常本次测试会在正七边形内（视觉上更美观）
+        - ✅ 七维全部显示，没有真实数据的显示为0分且颜色不同
         """
         self.radar_figure.clear()
         
-        # 定义要展示的指标（不包括综合得分）
-        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特准确率", "收缩压", "舒张压", "脉搏"]
-        metric_labels = ["疲劳", "情绪", "脑负荷", "准确率", "收缩压", "舒张压", "脉搏"]
+        # 🔄 获取阶段完成状态
+        stage_completed = data.get("_stage_completed", {})
+        
+        # 定义指标与阶段的映射关系(新命名)
+        metric_stage_mapping = {
+            "疲劳检测": "多模态疲劳检测",      # 基线+SART阶段测试
+            "情绪": "情绪检测",                # 原朗读录音改名
+            "脑负荷": "多模态疲劳检测",        # 基线+SART阶段测试
+            "舒尔特综合得分": "舒尔特专注度检测",  # 原舒尔特测试改名
+            "收缩压": "血压脉搏检测",          # 原血压测试改名
+            "舒张压": "血压脉搏检测",          # 原血压测试改名
+            "脉搏": "血压脉搏检测"             # 原血压测试改名
+        }
+        
+        # ✅ 定义要展示的指标（七维全部显示）
+        metrics = ["疲劳检测", "情绪", "脑负荷", "舒尔特综合得分", "收缩压", "舒张压", "脉搏"]
+        metric_labels = ["疲劳", "情绪", "脑负荷", "专注度", "收缩压", "舒张压", "脉搏"]
+        
+        # ✅ 标记每个指标是否有真实数据
+        has_real_data = []
+        for metric in metrics:
+            required_stage = metric_stage_mapping.get(metric)
+            # 检查对应阶段是否完成
+            is_completed = stage_completed.get(required_stage, False) if required_stage else True
+            has_real_data.append(is_completed)
+        
+        logger.info(f"雷达图七维显示: {metrics}")
+        logger.info(f"真实数据状态: {dict(zip(metric_labels, has_real_data))}")
         
         # 获取本次测试值
         current_values = []
-        for metric in metrics:
-            raw_value = data.get(metric, 0)
-            try:
-                value = float(raw_value) if raw_value is not None else 0
-            except (ValueError, TypeError):
-                value = 0
-            current_values.append(value)
+        for i, metric in enumerate(metrics):
+            # ✅ 如果该指标没有真实数据，强制设为0（但雷达图上会显示为30分）
+            if not has_real_data[i]:
+                current_values.append(0)
+            else:
+                raw_value = data.get(metric, 0)
+                try:
+                    value = float(raw_value) if raw_value is not None else 0
+                except (ValueError, TypeError):
+                    value = 0
+                current_values.append(value)
         
         # 计算首次测试基准值（用于相对比较）
         baseline = self._calculate_baseline()
@@ -1193,61 +1393,109 @@ class ScorePage(QWidget):
         
         for i, metric in enumerate(metrics):
             curr = current_values[i]
+            
+            # ✅ 没有真实数据的指标，雷达图上显示为30分（固定值）
+            if not has_real_data[i]:
+                normalized_current.append(30)
+                continue
+            
             base = baseline_values[i]
             
             # 避免除以零
             if base == 0:
                 base = 1
-            
-            if metric in ["疲劳检测", "情绪", "脑负荷"]:
-                # 这些指标越低越好：原始值越小，表现越好
-                # 换算逻辑：
-                # - 如果本次 <= 首次：表现更好或持平，得分 >= 80
-                # - 如果本次 > 首次：表现下降，得分 < 80
-                # 公式：80 * (2 - curr/base)，限制在 [0, 100]
-                ratio = curr / base
-                score = BASELINE_SCORE * (2 - ratio)
-                score = max(0, min(100, score))
                 
-            elif metric == "舒尔特准确率":
+            if metric in ["情绪", "脑负荷", "舒尔特综合得分", "疲劳检测"]:
                 # 准确率越高越好：原始值越大，表现越好
-                # 换算逻辑：
-                # - 如果本次 >= 首次：表现更好或持平，得分 >= 80
-                # - 如果本次 < 首次：表现下降，得分 < 80
-                # 公式：80 * (curr/base)，限制在 [0, 100]
+                # 相对基准值的换算逻辑（避免突破上限）：
+                # - 基准线固定为 80 分（红色正七边形）
+                # - 本次测试与基准值比较，动态计算得分
+                # - 当本次 = 基准值时 → 80分（与基准线重合）
+                # - 当本次 > 基准值时 → >80分（在基准线外，但不超过90分）
+                # - 当本次 < 基准值时 → <80分（在基准线内，最低40分）
+                # 
+                # 公式设计：
+                # 1. 计算相对基准的比例：ratio = curr / base
+                # 2. 分段映射：
+                #    - 如果 ratio >= 1（本次 >= 基准）: 
+                #      score = 80 + (ratio - 1) * k1，上限90分
+                #      当 ratio=1 → score=80
+                #      当 ratio=1.25（超出25%）→ score=90（封顶）
+                #      即 k1 = 10/0.25 = 40
+                #    - 如果 ratio < 1（本次 < 基准）:
+                #      score = 80 * ratio，下限40分
+                #      当 ratio=1 → score=80
+                #      当 ratio=0.5 → score=40（最低）
+                
                 ratio = curr / base
-                score = BASELINE_SCORE * ratio
-                score = max(0, min(100, score))
+                if ratio >= 1.0:
+                    # 本次 >= 基准：映射到 [80, 90]，避免突破上限
+                    # 超出25%时封顶为90分
+                    score = 80 + min((ratio - 1.0) * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次 < 基准：映射到 [40, 80]
+                    score = BASELINE_SCORE * ratio
+                    score = max(40, score)
+                
+                score = max(40, min(90, score))  # 严格限制在 [40, 90] 范围
                 
             elif metric in ["收缩压", "舒张压", "脉搏"]:
-                # 血压/脉搏：越接近理想值越好，直接用偏离度计算得分
-                # 不相对于首次测试，而是直接评估当前值的健康程度
+                # 血压/脉搏：越接近理想值越好（相对于基准值比较健康度）
+                # 相对基准值的换算逻辑：
+                # - 基准线固定为 80 分
+                # - 比较本次偏离度 vs 基准偏离度，偏离越小越好
+                # - 如果本次偏离 <= 基准偏离 → >=80分（健康度改善或持平）
+                # - 如果本次偏离 > 基准偏离 → <80分（健康度下降）
+                
                 ideal_values = {"收缩压": 120, "舒张压": 80, "脉搏": 75}
-                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}  # 最大可接受偏离
+                max_deviations = {"收缩压": 40, "舒张压": 20, "脉搏": 25}
                 
                 ideal = ideal_values[metric]
                 max_dev = max_deviations[metric]
                 
-                # 计算本次测试的偏离度
-                deviation = abs(curr - ideal)
+                # 计算本次和基准的偏离度
+                curr_deviation = abs(curr - ideal)
+                base_deviation = abs(base - ideal)
                 
-                # 换算逻辑：
-                # - 偏离度 = 0（完美）: 得分 = 80
-                # - 偏离度 = max_dev（极差）: 得分 = 0
-                # 公式：80 * (1 - deviation/max_dev)，限制在 [0, 80]
-                score = BASELINE_SCORE * (1 - deviation / max_dev)
-                score = max(0, min(BASELINE_SCORE, score))  # 最高不超过 80 分
+                # 避免除以零
+                if base_deviation == 0:
+                    base_deviation = 0.1
+                
+                # 计算偏离度比例（越小越好）
+                deviation_ratio = curr_deviation / base_deviation
+                
+                if deviation_ratio <= 1.0:
+                    # 本次偏离 <= 基准偏离：健康度改善，映射到 [80, 90]
+                    # 偏离度减少25%时达到90分封顶
+                    improvement = 1.0 - deviation_ratio  # 0到1之间
+                    score = 80 + min(improvement * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次偏离 > 基准偏离：健康度下降，映射到 [40, 80]
+                    score = 80 / deviation_ratio
+                    score = max(40, score)
+                
+                score = max(40, min(90, score))  # 限制在 [40, 90] 范围
             else:
-                # 其他未定义指标，默认按比例换算
+                # 其他未定义指标，默认使用相对基准的换算逻辑
                 ratio = curr / base
-                score = BASELINE_SCORE * ratio
-                score = max(0, min(100, score))
+                if ratio >= 1.0:
+                    # 本次 >= 基准
+                    score = 80 + min((ratio - 1.0) * 40, 10)
+                    score = min(90, score)
+                else:
+                    # 本次 < 基准
+                    score = 80 * ratio
+                    score = max(40, score)
+                score = max(40, min(90, score))
             
             normalized_current.append(score)
         
         # 闭合雷达图
         normalized_current += normalized_current[:1]
         normalized_baseline += normalized_baseline[:1]
+        has_real_data += has_real_data[:1]  # 同步闭合
         
         # 计算角度
         num_vars = len(metric_labels)
@@ -1262,39 +1510,85 @@ class ScorePage(QWidget):
         ax.plot(angles, normalized_baseline, 'r--', linewidth=2.5, label='理想基准线 (80分)', alpha=0.7)
         ax.fill(angles, normalized_baseline, 'r', alpha=0.1)
         
-        # 绘制本次测试值（蓝色实线）
-        ax.plot(angles, normalized_current, 'b-', linewidth=3, label='本次测试', marker='o', 
-                markersize=8, markerfacecolor='white', markeredgecolor='b', markeredgewidth=2)
-        ax.fill(angles, normalized_current, 'b', alpha=0.25)
+        # ✅ 分段绘制测试值：有真实数据用蓝色，无数据用灰色
+        for i in range(len(angles) - 1):
+            # 当前段的起点和终点
+            angle_start = angles[i]
+            angle_end = angles[i + 1]
+            value_start = normalized_current[i]
+            value_end = normalized_current[i + 1]
+            
+            # 根据数据状态选择颜色
+            if has_real_data[i] and has_real_data[i + 1]:
+                # 两端都有真实数据：蓝色实线
+                color = '#2196F3'
+                linestyle = '-'
+                alpha = 1.0
+                linewidth = 3
+            elif not has_real_data[i] and not has_real_data[i + 1]:
+                # 两端都无数据：灰色虚线
+                color = '#CCCCCC'
+                linestyle = '--'
+                alpha = 0.5
+                linewidth = 2
+            else:
+                # 一端有数据一端无数据：渐变色（简化为蓝色实线）
+                color = '#2196F3'
+                linestyle = '-'
+                alpha = 0.7
+                linewidth = 2.5
+            
+            # 绘制该段
+            ax.plot([angle_start, angle_end], [value_start, value_end], 
+                   color=color, linestyle=linestyle, linewidth=linewidth, alpha=alpha)
+        
+        # 绘制数据点（区分有无真实数据）
+        for i, (angle, value, has_data) in enumerate(zip(angles[:-1], normalized_current[:-1], has_real_data[:-1])):
+            if has_data:
+                # 有真实数据：蓝色实心点
+                ax.plot(angle, value, 'o', markersize=8, markerfacecolor='white', 
+                       markeredgecolor='#2196F3', markeredgewidth=2)
+            else:
+                # 无数据：灰色空心点
+                ax.plot(angle, value, 'o', markersize=6, markerfacecolor='#EEEEEE', 
+                       markeredgecolor='#CCCCCC', markeredgewidth=1.5)
+        
+        # 填充区域（有真实数据的部分用蓝色，无数据的用灰色）
+        # 简化处理：整体填充，透明度根据数据完整度调整
+        data_completeness = sum(has_real_data[:-1]) / len(has_real_data[:-1])  # 数据完整度
+        ax.fill(angles, normalized_current, '#2196F3', alpha=0.15 * data_completeness)
         
         # 设置刻度标签
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(metric_labels, fontproperties=self.zh_font, fontsize=12)
         
-        # 设置Y轴范围和刻度
-        ax.set_ylim(0, 100)
-        ax.set_yticks([20, 40, 60, 80, 100])
-        ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=10, color='#666')
         
-        # 添加网格
-        ax.grid(True, linestyle=':', alpha=0.5)
+        ax.set_ylim(0, 110)
+        ax.set_yticks([0, 20, 40, 60, 80, 100])  
+        ax.set_yticklabels(["0", "20", "40", "60", "80", "100"], fontsize=9,color='black',va='center')
         
-        # 添加图例
-        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), 
-                prop=self.zh_font, fontsize=11, framealpha=0.9)
+        # 添加网格(突出显示40和80的基准线)
+        ax.grid(True, linestyle=':', alpha=0.3)
+        # 在80分处绘制加粗的基准网格线
+        for angle in angles:
+            ax.plot([angle, angle], [0, 80], 'r-', linewidth=0.8, alpha=0.15)
         
-        # 在每个数据点旁边显示实际数值
-        for angle, curr_val, metric in zip(angles[:-1], current_values, metrics):
+        # 在每个数据点旁边显示实际数值（只显示有真实数据的点，未测试的不显示文字）
+        for i, (angle, curr_val, metric, has_data) in enumerate(zip(angles[:-1], current_values, metrics, has_real_data[:-1])):
+            if not has_data:
+                # ✅ 无数据的点不显示任何文字，只通过灰色标记区分
+                continue
+            
             # 计算文本位置
             x = angle
-            y = normalized_current[angles.index(angle)] + 8
+            y = normalized_current[i] + 8
             
             # 格式化显示文本
             if metric in ["收缩压", "舒张压"]:
                 text = f"{int(curr_val)}mmHg"
             elif metric == "脉搏":
                 text = f"{int(curr_val)}次/分"
-            elif metric == "舒尔特准确率":
+            elif metric == "舒尔特综合得分":
                 text = f"{int(curr_val)}%"
             elif metric in ["疲劳检测", "情绪", "脑负荷"]:
                 # 这些指标越低越好，但雷达图上显示的是反转后的值（越大越好）

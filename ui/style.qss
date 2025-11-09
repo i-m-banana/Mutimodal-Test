@@ -1,9 +1,20 @@
 
     /* --- 全局字体和颜色 --- */
     QWidget {
-        font-family: "Microsoft YaHei UI", "Segoe UI", Arial, sans-serif;
-        font-size: 15px;
+        font-family: "Alibaba Health 2.0 85 B", "阿里健康体2.0 中文 45 R", "阿里健康体2.0 中文 45 R", "Noto Sans CJK SC", "Microsoft YaHei", "Segoe UI", "Helvetica Neue", sans-serif;
+        font-size: 20px;
         color: #333;
+    }
+
+    /* --- 测试页面背景渐变 --- */
+    TestPage {
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 rgba(255, 255, 255, 1),
+            stop:0.3 rgba(230, 245, 255, 0.9),
+            stop:0.6 rgba(200, 235, 250, 0.8),
+            stop:1 rgba(170, 220, 245, 0.7)
+        );
     }
 
     /* --- 基线校准和SART实验页面样式 --- */
@@ -70,7 +81,7 @@
     QPushButton {
         border: none;
         border-radius: 25px;
-        font-size: 16px;
+        font-size: 20px;
         font-weight: bold;
         color: white;
         min-height: 50px;
@@ -100,13 +111,13 @@
 
     /* 完成评估按钮 */
     #finishButton {
-        background-color: #FF5722;
+        background-color: #4DA5C9;
     }
     #finishButton:hover {
-        background-color: #E64A19;
+        background-color: #3d8bb0;
     }
     #finishButton:pressed {
-        background-color: #D84315;
+        background-color: #2d7a9a;
     }
 
     /* --- 进度条 --- */

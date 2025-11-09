@@ -115,6 +115,21 @@ def eeg_get_snapshot(timeout: float = 2.0) -> Dict[str, Any]:
     return send_command("eeg.snapshot", timeout=timeout)
 
 
+def eeg_get_diagnostics(timeout: float = 2.0) -> Dict[str, Any]:
+    """获取EEG设备诊断信息.
+    
+    返回硬件可用性、设备连接状态等信息。
+    
+    Returns:
+        包含以下字段的字典:
+        - hardware_driver_available: bool, 硬件驱动是否可用
+        - force_simulation: bool, 是否强制使用模拟模式
+        - running: bool, 服务是否在运行
+        - device_connected: bool, 设备是否已连接
+    """
+    return send_command("eeg.diagnostics", timeout=timeout)
+
+
 # ============================================================================
 # 多模态服务代理
 # ============================================================================
@@ -134,6 +149,11 @@ def multimodal_start_collection(username: str, save_dir: str,
 def multimodal_stop_collection() -> Dict[str, Any]:
     """停止多模态数据采集."""
     return send_command("multimodal.stop")
+
+
+def multimodal_stop_video_only() -> Dict[str, Any]:
+    """停止多模态RGB/深度视频、眼动数据录制和疲劳度推理，但保持脑负荷推理继续运行."""
+    return send_command("multimodal.stop_video_only")
 
 
 def multimodal_cleanup() -> Dict[str, Any]:
@@ -269,9 +289,11 @@ __all__ = [
     "eeg_get_file_paths",
     "eeg_paths",  # 别名
     "eeg_get_snapshot",
+    "eeg_get_diagnostics",
     # Multimodal
     "multimodal_start_collection",
     "multimodal_stop_collection",
+    "multimodal_stop_video_only",
     "multimodal_cleanup",
     "cleanup_collector",  # 别名
     "multimodal_get_snapshot",

@@ -91,6 +91,7 @@ class AVService:
                       input_device_index: Optional[int] = None) -> None:
         with self._preview_lock:
             self._stop_event.clear()
+            self.logger.info(f"📁 设置 session_dir = {session_dir}")
             self._session_dir = session_dir
             os.makedirs(self._session_dir, exist_ok=True)
             self._camera_index = camera_index
@@ -138,6 +139,7 @@ class AVService:
 
             self._segment_index += 1
             base = os.path.join(self._session_dir, "emotion")
+            self.logger.info(f"🎬 开始录制，segment={self._segment_index}, session_dir={self._session_dir}, base={base}")
             os.makedirs(base, exist_ok=True)
             base = os.path.join(base, f"{self._segment_index}")
             self._audio_filepath = base + ".wav"

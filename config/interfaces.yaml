@@ -12,3 +12,4 @@ interfaces:
         - audio.level
         - multimodal.frame
         - multimodal.snapshot
+        - fatigue.assessment.result  # ✅ 疲劳度评估结果（文件模式，SART结束后触发）

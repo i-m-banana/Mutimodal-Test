@@ -29,11 +29,9 @@ class UICommandRouter:
         self.bp_service = BloodPressureService(logger=self.logger.getChild("bp"))
         self.db_service = DatabaseService(logger=self.logger.getChild("db"))
         self.eeg_service = EEGService(bus=bus, logger=self.logger.getChild("eeg"))
-        # 将EEG服务传递给Multimodal服务，以支持EEG数据轮询
         self.multimodal_service = MultimodalService(
             bus=bus,
             logger=self.logger.getChild("multimodal"),
-            eeg_service=self.eeg_service
         )
         self.tts_service = TTSService(logger=self.logger.getChild("tts"))
         self.emotion_service = EmotionService(
@@ -46,6 +44,8 @@ class UICommandRouter:
         if self._running:
             return
         self._subscription = self.bus.subscribe(EventTopic.UI_COMMAND, self._on_command)
+        # 将EEG服务注册到EventBus，供UnifiedInferenceService访问
+        self.bus._eeg_service = self.eeg_service
         self._running = True
         self._log_startup_status()
 
@@ -216,6 +216,8 @@ class UICommandRouter:
             return self.multimodal_service.start(body)
         if action == "multimodal.stop":
             return self.multimodal_service.stop()
+        if action == "multimodal.stop_video_only":
+            return self.multimodal_service.stop_video_only()
         if action == "multimodal.cleanup":
             return self.multimodal_service.cleanup()
         if action == "multimodal.status":
@@ -227,14 +229,16 @@ class UICommandRouter:
         if action == "tts.speak":
             return self.tts_service.speak(body)
         if action == "eeg.start":
-            save_dir = body.get("save_dir", "")
-            return self.eeg_service.start_recording(save_dir)
+            # 直接传递所有body参数，避免重复传递save_dir
+            return self.eeg_service.start_recording(**body)
         if action == "eeg.stop":
             return self.eeg_service.stop_recording()
         if action == "eeg.snapshot":
             return self.eeg_service.get_snapshot()
         if action == "eeg.file_paths":
             return self.eeg_service.get_file_paths()
+        if action == "eeg.diagnostics":
+            return self.eeg_service.diagnostics()
         if action == "emotion.analyze":
             audio_paths = body.get("audio_paths", [])
             video_paths = body.get("video_paths", [])

@@ -47,15 +47,37 @@ from ..qt import (
     QPropertyAnimation,
     pyqtSignal,
     qta,
+    QRegion,
+    QBitmap,
+    QPixmap,
 )
 
 from ..utils.widgets import AudioLevelMeter, ScoreChartWidget
 from ..utils.responsive import scale, scale_size, scale_font
-from ui.widgets.camera_preview import CameraPreviewWidget
+from ...widgets.camera_preview import CameraPreviewWidget
 from ...widgets.schulte_grid import SchulteGridWidget
 from...widgets.score_page import ScorePage
 from ...services.backend_client import get_backend_client
 from ...utils_common.thread_process_manager import get_thread_manager
+
+# ---------------------------------------------------------------------------
+# 自定义圆形标签类
+# ---------------------------------------------------------------------------
+class CircleLabel(QLabel):
+    """完美圆形的数字标签"""
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setAlignment(Qt.AlignCenter)
+    
+    def resizeEvent(self, event):
+        """在尺寸变化时重新应用圆形遮罩"""
+        super().resizeEvent(event)
+        size = min(self.width(), self.height())
+        # 确保是正方形
+        self.setFixedSize(size, size)
+        # 应用圆形遮罩
+        region = QRegion(0, 0, size, size, QRegion.Ellipse)
+        self.setMask(region)
 
 # ---------------------------------------------------------------------------
 # Configuration exports (preserve legacy names for migrated code)
@@ -171,7 +193,18 @@ class TestPage(QWidget):
 
     def _setup_properties(self):
         """初始化测试页面的所有状态变量。"""
-        self.steps = ['朗读录音', '血压测试', '舒特格测试', '分数展示']  # 🔄 改为朗读录音
+        # 🔄 完整的测试流程步骤(包括基线和SART)
+        self.all_stages = ['多模态疲劳检测', '情绪检测', '血压脉搏检测', '舒尔特专注度检测', '分数展示']
+        self.steps = ['情绪检测', '血压脉搏检测', '舒尔特专注度检测', '分数展示']  # 当前test.py内部的步骤
+
+        # � 记录每个阶段的完成状态
+        self.stage_completed = {
+            '多模态疲劳检测': False,  # 包含基线校准+SART实验
+            '情绪检测': False,        # 原朗读录音改名
+            '血压脉搏检测': False,    # 原血压测试改名
+            '舒尔特专注度检测': False  # 原舒尔特测试改名
+        }
+
         self.current_step = 0
         self.current_question = 0  # 保留兼容性，但不再有多个问题
         self.is_recording = False
@@ -180,6 +213,7 @@ class TestPage(QWidget):
         # 音频录制已转移到AVCollector，这里只保留定时器用于更新UI
         self.audio_timer = QTimer(self)
         self.camera_preview: Optional[CameraPreviewWidget] = None
+        # ✅ 两个独立的摄像头widget，都从同一个AV服务获取帧数据
         self.schulte_camera_preview: Optional[CameraPreviewWidget] = None
         # 会话与录制文件管理
         self.session_timestamp = None
@@ -240,6 +274,8 @@ class TestPage(QWidget):
 
         # 环节时间戳记录
         self.part_timestamps = []
+        self._timestamps_file_path = None  # 时间戳文件路径
+        self._text_qa_start_timestamp_recorded = False  # 朗读录音开始时间戳是否已记录
 
         # 测试流程状态标志
         self.test_started = False
@@ -275,12 +311,61 @@ class TestPage(QWidget):
             callback()
         except Exception as e:
             logger.error(f"执行延迟回调时出错: {e}", exc_info=True)
+    
+    def _save_timestamp_immediately(self, call_timestamp: float) -> None:
+        """实时保存时间戳到JSON文件（每次添加时间戳立即写入）
+        
+        Args:
+            call_timestamp: 时间戳（Unix时间戳）
+        """
+        try:
+            # 确保文件路径已初始化
+            if self._timestamps_file_path is None:
+                if not hasattr(self, 'session_dir') or not self.session_dir:
+                    logger.warning("session_dir 未初始化，无法保存时间戳")
+                    return
+                
+                eeg_dir = os.path.join(self.session_dir, 'eeg')
+                os.makedirs(eeg_dir, exist_ok=True)
+                self._timestamps_file_path = os.path.join(eeg_dir, 'part_timestamps.json')
+            
+            # 添加到列表
+            self.part_timestamps.append(call_timestamp)
+            
+            # 格式化所有时间戳
+            call_timestamps_formatted = [
+                {
+                    'timestamp': ts,
+                    'datetime': datetime.fromtimestamp(ts).isoformat(),
+                    'call_index': i
+                }
+                for i, ts in enumerate(self.part_timestamps)
+            ]
+            
+            # 立即写入文件
+            import json
+            with open(self._timestamps_file_path, 'w', encoding='utf-8') as f:
+                json.dump(call_timestamps_formatted, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ 时间戳实时保存: call_index={len(self.part_timestamps)-1}, file={self._timestamps_file_path}")
+            
+        except Exception as e:
+            logger.error(f"实时保存时间戳失败: {e}", exc_info=True)
 
     def _start_multimodal_monitoring(self, *, force: bool = False) -> None:
         """启动或重新启动多模态数据监控（仅内嵌显示，非阻塞）。"""
         try:
             if not HAS_MULTIMODAL:
                 return
+            
+            # ✅ 确保数据库记录已创建（防御性检查）
+            # 如果用户直接跳转到基线/SART阶段而没有先登录，这里会触发创建
+            try:
+                if not self._db_disabled and not self.row_id and not self._row_id_future:
+                    logger.info("📝 开始多模态监控前确保数据库记录已创建...")
+                    self._ensure_db_row()
+            except Exception as e:
+                logger.warning(f"⚠️ 创建数据库记录失败（将在后续尝试）: {e}")
 
             timer_active = False
             try:
@@ -780,6 +865,8 @@ class TestPage(QWidget):
 
     def _init_ui(self):
         """初始化用户界面。"""
+        # 背景渐变由全局样式表(style.qss)设置
+        
         self.main_layout = QVBoxLayout(self)
         
         # 使用固定边距和间距
@@ -969,43 +1056,131 @@ class TestPage(QWidget):
 
     # --- UI 创建辅助方法 ---
     def _create_step_navigator(self):
+        """创建完整的阶段导航栏(包括基线、SART、文本、血压、舒尔特)"""
         container = QWidget()
-        container.setObjectName("card")
+        container.setObjectName("stepNavigator")  # 改用独特的名称避免与全局card样式冲突
+        # 设置圆角属性
+        container.setAttribute(Qt.WA_StyledBackground, True)
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(scale(12), scale(10), scale(12), scale(10))
-        self.step_labels = []
-        self.step_opacity_effects = []
-        for i, step_name in enumerate(self.steps):
-            widget, number_label, text_label = QWidget(), QLabel(str(i + 1)), QLabel(step_name)
-            h_layout = QHBoxLayout(widget)
-            h_layout.setContentsMargins(0, 0, 0, 0)
-            h_layout.setSpacing(scale(4))
-            number_label.setAlignment(Qt.AlignCenter)
-            number_label.setFixedSize(35, 35)
-            h_layout.addWidget(number_label)
-            h_layout.addWidget(text_label)
-            self.step_labels.append((number_label, text_label))
-
-            # 添加透明度效果
-            opacity_effect = QGraphicsOpacityEffect(number_label)
-            number_label.setGraphicsEffect(opacity_effect)
-            self.step_opacity_effects.append(opacity_effect)
-
-            layout.addWidget(widget, 1)
-            if i < len(self.steps) - 1:
+        # 增加上下内边距，让导航栏更高，圆角效果更明显
+        layout.setContentsMargins(scale(12), scale(8), scale(12), scale(8))
+        layout.setSpacing(scale(6))
+        
+        self.stage_buttons = {}  # 保存每个阶段的按钮引用
+        self.step_labels = []  # 兼容旧代码
+        self.step_opacity_effects = []  # 兼容旧代码
+        
+        # 设置渐变背景和圆角（独立样式，不受全局card影响）
+        # 导航栏高度 = scale(8)*2 + scale(45) ≈ 61px
+        # 圆角设置为30px，形成左右半圆效果
+        container.setStyleSheet("""
+            QWidget#stepNavigator {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #7FDBFF,
+                    stop:0.5 #A0E7FF,
+                    stop:1 #C0F0FF
+                );
+                border-radius: 30px;
+                border: none;
+            }
+        """)
+        
+        # 添加右下黑色阴影效果（悬浮效果）- 调整参数避免遮挡圆角
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)  # 减小模糊半径
+        shadow.setXOffset(3)      # 减小偏移
+        shadow.setYOffset(3)
+        shadow.setColor(QColor(0, 0, 0, 80))  # 降低透明度
+        container.setGraphicsEffect(shadow)
+        
+        # 创建所有阶段的导航按钮(包括"分数展示")
+        display_stages = self.all_stages  # 显示所有5个阶段
+        
+        for i, stage_name in enumerate(display_stages):
+            # 创建横向布局容器：数字在左，文字在右
+            stage_widget = QWidget()
+            stage_widget.setStyleSheet("background: transparent;")
+            stage_layout = QHBoxLayout(stage_widget)
+            stage_layout.setContentsMargins(scale(10), scale(4), scale(10), scale(4))
+            stage_layout.setSpacing(scale(8))
+            stage_layout.setAlignment(Qt.AlignCenter)
+            
+            # 数字标签（使用自定义圆形标签）- 老年模式字体更大
+            size = scale(45)
+            number_label = CircleLabel(str(i + 1))
+            number_label.setObjectName("stageNumber")
+            number_label.setFixedSize(size, size)
+            number_label.setStyleSheet("""
+                QLabel#stageNumber {
+                    background-color: rgb(227, 247, 253);
+                    border: none;
+                    font-size: 30px;
+                    font-weight: bold;
+                    color: rgb(77, 171, 201);
+                }
+            """)
+            
+            # 阶段名称标签（老年模式 - 超大字号）
+            name_label = QLabel(stage_name)
+            name_label.setObjectName("stageName")
+            name_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            name_label.setStyleSheet("""
+                QLabel#stageName {
+                    background: transparent;
+                    font-size: 32px;
+                    font-weight: bold;
+                    color: rgb(77, 171, 201);
+                }
+            """)
+            
+            stage_layout.addWidget(number_label, 0, Qt.AlignCenter)
+            stage_layout.addWidget(name_label, 0, Qt.AlignLeft | Qt.AlignVCenter)
+            
+            # 创建可点击按钮（透明覆盖层）
+            stage_btn = QPushButton(stage_widget)
+            stage_btn.setObjectName("stageNavButton")
+            stage_btn.setCursor(Qt.PointingHandCursor)
+            stage_btn.setStyleSheet("""
+                QPushButton#stageNavButton {
+                    background: transparent;
+                    border: none;
+                }
+            """)
+            stage_btn.setGeometry(0, 0, stage_widget.width(), stage_widget.height())
+            
+            # 绑定点击事件
+            stage_btn.clicked.connect(lambda checked, s=stage_name: self._on_stage_nav_clicked(s))
+            
+            # 保存引用（用于后续更新状态）
+            self.stage_buttons[stage_name] = {
+                'widget': stage_widget,
+                'number': number_label,
+                'name': name_label,
+                'button': stage_btn
+            }
+            
+            layout.addWidget(stage_widget, 1)
+            
+            # 添加分隔线(最后一个不加)
+            if i < len(display_stages) - 1:
                 line = QFrame()
                 line.setFrameShape(QFrame.VLine)
-                line.setObjectName("separatorLine")
-                layout.addWidget(line)
+                line.setFixedWidth(2)
+                line.setFixedHeight(scale(45))
+                line.setStyleSheet("background-color: rgba(255, 255, 255, 0.5); border: none;")
+                layout.addWidget(line, 0, Qt.AlignCenter)
+        
         return container
 
     def _create_question_progress_bar(self):
         """创建问题进度条（朗读模式下不显示，返回空容器）"""
         container = QWidget()
-        container.setObjectName("card")
+        # 不设置 card 样式，避免显示白条
+        container.setStyleSheet("background: transparent;")
         container.setVisible(False)  # 🔄 朗读模式下隐藏进度条
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(scale(12), scale(8), scale(12), scale(8))
+        layout.setContentsMargins(0, 0, 0, 0)  # 移除边距
 
         self.question_dots = []  # 保留空列表以避免其他代码报错
         return container
@@ -1028,6 +1203,297 @@ class TestPage(QWidget):
             anim.start()
             self._dot_animations.append(anim)  # 保留引用
 
+    def _on_stage_nav_clicked(self, stage_name: str):
+        """处理阶段导航点击事件 - 支持自由跳转"""
+        logger.info(f"🔘 用户点击导航: {stage_name}")
+        
+        # ✅ 血压测试进行中时，禁止页面跳转
+        if hasattr(self, 'bp_test_running') and self.bp_test_running:
+            QMessageBox.warning(
+                self, 
+                "测试进行中", 
+                "血压测试正在进行中，请等待测试完成后再进行其他操作。"
+            )
+            logger.warning("⚠️ 血压测试进行中，禁止页面跳转")
+            return
+
+        # ✅ 完全自由跳转，无需按顺序完成
+        if stage_name == '多模态疲劳检测':
+            self._jump_to_multimodal_fatigue()
+        elif stage_name == '情绪检测':
+            self._jump_to_emotion()
+        elif stage_name == '血压脉搏检测':
+            self._jump_to_blood_pressure()
+        elif stage_name == '舒尔特专注度检测':
+            self._jump_to_schulte()
+        elif stage_name == '分数展示':
+            self._jump_to_score_display()
+
+    def _jump_to_multimodal_fatigue(self):
+        """跳转到多模态疲劳检测阶段(显示基线校准提示页面)"""
+        logger.info("🔄 跳转到多模态疲劳检测阶段（显示基线提示）")
+        
+        # 重置基线和SART页面状态（防止上次的完成提示残留）
+        try:
+            main_window = self.window()
+            if hasattr(main_window, 'baseline_page'):
+                main_window.baseline_page.reset()
+                logger.info("✅ 已重置基线校准页面状态")
+            if hasattr(main_window, 'sart_page'):
+                main_window.sart_page.reset()
+                logger.info("✅ 已重置SART实验页面状态")
+        except Exception as e:
+            logger.error(f"❌ 重置页面状态失败: {e}")
+        
+        # 显示基线校准提示页面（answer_stack中的第0个widget）
+        self.answer_stack.setCurrentIndex(0)
+        # 隐藏摄像头和按钮（提示页面不需要）
+        self._hide_camera_and_buttons()
+        self._update_stage_nav_status()
+    
+    def _on_start_baseline_clicked(self):
+        """基线校准开始按钮点击处理"""
+        logger.info("🚀 用户点击开始基线校准")
+        # 跳转到全屏基线校准页面
+        try:
+            main_window = self.window()
+            if hasattr(main_window, 'show_baseline_page'):
+                # ✅ 使用 show_baseline_page() 方法，会正确设置 session_info
+                main_window.show_baseline_page()
+                logger.info("✅ 已通过show_baseline_page()跳转到基线校准页面")
+            elif hasattr(main_window, 'stack'):
+                # 后备方案：直接跳转（但可能没有正确设置session_dir）
+                logger.warning("⚠️ show_baseline_page()不存在，使用后备方案")
+                main_window.stack.setCurrentIndex(2)
+                logger.info("✅ 已跳转到基线校准页面（全屏）")
+            else:
+                logger.warning("⚠️ 无法找到主窗口堆栈")
+                QMessageBox.information(self, "提示", "无法启动基线校准")
+        except Exception as e:
+            logger.error(f"❌ 跳转基线校准页面失败: {e}")
+            QMessageBox.warning(self, "错误", f"启动失败：{e}")
+    
+    def _on_start_sart_clicked(self):
+        """SART实验开始按钮点击处理"""
+        logger.info("🚀 用户点击开始SART实验")
+        # 跳转到全屏SART实验页面
+        try:
+            main_window = self.window()
+            if hasattr(main_window, 'show_sart_page'):
+                # ✅ 使用 show_sart_page() 方法，会正确设置 session_info
+                main_window.show_sart_page()
+                logger.info("✅ 已通过show_sart_page()跳转到SART实验页面")
+            elif hasattr(main_window, 'stack'):
+                # 后备方案：直接跳转（但可能没有正确设置session_dir）
+                logger.warning("⚠️ show_sart_page()不存在，使用后备方案")
+                main_window.stack.setCurrentIndex(3)
+                logger.info("✅ 已跳转到SART实验页面（全屏）")
+            else:
+                logger.warning("⚠️ 无法找到主窗口堆栈")
+                QMessageBox.information(self, "提示", "无法启动SART实验")
+        except Exception as e:
+            logger.error(f"❌ 跳转SART页面失败: {e}")
+            QMessageBox.warning(self, "错误", f"启动失败：{e}")
+    
+    def _jump_to_emotion(self):
+        """跳转到情绪检测阶段(原朗读录音阶段)"""
+        logger.info("🔄 跳转到情绪检测阶段")
+        
+        # 🔧 修复布局问题：从舒尔特页面跳转时，先切换到血压页面（隐藏摄像头）
+        # 然后再跳转到情绪检测页面，避免布局被拉宽
+        if self.current_step == 2:  # 如果当前在舒尔特页面
+            logger.debug("从舒尔特页面跳转，先重置布局")
+            # 先切换到血压页面（step=1），隐藏舒尔特摄像头
+            self.current_step = 1
+            self.update_step_ui()
+            # 使用极短的延迟（仅10ms）让布局重置
+            QTimer.singleShot(10, lambda: self._complete_jump_to_emotion())
+        else:
+            # 从其他页面跳转，直接切换
+            self._complete_jump_to_emotion()
+    
+    def _complete_jump_to_emotion(self):
+        """完成跳转到情绪检测（内部方法）"""
+        self.current_step = 0  # 情绪检测是第一个步骤
+        self.update_step_ui()  # 内部会调用_update_stage_nav_status()
+    
+    def _jump_to_blood_pressure(self):
+        """跳转到血压脉搏检测阶段"""
+        logger.info("🔄 跳转到血压脉搏检测阶段")
+        
+        # ✅ 重置血压测试状态（确保每次进入都是干净的状态）
+        try:
+            # 停止正在进行的测试（如果有）
+            if hasattr(self, 'bp_test_running') and self.bp_test_running:
+                self._stop_bp_test()
+            
+            # 重置结果数据
+            self.bp_results = {
+                'systolic': None,
+                'diastolic': None,
+                'pulse': None,
+            }
+            
+            # 重置UI控件状态
+            if hasattr(self, 'bp_start_button'):
+                self.bp_start_button.setText("开始测试")
+                self.bp_start_button.setObjectName("successButton")
+                self.bp_start_button.style().unpolish(self.bp_start_button)
+                self.bp_start_button.style().polish(self.bp_start_button)
+            
+            if hasattr(self, 'bp_progress_label'):
+                self.bp_progress_label.setText("等待开始测试...")
+            
+            if hasattr(self, 'bp_progress_circle'):
+                self.bp_progress_circle.setText("0%")
+            
+            # 隐藏结果区域，显示测试控制区域
+            if hasattr(self, 'result_container'):
+                self.result_container.setVisible(False)
+            if hasattr(self, 'bp_status_container'):
+                self.bp_status_container.setVisible(True)
+            if hasattr(self, 'bp_control_container'):
+                self.bp_control_container.setVisible(True)
+            
+            # 重置卡片内按钮状态
+            if hasattr(self, 'bp_next_button'):
+                self.bp_next_button.setText("请先完成血压测试")
+                self.bp_next_button.setEnabled(False)
+            
+            logger.info("✅ 血压测试状态已重置")
+        except Exception as e:
+            logger.error(f"❌ 重置血压测试状态失败: {e}")
+        
+        self.current_step = 1  # 血压脉搏检测是第二个步骤
+        self.update_step_ui()  # 内部会调用_update_stage_nav_status()
+    
+    def _jump_to_schulte(self):
+        """跳转到舒尔特专注度检测阶段"""
+        logger.info("🔄 跳转到舒尔特专注度检测阶段")
+        
+        # 每次进入都重新初始化舒尔特widget（避免状态卡住）
+        self._reinit_schulte_widget()
+        
+        self.current_step = 2  # 舒尔特专注度检测是第三个步骤
+        self.update_step_ui()  # 内部会调用_update_stage_nav_status()
+    
+    def _jump_to_score_display(self):
+        """跳转到分数展示阶段"""
+        logger.info("🔄 跳转到分数展示阶段")
+        self.current_step = 3  # 分数展示是第四个步骤
+        self.update_step_ui()  # 内部会调用_update_stage_nav_status()
+    
+    def _hide_camera_and_buttons(self):
+        """隐藏摄像头和底部按钮（用于提示页面）"""
+        if hasattr(self, 'camera_widget'):
+            self.camera_widget.setVisible(False)
+        if hasattr(self, 'schulte_camera_widget'):
+            self.schulte_camera_widget.setVisible(False)
+        if hasattr(self, 'btn_next'):
+            self.btn_next.setVisible(False)
+        if hasattr(self, 'btn_finish'):
+            self.btn_finish.setVisible(False)
+
+    def _update_stage_nav_status(self):
+        """更新导航栏的视觉状态"""
+        # 根据answer_stack的当前索引判断当前阶段
+        current_index = self.answer_stack.currentIndex()
+
+        # answer_stack索引映射到全局阶段
+        index_to_stage = {
+            0: '多模态疲劳检测',    # 基线提示页面
+            1: '多模态疲劳检测',    # SART提示页面
+            2: '情绪检测',          # 朗读录音
+            3: '血压脉搏检测',      # 血压测试
+            4: '舒尔特专注度检测',  # 舒尔特测试
+            5: None,                # 信息确认页
+            6: '分数展示'           # 分数页面
+        }
+
+        current_stage = index_to_stage.get(current_index, None)
+
+        for stage_name, components in self.stage_buttons.items():
+            number_label = components['number']
+            name_label = components['name']
+
+            is_current = (stage_name == current_stage)
+            is_completed = self.stage_completed.get(stage_name, False)
+
+            # 根据状态设置样式（圆形无边框设计）
+            if is_current:
+                # 当前阶段：水绿色填充圆圈，白色数字
+                number_label.setStyleSheet("""
+                    QLabel#stageNumber {
+                        background-color: rgb(77, 171, 201);
+                        border: none;
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: white;
+                    }
+                """)
+                name_label.setStyleSheet("""
+                    QLabel#stageName {
+                        background: transparent;
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: rgb(77, 171, 201);
+                    }
+                """)
+            else:
+                # 其他阶段（无论是否完成）：浅青绿色圆圈，水绿色数字
+                # 完成后只有文字变绿，数字底色保持浅青绿色
+                number_label.setStyleSheet("""
+                    QLabel#stageNumber {
+                        background-color: rgb(227, 247, 253);
+                        border: none;
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: rgb(77, 171, 201);
+                    }
+                """)
+
+                # 文字颜色：已完成的变绿色，未开始的保持水绿色
+                if is_completed:
+                    name_label.setStyleSheet("""
+                        QLabel#stageName {
+                            background: transparent;
+                            font-size: 24px;
+                            font-weight: bold;
+                            color: #4CAF50;
+                        }
+                    """)
+                else:
+                    name_label.setStyleSheet("""
+                        QLabel#stageName {
+                            background: transparent;
+                            font-size: 24px;
+                            font-weight: bold;
+                            color: rgb(77, 171, 201);
+                        }
+                    """)
+
+    def mark_stage_completed(self, stage_name: str):
+        """标记阶段为已完成
+
+        Args:
+            stage_name: 阶段名称，支持新旧命名自动映射
+        """
+        # 🔄 兼容旧命名，自动映射到新命名
+        name_mapping = {
+            '基线校准': '多模态疲劳检测',
+            'SART实验': '多模态疲劳检测',
+            '朗读录音': '情绪检测',
+            '血压测试': '血压脉搏检测',
+            '舒尔特测试': '舒尔特专注度检测'
+        }
+
+        # 如果是旧命名，映射到新命名
+        mapped_stage = name_mapping.get(stage_name, stage_name)
+
+        self.stage_completed[mapped_stage] = True
+        logger.info(f"✅ 阶段已完成: {stage_name} → {mapped_stage}")
+        self._update_stage_nav_status()
+
     def _create_main_content_area(self):
         container = QWidget()
         self.content_layout = QHBoxLayout(container)
@@ -1036,14 +1502,14 @@ class TestPage(QWidget):
         
         # 创建左侧摄像头视图（内嵌模式）
         self.camera_widget = self._create_camera_view()
-        self.content_layout.addWidget(self.camera_widget, 0)
-        
+        # 使用最大宽度限制而不是固定宽度，这样隐藏时不占空间
+        cam_width = scale_size(560, 420)[0]  # 获取摄像头宽度
+        self.camera_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.content_layout.addWidget(self.camera_widget, 1)  # stretch factor = 0
+
         self.answer_stack = QStackedWidget()
         self._create_answer_area_widgets()
-        self.content_layout.addWidget(self.answer_stack, 1)
-
-        self.score_page = ScorePage(username=self.current_user)
-        self.answer_stack.addWidget(self.score_page)
+        self.content_layout.addWidget(self.answer_stack, 1)  # stretch factor = 1
 
         return container
 
@@ -1056,8 +1522,8 @@ class TestPage(QWidget):
 
         vlayout.addStretch(1)
 
-        # 摄像头画面 - 缩小尺寸以匹配右侧高度
-        cam_width, cam_height = scale_size(560, 420)
+        # 摄像头画面 - 统一尺寸与舒尔特页面保持一致
+        cam_width, cam_height = scale_size(620, 480)
         self.camera_preview = CameraPreviewWidget(cam_width, cam_height, placeholder_text="摄像头画面加载中...")
         self.camera_preview.label.setObjectName("cameraView")
         self.camera_preview.label.setStyleSheet(
@@ -1079,32 +1545,40 @@ class TestPage(QWidget):
         self.fatigue_info_label.setVisible(False)  # 隐藏不显示
         margin = scale(6)
 
-        # ✅ 脑负荷信息容器 - 保留显示
+        # ✅ 脑负荷信息容器 - 模仿舒尔特右边框样式(白色背景+底部阴影)
         brain_load_container = QFrame()
         brain_load_container.setObjectName("brainLoadContainer")
         brain_load_container.setFixedWidth(cam_width)
         brain_load_container.setStyleSheet("""
                   QFrame#brainLoadContainer {
-                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      background-color: #ffffff;
                       border: 2px solid #e0e0e0;
                       border-radius: 10px;
                       padding: 10px;
                   }
               """)
+        
+        # 添加底部阴影效果(模仿舒尔特框)
+        brain_load_shadow = QGraphicsDropShadowEffect()
+        brain_load_shadow.setBlurRadius(15)
+        brain_load_shadow.setXOffset(0)
+        brain_load_shadow.setYOffset(5)  # 底部阴影
+        brain_load_shadow.setColor(QColor(0, 0, 0, 60))
+        brain_load_container.setGraphicsEffect(brain_load_shadow)
 
         brain_load_layout = QVBoxLayout(brain_load_container)
         brain_load_layout.setSpacing(scale(6))
         brain_load_layout.setContentsMargins(margin, margin, margin, margin)
 
-        # 脑负荷标题
+        # 脑负荷标题（统一使用超大字号，与舒尔特页面一致）
         brain_load_title_label = QLabel("🧠 脑负荷监测")
-        brain_load_title_font = QFont()
-        brain_load_title_font.setPointSize(scale_font(11))
-        brain_load_title_font.setBold(True)
-        brain_load_title_label.setFont(brain_load_title_font)
         brain_load_title_label.setAlignment(Qt.AlignCenter)
-        brain_load_title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
+        brain_load_title_label.setStyleSheet("""
+            color: #2c3e50;
+            padding: 8px;
+            font-size: 24px;
+            font-weight: bold;
+        """)
         brain_load_layout.addWidget(brain_load_title_label)
 
         # 分隔线
@@ -1114,19 +1588,17 @@ class TestPage(QWidget):
         brain_load_separator.setStyleSheet("background-color: #bdc3c7;")
         brain_load_layout.addWidget(brain_load_separator)
 
-        # 脑负荷显示（大号）
+        # 脑负荷显示（超大号）
         self.brain_load_info_label = QLabel("脑负荷: --")
-        brain_load_info_font = QFont()
-        brain_load_info_font.setPointSize(scale_font(13))
-        brain_load_info_font.setBold(True)
-        self.brain_load_info_label.setFont(brain_load_info_font)
         self.brain_load_info_label.setAlignment(Qt.AlignCenter)
         self.brain_load_info_label.setStyleSheet("""
                   QLabel {
                       color: #7f8c8d;
-                      padding: 8px;
+                      padding: 12px;
                       background-color: #ecf0f1;
                       border-radius: 8px;
+                      font-size: 22px;
+                      font-weight: bold;
                   }
               """)
         brain_load_layout.addWidget(self.brain_load_info_label)
@@ -1137,7 +1609,7 @@ class TestPage(QWidget):
         tip_font.setPointSize(scale_font(8))
         tip_label.setFont(tip_font)
         tip_label.setAlignment(Qt.AlignCenter)
-        tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
+        tip_label.setStyleSheet("color: #95a5a6; padding: 8px;")
         brain_load_layout.addWidget(tip_label)
 
         vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
@@ -1155,18 +1627,17 @@ class TestPage(QWidget):
         return outer_widget
 
     def _create_camera_view_for_schulte(self):
-        """为舒尔特页面创建摄像头视图（与第一页保持一致）"""
+        """为舒尔特页面创建摄像头视图（与情绪检测页面完全一致，独立widget但共享AV数据源）"""
         inner_widget = QWidget()
         vlayout = QVBoxLayout(inner_widget)
         vlayout.setSpacing(scale(8))
         vlayout.setContentsMargins(0, 0, 0, 0)
 
-        # 顶部拉伸
         vlayout.addStretch(1)
 
-        # 摄像头画面（与第一页相同尺寸）- 缩小尺寸以匹配右侧高度
+        # 摄像头画面 - 与情绪检测页面使用完全相同的尺寸和样式
         cam_width, cam_height = scale_size(560, 420)
-        self.schulte_camera_preview = CameraPreviewWidget(cam_width, cam_height, placeholder_text="摄像头画面")
+        self.schulte_camera_preview = CameraPreviewWidget(cam_width, cam_height, placeholder_text="摄像头画面加载中...")
         self.schulte_camera_preview.label.setObjectName("schulteCameraView")
         self.schulte_camera_preview.label.setStyleSheet(
             """
@@ -1186,33 +1657,41 @@ class TestPage(QWidget):
         self.schulte_fatigue_label = QLabel("--")
         self.schulte_fatigue_label.hide()  # 隐藏显示
 
-        # 脑负荷信息容器 - 与疲劳度信息容器相同
+        # 脑负荷信息容器 - 与情绪检测页面完全一致
         brain_load_container = QFrame()
         brain_load_container.setObjectName("schulteBrainLoadContainer")
         brain_load_container.setFixedWidth(cam_width)
         brain_load_container.setStyleSheet("""
                   QFrame#schulteBrainLoadContainer {
-                      background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                          stop:0 #ffffff, stop:1 #f8f9fa);
+                      background-color: #ffffff;
                       border: 2px solid #e0e0e0;
                       border-radius: 10px;
                       padding: 10px;
                   }
               """)
+        
+        # 添加底部阴影效果
+        schulte_brain_shadow = QGraphicsDropShadowEffect()
+        schulte_brain_shadow.setBlurRadius(15)
+        schulte_brain_shadow.setXOffset(0)
+        schulte_brain_shadow.setYOffset(5)  # 底部阴影
+        schulte_brain_shadow.setColor(QColor(0, 0, 0, 60))
+        brain_load_container.setGraphicsEffect(schulte_brain_shadow)
 
         brain_load_layout = QVBoxLayout(brain_load_container)
         brain_load_layout.setSpacing(scale(6))
         margin = scale(6)
         brain_load_layout.setContentsMargins(margin, margin, margin, margin)
 
-        # 脑负荷标题
+        # 脑负荷标题（与情绪检测页面完全一致）
         brain_load_title_label = QLabel("🧠 脑负荷监测")
-        brain_load_title_font = QFont()
-        brain_load_title_font.setPointSize(scale_font(11))
-        brain_load_title_font.setBold(True)
-        brain_load_title_label.setFont(brain_load_title_font)
         brain_load_title_label.setAlignment(Qt.AlignCenter)
-        brain_load_title_label.setStyleSheet("color: #2c3e50; padding: 4px;")
+        brain_load_title_label.setStyleSheet("""
+            color: #2c3e50;
+            padding: 8px;
+            font-size: 24px;
+            font-weight: bold;
+        """)
         brain_load_layout.addWidget(brain_load_title_label)
 
         # 分隔线
@@ -1222,33 +1701,31 @@ class TestPage(QWidget):
         brain_load_separator.setStyleSheet("background-color: #bdc3c7;")
         brain_load_layout.addWidget(brain_load_separator)
 
-        # 脑负荷显示（大号）
+        # 脑负荷显示（与情绪检测页面完全一致）
         self.schulte_brain_load_label = QLabel("脑负荷: --")
-        brain_load_info_font = QFont()
-        brain_load_info_font.setPointSize(scale_font(13))
-        brain_load_info_font.setBold(True)
-        self.schulte_brain_load_label.setFont(brain_load_info_font)
         self.schulte_brain_load_label.setAlignment(Qt.AlignCenter)
         self.schulte_brain_load_label.setStyleSheet("""
                   QLabel {
                       color: #7f8c8d;
-                      padding: 8px;
+                      padding: 12px;
                       background-color: #ecf0f1;
                       border-radius: 8px;
+                      font-size: 22px;
+                      font-weight: bold;
                   }
               """)
         brain_load_layout.addWidget(self.schulte_brain_load_label)
 
-        # 提示信息
+        # 提示信息（与情绪检测页面完全一致）
         tip_label = QLabel("实时监测中...")
         tip_font = QFont()
         tip_font.setPointSize(scale_font(8))
         tip_label.setFont(tip_font)
         tip_label.setAlignment(Qt.AlignCenter)
-        tip_label.setStyleSheet("color: #95a5a6; padding: 4px;")
+        tip_label.setStyleSheet("color: #95a5a6; padding: 8px;")
         brain_load_layout.addWidget(tip_label)
 
-        # 将脑负荷容器添加到布局(疲劳度已隐藏)
+        # 将脑负荷容器添加到布局
         vlayout.addWidget(brain_load_container, 0, Qt.AlignCenter)
 
         vlayout.addStretch(1)
@@ -1263,61 +1740,301 @@ class TestPage(QWidget):
 
         return outer_widget
 
-    def _create_answer_area_widgets(self):
-        # 🔄 朗读录音页面（改为显示完整文本供用户朗读）
-        page_qna = QWidget()
-        layout_qna = QVBoxLayout(page_qna)
-        layout_qna.setAlignment(Qt.AlignCenter)  # 改为垂直居中，与左侧摄像头对齐
-        layout_qna.setSpacing(scale(15))
-        layout_qna.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
+    def _create_baseline_prompt_page(self):
+        """创建基线校准提示页面（带白色圆角外框）"""
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
+        page_layout.setSpacing(scale(12))
+
+        # 创建白色圆角矩形容器（外框 - 增加圆角和阴影）
+        content_frame = QFrame()
+        content_frame.setObjectName("baselinePromptFrame")
+        content_frame.setStyleSheet("""
+            QFrame#sartPromptFrame {
+                background-image: url("ui/assets/sart");
+                background-repeat: no-repeat;
+                background-position: center;
+                background-origin: content;
+                background-size: contain;
+                border-radius: 60px;
+            }
+        """)
+
+        content_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # 添加底部阴影效果
+        baseline_shadow = QGraphicsDropShadowEffect()
+        baseline_shadow.setBlurRadius(20)
+        baseline_shadow.setXOffset(0)
+        baseline_shadow.setYOffset(8)
+        baseline_shadow.setColor(QColor(0, 0, 0, 80))
+        content_frame.setGraphicsEffect(baseline_shadow)
+
+        # 容器内部布局
+        layout = QVBoxLayout(content_frame)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(scale(30))
+        layout.setContentsMargins(scale(40), scale(32), scale(40), scale(32))
 
         # 添加顶部弹性空间
-        layout_qna.addStretch(1)
+        layout.addStretch(1)
 
-        # 标题：朗读文本
+        # 标题（更大字号，确保单行显示）✅
+        title_label = QLabel("请注视屏幕中央的十字，进行30s静息基线采集。")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setWordWrap(False)  # ✅ 禁止换行
+        title_label.setStyleSheet("""
+            color: #2c3e50;
+            font-size: 50px;
+            font-weight: bold;
+            padding: 20px;
+        """)  # ✅ 从32px增加到40px
+        layout.addWidget(title_label)
+
+        # 添加中间弹性空间
+        layout.addStretch(2)
+
+        # 十字符号（超大号）
+        cross_label = QLabel("+")
+        cross_label.setAlignment(Qt.AlignCenter)
+        cross_label.setStyleSheet("""
+            color: #000000;
+            font-size: 300px;
+            font-weight: bold;
+        """)
+        layout.addWidget(cross_label)
+
+        # 添加底部弹性空间
+        layout.addStretch(2)
+
+        # 开始按钮（尺寸加大，与校准页面统一）✅
+        self.btn_start_baseline = QPushButton("点击开始")
+        self.btn_start_baseline.setObjectName("primaryButton")
+        self.btn_start_baseline.setFixedSize(scale(280), scale(80))  # ✅ 从240×60增加到280×80
+        self.btn_start_baseline.setCursor(Qt.PointingHandCursor)
+        self.btn_start_baseline.setStyleSheet("""
+            QPushButton#primaryButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 32px;
+                font-weight: bold;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#primaryButton:pressed {
+                background-color: #2E86C1;
+            }
+        """)  # ✅ 字体从24px增加到32px，圆角从15px增加到20px
+        self.btn_start_baseline.clicked.connect(self._on_start_baseline_clicked)
+        layout.addWidget(self.btn_start_baseline, 0, Qt.AlignCenter)
+
+        # 添加底部一点空间
+        layout.addStretch(1)
+
+        page_layout.addWidget(content_frame, 1)
+        return page
+
+    def _create_sart_prompt_page(self):
+        """创建SART实验提示页面（用整张图片替代中间内容）"""
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(scale(16), scale(16), scale(16), scale(16))
+        page_layout.setSpacing(scale(12))
+
+        # 创建白色圆角矩形容器
+        content_frame = QFrame()
+        content_frame.setObjectName("sartPromptFrame")
+        content_frame.setStyleSheet("""
+            QFrame#sartPromptFrame {
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 60px;
+            }
+        """)
+
+        # 添加阴影
+        sart_shadow = QGraphicsDropShadowEffect()
+        sart_shadow.setBlurRadius(20)
+        sart_shadow.setXOffset(0)
+        sart_shadow.setYOffset(8)
+        sart_shadow.setColor(QColor(0, 0, 0, 80))
+        content_frame.setGraphicsEffect(sart_shadow)
+
+        # 主布局
+        layout = QVBoxLayout(content_frame)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(scale(30))
+        layout.setContentsMargins(scale(60), scale(40), scale(60), scale(40))
+
+        # 顶部标题（字体更大、单行显示）✅
+        title_label = QLabel("基线校准结束，点击按钮开始多模态疲劳检测。")
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setWordWrap(False)  # 禁止换行
+        title_label.setStyleSheet("""
+            color: #2c3e50;
+            font-size: 42px;
+            font-weight: bold;
+            padding: 20px;
+        """)
+        layout.addStretch(1)
+        layout.addWidget(title_label)
+        layout.addStretch(1)
+
+        # ✅ 中间图片部分
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setStyleSheet("border: none; background-color: transparent;")
+
+        image_path = str(config.BASE_DIR / "assets" / "sart.png")
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # 按比例缩放，尽量填满中间区域（保留边距）
+                scaled_pixmap = pixmap.scaled(
+                    scale(1000), scale(600),  # 根据你的窗口大小调整这两个值
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                image_label.setPixmap(scaled_pixmap)
+            else:
+                image_label.setText("⚠️ 图片加载失败")
+                image_label.setStyleSheet("font-size: 24px; color: #e74c3c;")
+        else:
+            image_label.setText("⚠️ 未找到图片: ui/assets/sart")
+            image_label.setStyleSheet("font-size: 24px; color: #e74c3c;")
+
+        # 添加大图并让它扩展空间
+        layout.addStretch(1)
+        layout.addWidget(image_label, 1, Qt.AlignCenter)
+        layout.addStretch(1)
+
+        # ✅ 大按钮部分（与其他页面统一）
+        self.btn_start_sart = QPushButton("我已了解规则，开始测试")
+        self.btn_start_sart.setObjectName("sartPrimaryButton")
+        self.btn_start_sart.setFixedSize(scale(500), scale(330))  # 大按钮
+        self.btn_start_sart.setCursor(Qt.PointingHandCursor)
+        self.btn_start_sart.setStyleSheet("""
+            QPushButton#sartPrimaryButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 25px;
+                font-size: 32px;
+                font-weight: bold;
+            }
+            QPushButton#sartPrimaryButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#sartPrimaryButton:pressed {
+                background-color: #2E86C1;
+            }
+        """)
+        self.btn_start_sart.clicked.connect(self._on_start_sart_clicked)
+        layout.addWidget(self.btn_start_sart, 0, Qt.AlignCenter)
+        layout.addStretch(1)
+
+        page_layout.addWidget(content_frame)
+        return page
+
+    def _create_answer_area_widgets(self):
+        # 🆕 基线校准提示页面
+        page_baseline_prompt = self._create_baseline_prompt_page()
+        self.answer_stack.addWidget(page_baseline_prompt)
+        
+        # 🆕 SART实验提示页面
+        page_sart_prompt = self._create_sart_prompt_page()
+        self.answer_stack.addWidget(page_sart_prompt)
+        
+        # 🔄 朗读录音页面 - 使用卡片容器(模仿舒尔特右边框)
+        page_qna = QWidget()
+        # ✅ 设置透明背景，与舒尔特页面保持一致
+        page_qna.setStyleSheet("QWidget { background-color: transparent; }")
+        layout_qna = QVBoxLayout(page_qna)
+        layout_qna.setAlignment(Qt.AlignCenter)
+        layout_qna.setSpacing(scale(20))
+        layout_qna.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
+
+        # 创建白色卡片容器(模仿舒尔特右边框样式)
+        card_container = QFrame()
+        card_container.setObjectName("emotionCardContainer")
+        # 🔧 修复：设置最大宽度限制，防止被内容撑得过宽
+        card_container.setMaximumWidth(scale(1200))  # 限制最大宽度
+        card_container.setStyleSheet("""
+            QFrame#emotionCardContainer {
+                background-color: #ffffff;
+                border: 2px solid #e0e0e0;
+                border-radius: 25px;
+                padding: 20px;
+            }
+        """)
+        
+        # 添加底部阴影效果(模仿舒尔特框)
+        card_shadow = QGraphicsDropShadowEffect()
+        card_shadow.setBlurRadius(15)
+        card_shadow.setXOffset(0)
+        card_shadow.setYOffset(5)
+        card_shadow.setColor(QColor(0, 0, 0, 60))
+        card_container.setGraphicsEffect(card_shadow)
+        
+        card_layout = QVBoxLayout(card_container)
+        card_layout.setSpacing(scale(20))
+        card_layout.setContentsMargins(scale(15), scale(15), scale(15), scale(15))
+
+        # 标题：朗读文本(老年模式 - 超大字体)
         title_label = QLabel("📖 请朗读以下文本")
         title_label.setObjectName("h1")
         title_label.setAlignment(Qt.AlignCenter)
         title_font = QFont()
-        title_font.setPointSize(16)
+        title_font.setPointSize(80)  # ✅ 从32增大到80，更适合老年人
         title_font.setBold(True)
         title_label.setFont(title_font)
-        layout_qna.addWidget(title_label)
+        card_layout.addWidget(title_label)
 
-        # 文本显示区域（可滚动的文本框）- 调整尺寸
+        # 文本显示区域（可滚动的文本框）
         self.lbl_reading_text = QTextEdit()
         self.lbl_reading_text.setReadOnly(True)
         self.lbl_reading_text.setObjectName("readingTextDisplay")
-        self.lbl_reading_text.setFixedWidth(scale(700))  # 增加宽度
-        self.lbl_reading_text.setMinimumHeight(scale(320))  # 增加最小高度
-        self.lbl_reading_text.setMaximumHeight(scale(420))  # 增加最大高度
+        self.lbl_reading_text.setMinimumWidth(scale(900))
+        self.lbl_reading_text.setMinimumHeight(scale(500))  # ✅ 从300增加到350，给更大字体更多空间
+        self.lbl_reading_text.setMaximumHeight(scale(500))  # ✅ 从400增加到500
         
-        # 设置文本样式
+        # 设置文本样式(老年模式 - 更大字体)
         text_font = QFont()
-        text_font.setPointSize(16)  # 增大字体
+        text_font.setPointSize(28)  # ✅ 从20增大到28，显著提升可读性
         self.lbl_reading_text.setFont(text_font)
         self.lbl_reading_text.setStyleSheet("""
             QTextEdit#readingTextDisplay {
                 background-color: #f8f9fa;
                 border: 2px solid #dee2e6;
                 border-radius: 10px;
-                padding: 15px;
-                line-height: 1.8;
+                padding: 38px;  
+                line-height: 1.4;  
                 color: #212529;
+                font-size: 27px;
             }
         """)
         
-        # 设置文本内容并垂直居中（将在 start_test 或 update_step_ui 中填充）
+        # 设置文本内容
         self.lbl_reading_text.setPlainText(self.reading_text_content)
-        self.lbl_reading_text.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)  # 垂直居中，水平左对齐
+        self.lbl_reading_text.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         
-        layout_qna.addWidget(self.lbl_reading_text, 0, Qt.AlignCenter)
+        card_layout.addWidget(self.lbl_reading_text, 0, Qt.AlignCenter)
 
-        # 麦克风按钮和音量显示的容器
+        # 控制区域 - 横向布局(左:麦克风+音量条, 右:完成录音按钮)
         control_container = QWidget()
-        control_layout = QVBoxLayout(control_container)
-        control_layout.setSpacing(scale(15))
+        control_layout = QHBoxLayout(control_container)
+        control_layout.setSpacing(scale(40))
         control_layout.setAlignment(Qt.AlignCenter)
+        
+        # 左侧:麦克风按钮、状态和音量条(垂直排列)
+        left_control = QWidget()
+        left_layout = QVBoxLayout(left_control)
+        left_layout.setSpacing(scale(15))
+        left_layout.setAlignment(Qt.AlignCenter)
 
         # 麦克风按钮
         self.btn_mic = QPushButton()
@@ -1327,20 +2044,66 @@ class TestPage(QWidget):
         self.btn_mic.setCursor(Qt.PointingHandCursor)
         self.btn_mic.setIcon(qta.icon('fa5s.microphone-alt', color='white'))
 
-        # 音量显示
-        self.audio_level = AudioLevelMeter()
-        self.audio_level.setFixedWidth(350)
-
-        # 录音状态标签
+        # 录音状态标签(老年模式 - 更大字体)
         self.lbl_recording_status = QLabel("点击录音按钮开始朗读并录音")
         self.lbl_recording_status.setObjectName("statusLabel")
         self.lbl_recording_status.setAlignment(Qt.AlignCenter)
+        status_font = QFont()
+        status_font.setPointSize(16)
+        self.lbl_recording_status.setFont(status_font)
+        
+        # 音量显示(放在麦克风下面)
+        self.audio_level = AudioLevelMeter()
+        self.audio_level.setFixedWidth(350)
 
-        control_layout.addWidget(self.btn_mic, 0, Qt.AlignCenter)
-        control_layout.addWidget(self.audio_level, 0, Qt.AlignCenter)
-        control_layout.addWidget(self.lbl_recording_status, 0, Qt.AlignCenter)
+        left_layout.addWidget(self.btn_mic, 0, Qt.AlignCenter)
+        left_layout.addWidget(self.lbl_recording_status, 0, Qt.AlignCenter)
+        left_layout.addWidget(self.audio_level, 0, Qt.AlignCenter)
+        
+        # 右侧:完成录音按钮(变大,与左侧对齐)
+        right_control = QWidget()
+        right_layout = QVBoxLayout(right_control)
+        right_layout.setSpacing(scale(10))
+        right_layout.setAlignment(Qt.AlignCenter)
+        
+        # 完成录音按钮(增大尺寸)
+        self.btn_next = QPushButton("完成录音")
+        self.btn_next.setObjectName("successButton")
+        self.btn_next.setIcon(qta.icon('fa5s.arrow-right'))
+        self.btn_next.setFixedSize(scale(280), scale(90))  # 从200x70增加到280x90,更大更醒目
+        self.btn_next.setStyleSheet("""
+            QPushButton#successButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 28px;
+                font-weight: bold;
+            }
+            QPushButton#successButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton#successButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton#successButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        # ❌ 不要在这里连接信号！已在 _connect_signals() 中连接
+        # self.btn_next.clicked.connect(self._next_step_or_question)
+        self.btn_next.setEnabled(False)
+        right_layout.addWidget(self.btn_next, 0, Qt.AlignCenter)
 
-        layout_qna.addWidget(control_container)
+        control_layout.addWidget(left_control)
+        control_layout.addWidget(right_control)
+        
+        card_layout.addWidget(control_container)
+        
+        # 将卡片添加到主页面
+        layout_qna.addStretch(1)
+        layout_qna.addWidget(card_container, 0, Qt.AlignCenter)
         layout_qna.addStretch(1)
 
         self.answer_stack.addWidget(page_qna)
@@ -1350,16 +2113,16 @@ class TestPage(QWidget):
         self.answer_stack.addWidget(page_blood_pressure)
 
         # 舒特格测试页面
-        page_schulte = self._create_schulte_page()
-        self.answer_stack.addWidget(page_schulte)
+        self.page_schulte = self._create_schulte_page()
+        self.answer_stack.addWidget(self.page_schulte)
 
         # 信息确认页面
         page_confirm = self._create_info_page()
         self.answer_stack.addWidget(page_confirm)
 
-        # 分数展示页面
-        page_score = self._create_score_page()
-        self.answer_stack.addWidget(page_score)
+        # 分数展示页面（使用ScorePage组件）
+        self.score_page = ScorePage(username=self.current_user)
+        self.answer_stack.addWidget(self.score_page)
 
     def _create_info_page(self):
         page = QWidget()
@@ -1380,125 +2143,256 @@ class TestPage(QWidget):
         return page
 
     def _create_blood_pressure_page(self):
-        """创建血压脉搏测试页面"""
+        """创建血压脉搏测试页面(卡片布局 - 左图右文在一个卡片中)"""
         page = QWidget()
-        layout = QVBoxLayout(page)
+        page_layout = QVBoxLayout(page)
+        page_layout.setAlignment(Qt.AlignCenter)
+        page_layout.setContentsMargins(scale(30), scale(30), scale(30), scale(30))
+        
+        # 创建白色卡片容器(模仿舒尔特右边框样式)
+        card_container = QFrame()
+        card_container.setObjectName("bpCardContainer")
+        # 🔧 修复：设置固定大小，防止内容变化导致卡片尺寸变化
+        card_container.setFixedSize(scale(1200), scale(600))  # 固定宽度1200，高度600
+        card_container.setStyleSheet("""
+            QFrame#bpCardContainer {
+                background-color: #ffffff;
+                border: 2px solid #e0e0e0;
+                border-radius: 25px;
+                padding: 30px;
+            }
+        """)
+        
+        # 添加底部阴影效果
+        card_shadow = QGraphicsDropShadowEffect()
+        card_shadow.setBlurRadius(15)
+        card_shadow.setXOffset(0)
+        card_shadow.setYOffset(5)
+        card_shadow.setColor(QColor(0, 0, 0, 60))
+        card_container.setGraphicsEffect(card_shadow)
+        
+        # 卡片内的横向布局(左图右文)
+        main_layout = QHBoxLayout(card_container)
+        main_layout.setSpacing(scale(25))  # 紧凑间距
+        main_layout.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
+        
+        # 左侧:血压仪图片提示（固定高度）
+        left_widget = QWidget()
+        left_widget.setFixedWidth(scale(450))  # 固定宽度
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setAlignment(Qt.AlignCenter)
+        left_layout.setSpacing(scale(15))
+        
+        # 图片标签
+        image_label = QLabel()
+        image_label.setObjectName("bpImageLabel")
+        image_label.setAlignment(Qt.AlignCenter)
+        
+        # 加载图片 (相对于ui目录,显示更大,无边框)
+        image_path = "assets/maibobo/maibobo.jpg"
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # 🔧 修复：进一步减小图片尺寸以适配1080p显示器
+                scaled_pixmap = pixmap.scaled(
+                    scale(400), scale(450),  # 从450x510进一步减小到400x450
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                image_label.setPixmap(scaled_pixmap)
+                # 移除边框和背景,只显示图片
+                image_label.setStyleSheet("""
+                    QLabel#bpImageLabel {
+                        border: none;
+                        background-color: transparent;
+                        padding: 0px;
+                    }
+                """)
+            else:
+                image_label.setText("图片加载失败")
+                image_label.setStyleSheet("font-size: 18px; color: #999;")
+        else:
+            image_label.setText("⚠️\n图片文件不存在")
+            image_label.setStyleSheet("font-size: 20px; color: #f44336;")
+        
+        # 图片说明(更大字体)
+        tip_label = QLabel("请将手臂放置在仪器测量位置")
+        tip_label.setAlignment(Qt.AlignCenter)
+        tip_label.setStyleSheet("font-size: 30px; font-weight: bold; color: #333;")
+        
+        left_layout.addStretch(1)
+        left_layout.addWidget(image_label, 0, Qt.AlignCenter)
+        left_layout.addWidget(tip_label, 0, Qt.AlignCenter)
+        left_layout.addStretch(1)
+        
+        # 右侧:测试控制和结果(垂直布局，固定宽度)
+        right_widget = QWidget()
+        right_widget.setFixedWidth(scale(670))  # 固定宽度（1200 - 450 - 20*2边距 - 25间距 - 60padding）
+        layout = QVBoxLayout(right_widget)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(20)
+        layout.setSpacing(scale(25))
 
         # 标题
-        title_label = QLabel("血压脉搏测试")
+        title_label = QLabel("血压脉搏检测")
         title_label.setObjectName("h1")
         title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("font-size: 40px; font-weight: bold;")
 
         # 说明文字
-        description_label = QLabel(
-            "请按照左侧血压仪说明，将您的手臂放置在仪器测量位置\n\n点击开始测试按钮开始测量"
-        )
-        description_label.setObjectName("subtitle")
-        description_label.setAlignment(Qt.AlignCenter)
-        description_label.setWordWrap(True)
+        # description_label = QLabel(
+        #     "将手臂放置在测量位置\n\n点击开始测试按钮"
+        # )
+        # description_label.setObjectName("subtitle")
+        # description_label.setAlignment(Qt.AlignCenter)
+        # description_label.setWordWrap(True)
+        # description_label.setStyleSheet("font-size: 24px; color: #666;")
 
         # 设备状态区域
-        status_container = QWidget()
-        status_layout = QVBoxLayout(status_container)
-        status_layout.setSpacing(10)
+        self.bp_status_container = QWidget()  # 保存引用以便隐藏
+        status_layout = QVBoxLayout(self.bp_status_container)
+        status_layout.setSpacing(scale(12))
 
-        # 设备连接状态
+        # 设备连接状态(改为蓝色,字体更大)
         self.bp_status_label = QLabel("正在检测血压仪器连接...")
         self.bp_status_label.setObjectName("statusLabel")
         self.bp_status_label.setAlignment(Qt.AlignCenter)
+        self.bp_status_label.setStyleSheet("font-size: 30px; font-weight: bold; color: #1976D2;")
 
-        # 测试进度显示
+        # 测试进度显示(字体更大)
         self.bp_progress_label = QLabel("等待开始测试")
         self.bp_progress_label.setObjectName("subtitle")
         self.bp_progress_label.setAlignment(Qt.AlignCenter)
+        self.bp_progress_label.setStyleSheet("font-size: 28px; color: #666;")
 
         status_layout.addWidget(self.bp_status_label)
         status_layout.addWidget(self.bp_progress_label)
 
         # 测试控制区域
-        control_container = QWidget()
-        control_layout = QVBoxLayout(control_container)
-        control_layout.setSpacing(15)
+        self.bp_control_container = QWidget()  # 保存引用以便隐藏
+        control_layout = QVBoxLayout(self.bp_control_container)
+        control_layout.setSpacing(scale(20))
 
-        # 开始/停止测试按钮
-        self.bp_start_button = QPushButton("开始测试")
-        self.bp_start_button.setObjectName("successButton")
-        self.bp_start_button.setFixedSize(150, 50)
-        self.bp_start_button.clicked.connect(self._toggle_bp_test)
-        self.bp_start_button.setEnabled(False)  # 初始禁用
-
-        # 圆形进度指示器
+        # 圆形进度指示器(还原回原来的样式)
         self.bp_progress_circle = QLabel()
-        self.bp_progress_circle.setFixedSize(80, 80)
+        self.bp_progress_circle.setFixedSize(100, 100)  # 还原原始尺寸
         self.bp_progress_circle.setAlignment(Qt.AlignCenter)
         self.bp_progress_circle.setStyleSheet("""
             QLabel {
                 border: 4px solid #E0E0E0;
-                border-radius: 40px;
+                border-radius: 50px;
                 background-color: #F5F5F5;
                 color: #666;
-                font-size: 12px;
+                font-size: 18px;
                 font-weight: bold;
             }
         """)
         self.bp_progress_circle.setText("准备")
+        
+        # 开始/停止测试按钮(更大)
+        self.bp_start_button = QPushButton("开始测试")
+        self.bp_start_button.setObjectName("successButton")
+        self.bp_start_button.setFixedSize(scale(220), scale(70))  # 增大按钮
+        self.bp_start_button.setStyleSheet("font-size: 26px; font-weight: bold; background-color: #5DADE2;")  # 老年模式
+        self.bp_start_button.clicked.connect(self._toggle_bp_test)
+        self.bp_start_button.setEnabled(False)  # 初始禁用
 
         control_layout.addWidget(self.bp_progress_circle, 0, Qt.AlignCenter)
         control_layout.addWidget(self.bp_start_button, 0, Qt.AlignCenter)
 
-        # 结果显示区域
+        # 结果显示区域（固定高度，避免显示/隐藏时布局变化）
         self.result_container = QWidget()
         self.result_container.setVisible(False)
+        self.result_container.setFixedHeight(scale(380))  # 固定高度 = "测试完成"标签 + 卡片高度 + 间距
         result_layout = QVBoxLayout(self.result_container)
-        result_layout.setSpacing(15)
+        result_layout.setSpacing(scale(15))  # "测试完成"和卡片之间的间距
+        result_layout.setContentsMargins(0, 0, 0, 0)  # 移除外边距
 
-        # 结果标题
-        result_title = QLabel("测试结果")
-        result_title.setObjectName("h2")
-        result_title.setAlignment(Qt.AlignCenter)
+        # "测试完成"标签（测试成功时才显示）
+        self.bp_complete_label = QLabel("测试完成 ✅")
+        self.bp_complete_label.setObjectName("subtitle")
+        self.bp_complete_label.setAlignment(Qt.AlignCenter)
+        self.bp_complete_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #4CAF50;")
 
-        # 结果卡片
+        # 结果卡片（固定大小）
         self.result_card = QWidget()
         self.result_card.setObjectName("card")
-        self.result_card.setFixedSize(400, 200)
+        self.result_card.setFixedSize(scale(550), scale(300))  # 适度增加高度，更舒适
         result_card_layout = QVBoxLayout(self.result_card)
-        result_card_layout.setSpacing(15)
+        result_card_layout.setSpacing(scale(12))  # 增加三行数据之间的间距
+        result_card_layout.setContentsMargins(scale(20), scale(25), scale(20), scale(25))  # 增加上下内边距
 
         # 收缩压
         self.systolic_label = QLabel("收缩压: -- mmHg")
         self.systolic_label.setObjectName("statusLabel")
         self.systolic_label.setAlignment(Qt.AlignCenter)
-        self.systolic_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2;")
+        self.systolic_label.setStyleSheet("font-size: 30px; font-weight: bold; color: #1976D2;")  # 统一大字体
 
         # 舒张压
         self.diastolic_label = QLabel("舒张压: -- mmHg")
         self.diastolic_label.setObjectName("statusLabel")
         self.diastolic_label.setAlignment(Qt.AlignCenter)
-        self.diastolic_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2;")
+        self.diastolic_label.setStyleSheet("font-size: 30px; font-weight: bold; color: #1976D2;")  # 统一大字体
 
         # 脉搏
         self.pulse_label = QLabel("脉搏: -- 次/分")
         self.pulse_label.setObjectName("statusLabel")
         self.pulse_label.setAlignment(Qt.AlignCenter)
-        self.pulse_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4CAF50;")
+        self.pulse_label.setStyleSheet("font-size: 30px; font-weight: bold; color: #4CAF50;")  # 统一大字体
+
+        # 在卡片内添加"进入下一步"按钮
+        self.bp_next_button = QPushButton("请先完成血压测试")
+        self.bp_next_button.setObjectName("bpNextButton")
+        self.bp_next_button.setFixedSize(scale(240), scale(60))
+        self.bp_next_button.setCursor(Qt.PointingHandCursor)
+        self.bp_next_button.setStyleSheet("""
+            QPushButton#bpNextButton {
+                background-color: #5DADE2;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                font-size: 24px;
+                font-weight: bold;
+            }
+            QPushButton#bpNextButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton#bpNextButton:pressed {
+                background-color: #2E86C1;
+            }
+            QPushButton#bpNextButton:disabled {
+                background-color: #BDC3C7;
+                color: #7F8C8D;
+            }
+        """)
+        self.bp_next_button.setEnabled(False)  # 初始禁用
+        self.bp_next_button.clicked.connect(self._next_step_or_question)
 
         result_card_layout.addWidget(self.systolic_label)
         result_card_layout.addWidget(self.diastolic_label)
         result_card_layout.addWidget(self.pulse_label)
+        result_card_layout.addSpacing(scale(15))  # 增加数据和按钮之间的间距
+        result_card_layout.addWidget(self.bp_next_button, 0, Qt.AlignCenter)
 
-        result_layout.addWidget(result_title)
+        result_layout.addWidget(self.bp_complete_label)
         result_layout.addWidget(self.result_card, 0, Qt.AlignCenter)
 
-        # 布局组装
+        # 右侧布局组装
         layout.addStretch(1)
         layout.addWidget(title_label)
-        layout.addWidget(description_label)
-        layout.addWidget(status_container, 0, Qt.AlignCenter)
-        layout.addWidget(control_container, 0, Qt.AlignCenter)
+        # layout.addWidget(description_label)
+        layout.addWidget(self.bp_status_container, 0, Qt.AlignCenter)
+        layout.addWidget(self.bp_control_container, 0, Qt.AlignCenter)
         layout.addWidget(self.result_container, 0, Qt.AlignCenter)
-        layout.addStretch(2)
+        layout.addStretch(1)
+        
+        # 主布局组装:左图右文都在卡片内（不使用stretch因子，因为已固定宽度）
+        main_layout.addWidget(left_widget, 0)  # 左侧图片区域（固定宽度450）
+        main_layout.addWidget(right_widget, 0)  # 右侧控制区域（固定宽度670）
+        
+        # 将卡片添加到页面(居中显示)
+        page_layout.addStretch(1)
+        page_layout.addWidget(card_container, 0, Qt.AlignCenter)
+        page_layout.addStretch(1)
 
         # 初始化血压测试相关变量
         self.bp_test_running = False
@@ -1591,7 +2485,14 @@ class TestPage(QWidget):
         if not self.bp_test_running:
             self._start_bp_test()
         else:
-            self._stop_bp_test()
+            # ✅ 血压测试进行中不允许手动停止
+            QMessageBox.warning(
+                self, 
+                "测试进行中", 
+                "血压测试正在进行中，无法手动停止。\n请等待测试自动完成。"
+            )
+            logger.warning("⚠️ 血压测试进行中，禁止手动停止")
+            return
 
     def _start_bp_test(self):
         """开始血压测试"""
@@ -1613,8 +2514,10 @@ class TestPage(QWidget):
             }
 
             self.bp_test_running = True
-            self.bp_start_button.setText("停止测试")
-            self.bp_start_button.setObjectName("finishButton")
+            # ✅ 测试进行中：禁用按钮，防止点击
+            self.bp_start_button.setText("测试进行中...")
+            self.bp_start_button.setEnabled(False)  # 禁用按钮
+            self.bp_start_button.setObjectName("disabledButton")
             self.bp_start_button.style().unpolish(self.bp_start_button)
             self.bp_start_button.style().polish(self.bp_start_button)
 
@@ -1660,10 +2563,12 @@ class TestPage(QWidget):
             self._stop_bp_test()
 
     def _stop_bp_test(self):
-        """停止血压测试"""
+        """停止血压测试（仅在测试完成或出错时内部调用）"""
         try:
             self.bp_test_running = False
+            # ✅ 测试结束：恢复按钮可用状态
             self.bp_start_button.setText("开始测试")
+            self.bp_start_button.setEnabled(True)  # 恢复可用
             self.bp_start_button.setObjectName("successButton")
             self.bp_start_button.style().unpolish(self.bp_start_button)
             self.bp_start_button.style().polish(self.bp_start_button)
@@ -1779,12 +2684,26 @@ class TestPage(QWidget):
                 else:
                     color = "#F44336"
 
-                self.systolic_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
-                self.diastolic_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+                # 保持统一的大字体（30px），只改变颜色
+                self.systolic_label.setStyleSheet(f"font-size: 30px; font-weight: bold; color: {color};")
+                self.diastolic_label.setStyleSheet(f"font-size: 30px; font-weight: bold; color: {color};")
+                self.pulse_label.setStyleSheet(f"font-size: 30px; font-weight: bold; color: {color};")
 
+                # 显示结果，隐藏状态和控制区域
                 self.result_container.setVisible(True)
+                self.bp_status_container.setVisible(False)
+                self.bp_control_container.setVisible(False)
+                
+                # 隐藏加载圆圈和开始测试按钮（已在control_container中，但为保险起见也单独设置）
+                self.bp_progress_circle.setVisible(False)
+                self.bp_start_button.setVisible(False)
+                
+                # 启用卡片内的"进入下一步"按钮
+                if hasattr(self, 'bp_next_button'):
+                    self.bp_next_button.setText("进入舒特格测试")
+                    self.bp_next_button.setEnabled(True)
 
-                self.bp_progress_label.setText("测试完成 ✅")
+                # 不再需要更新bp_progress_label，因为已经隐藏了status_container
                 self.bp_progress_circle.setText("完成")
                 self.bp_progress_circle.setStyleSheet("""
                     QLabel {
@@ -1816,6 +2735,14 @@ class TestPage(QWidget):
                         font-weight: bold;
                     }
                 """)
+                
+                # 失败时保持status和control容器可见，允许重新测试
+                self.bp_status_container.setVisible(True)
+                self.bp_control_container.setVisible(True)
+                self.bp_progress_circle.setVisible(True)
+                self.bp_start_button.setVisible(True)
+                self.bp_start_button.setText("重新测试")
+                self.bp_start_button.setEnabled(True)
 
                 QMessageBox.warning(self, "测试失败", "未能获取有效的血压数据，请检查设备连接或重新测试")
 
@@ -1895,7 +2822,7 @@ class TestPage(QWidget):
                 # 📍 确保文本问答开始时间戳已记录（如果还没记录则补记录）
                 if not getattr(self, '_text_qa_start_timestamp_recorded', False):
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录文本问答开始时间戳(Q键跳过，页面未真正开始): {call_timestamp}")
                     self._text_qa_start_timestamp_recorded = True
                 
@@ -1916,7 +2843,7 @@ class TestPage(QWidget):
                 
                 # 📍 记录文本问答结束时间戳
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)
+                self._save_timestamp_immediately(call_timestamp)
                 logger.info(f"📍 已记录文本问答结束时间戳(Q键跳过): {call_timestamp}")
                 
                 # 保存音视频路径到数据库
@@ -1930,6 +2857,10 @@ class TestPage(QWidget):
             if self.current_step == 1:
                 logger.info("测试后门触发：按下 Q，血压测试视为完成")
                 
+                # ✅ 如果血压测试正在运行，先停止它
+                if hasattr(self, 'bp_test_running') and self.bp_test_running:
+                    self._stop_bp_test()
+                
                 # 📍 记录血压测试开始时间戳（如果还没进入血压页面就跳过）
                 # 正常流程：文本QA结束 → 血压开始 → 血压结束 → 舒尔特开始
                 # 跳过场景：可能在血压页面加载时就按Q,需要补开始时间戳
@@ -1937,23 +2868,29 @@ class TestPage(QWidget):
                 if len(self.part_timestamps) < expected_timestamps_before_bp + 1:
                     # 缺少血压开始时间戳，补记录
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录血压测试开始时间戳(Q键跳过): {call_timestamp}")
                 
                 # 📍 记录血压测试结束时间戳
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)
+                self._save_timestamp_immediately(call_timestamp)
                 logger.info(f"📍 已记录血压测试结束时间戳(Q键跳过): {call_timestamp}")
                 
+                # ✅ 设置模拟血压值
                 self.bp_results = {
                     'systolic': 120,
                     'diastolic': 80,
                     'pulse': 75,
                 }
+                logger.info(f"✅ 已设置模拟血压值: {self.bp_results}")
+                
+                # ✅ 完成血压测试并显示结果
                 self._complete_bp_test()
-                # 立即推进到下一步，避免重复触发情绪分析
-                self.current_step = 2
-                self.update_step_ui()
+                
+                # ⚠️ 不要立即切换到下一步，让用户看到结果
+                # self.current_step = 2
+                # self.update_step_ui()
+                logger.info("✅ 血压测试已跳过，显示模拟结果")
                 return True
 
             if self.current_step == 2:
@@ -1965,8 +2902,16 @@ class TestPage(QWidget):
                 if len(self.part_timestamps) < expected_timestamps_before_schulte + 1:
                     # 缺少舒尔特开始时间戳，补记录
                     call_timestamp = time.time()
-                    self.part_timestamps.append(call_timestamp)
+                    self._save_timestamp_immediately(call_timestamp)
                     logger.info(f"📍 补记录舒尔特测试开始时间戳: {call_timestamp}")
+
+                try:
+                    self._save_speech_recognition_results()
+                    self._trigger_emotion_analysis()
+                    logger.info("✅ 快捷键跳过：已保存语音识别结果并触发情绪分析")
+                except Exception as e:
+                    logger.warning(f"快捷键跳过时保存结果失败: {e}")
+                
                 
                 self._on_schulte_result(30.0, 85.0)
                 self._on_schulte_completed()
@@ -1976,37 +2921,85 @@ class TestPage(QWidget):
         return False
 
     def keyPressEvent(self, event):
-        """全局监听键盘事件，用于测试调试后门"""
+        """全局监听键盘事件，用于测试调试后门和基线/SART启动"""
+        # 空格键：触发当前显示页面的开始按钮
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            current_index = self.answer_stack.currentIndex()
+            if current_index == 0:  # 基线校准提示页面
+                self.btn_start_baseline.click()
+                return
+            elif current_index == 1:  # SART提示页面
+                self.btn_start_sart.click()
+                return
+        
+        # 调试后门
         if event.key() == Qt.Key_Q and not event.isAutoRepeat():
             if self._handle_debug_shortcut():
                 return
         super().keyPressEvent(event)
 
     def _create_schulte_page(self):
-        """创建舒特格测试页面（带摄像头和疲劳度显示）"""
         page = QWidget()
         main_layout = QHBoxLayout(page)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(20)
-        
-        # 左侧：摄像头和疲劳度（复用第一页的样式）
+        main_layout.setContentsMargins(scale(8), 0, scale(8), 0)
+        main_layout.setSpacing(scale(20))
+
+        # ✅ 左侧弹簧
+        main_layout.addStretch(1)
+
+        # 左列：摄像头
         self.schulte_camera_widget = self._create_camera_view_for_schulte()
-        main_layout.addWidget(self.schulte_camera_widget, 0)
-        
-        # 右侧：舒尔特测试区域
-        schulte_container = QWidget()
-        schulte_layout = QVBoxLayout(schulte_container)
-        schulte_layout.setAlignment(Qt.AlignCenter)
-        schulte_layout.setSpacing(20)
-        
+        cam_width = scale_size(560, 420)[0]
+        self.schulte_camera_widget.setMaximumWidth(cam_width)
+        self.schulte_camera_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        main_layout.addWidget(self.schulte_camera_widget, 0, Qt.AlignRight)
+
+        # 右列：舒尔特方格
+        self.schulte_container = QWidget()
+        schulte_layout = QVBoxLayout(self.schulte_container)
+        schulte_layout.setContentsMargins(0, 0, 0, 0)
+        schulte_layout.setSpacing(scale(10))
+
         self.schulte_widget = SchulteGridWidget(self.current_user)
         self.schulte_widget.test_completed.connect(self._on_schulte_completed)
         self.schulte_widget.test_result_ready.connect(self._on_schulte_result)
-        
-        schulte_layout.addWidget(self.schulte_widget)
-        main_layout.addWidget(schulte_container, 1)
-        
+        schulte_layout.addWidget(self.schulte_widget, 0, Qt.AlignCenter)
+
+        main_layout.addWidget(self.schulte_container, 0, Qt.AlignLeft)
+
+        # ✅ 右侧弹簧
+        main_layout.addStretch(1)
+
         return page
+
+    def _reinit_schulte_widget(self):
+        """重新初始化舒尔特widget（每次进入页面时调用，避免状态卡住）"""
+        if not hasattr(self, 'schulte_container') or not hasattr(self, 'schulte_widget'):
+            logger.warning("舒尔特容器或widget不存在，跳过重新初始化")
+            return
+        
+        try:
+            # 获取布局
+            layout = self.schulte_container.layout()
+            if layout is None:
+                logger.warning("舒尔特容器没有布局")
+                return
+            
+            # 移除旧的widget
+            layout.removeWidget(self.schulte_widget)
+            self.schulte_widget.deleteLater()
+            
+            # 创建新的widget
+            self.schulte_widget = SchulteGridWidget(self.current_user)
+            self.schulte_widget.test_completed.connect(self._on_schulte_completed)
+            self.schulte_widget.test_result_ready.connect(self._on_schulte_result)
+            
+            # 添加到布局
+            layout.addWidget(self.schulte_widget)
+            
+            logger.info("✅ 舒尔特widget已重新初始化")
+        except Exception as e:
+            logger.error(f"❌ 重新初始化舒尔特widget失败: {e}", exc_info=True)
 
     def _create_score_page(self):
         page_score = QWidget()
@@ -2032,51 +3025,72 @@ class TestPage(QWidget):
     def _create_bottom_buttons(self):
         container = QWidget()
         layout = QHBoxLayout(container)
-        self.btn_next = QPushButton("下一题")
-        self.btn_next.setObjectName("successButton")
-        self.btn_next.setIcon(qta.icon('fa5s.arrow-right'))
-        self.btn_next.setFixedWidth(200)
+        layout.setContentsMargins(0, scale(15), 0, scale(20))
+        
+        # 通用的下一步按钮(用于血压、舒尔特等其他页面)
+        self.btn_next_bottom = QPushButton("下一步")
+        self.btn_next_bottom.setObjectName("successButton")
+        self.btn_next_bottom.setIcon(qta.icon('fa5s.arrow-right'))
+        self.btn_next_bottom.setFixedSize(scale(320), scale(80))
+        self.btn_next_bottom.setStyleSheet("""
+            QPushButton#successButton {
+                font-size: 26px;
+                font-weight: bold;
+            }
+        """)
+        self.btn_next_bottom.clicked.connect(self._next_step_or_question)
+        
+        # 完成评估按钮（用于最后的页面）
         self.btn_finish = QPushButton("完成评估")
         self.btn_finish.setObjectName("finishButton")
         self.btn_finish.setIcon(qta.icon('fa5s.flag-checkered'))
-        self.btn_finish.setFixedWidth(200)
+        self.btn_finish.setFixedSize(scale(320), scale(80))
+        self.btn_finish.setStyleSheet("""
+            QPushButton#finishButton {
+                font-size: 26px;
+                font-weight: bold;
+            }
+        """)
         self.btn_finish.setVisible(False)
-        layout.addWidget(self.btn_next)
+        layout.addWidget(self.btn_next_bottom)
         layout.addWidget(self.btn_finish)
         return container
 
     def update_step_ui(self):
-        for i, (num_label, text_label) in enumerate(self.step_labels):
-            target_opacity = 1.0 if i == self.current_step else 0.5
-            anim = QPropertyAnimation(self.step_opacity_effects[i], b"opacity")
-            anim.setDuration(400)
-            anim.setStartValue(self.step_opacity_effects[i].opacity())
-            anim.setEndValue(target_opacity)
-            anim.setEasingCurve(QEasingCurve.InOutQuad)
-            anim.start(QPropertyAnimation.DeleteWhenStopped)
+        # 兼容旧代码：保留原有的步骤标签更新(如果存在)
+        if hasattr(self, 'step_labels') and self.step_labels:
+            for i, (num_label, text_label) in enumerate(self.step_labels):
+                target_opacity = 1.0 if i == self.current_step else 0.5
+                if hasattr(self, 'step_opacity_effects') and i < len(self.step_opacity_effects):
+                    anim = QPropertyAnimation(self.step_opacity_effects[i], b"opacity")
+                    anim.setDuration(400)
+                    anim.setStartValue(self.step_opacity_effects[i].opacity())
+                    anim.setEndValue(target_opacity)
+                    anim.setEasingCurve(QEasingCurve.InOutQuad)
+                    anim.start(QPropertyAnimation.DeleteWhenStopped)
 
-            if i == self.current_step:
-                num_label.setStyleSheet("""
-                        QLabel {
-                            background-color: #1976D2;
-                            color: white;
-                            border-radius: 17px;
-                            font-weight: bold;
-                            font-size: 16px;
-                        }
-                    """)
-                text_label.setStyleSheet("color: #1976D2; font-weight: bold;")
-            else:
-                num_label.setStyleSheet("""
-                        QLabel {
-                            background-color: #E0E0E0;
-                            color: #212121;
-                            border-radius: 17px;
-                            font-weight: normal;
-                            font-size: 16px;
-                        }
-                    """)
-                text_label.setStyleSheet("color: #757575; font-weight: normal;")
+                if i == self.current_step:
+                    num_label.setStyleSheet("""
+                            QLabel {
+                                background-color: #1976D2;
+                                color: white;
+                                border-radius: 17px;
+                                font-weight: bold;
+                                font-size: 16px;
+                            }
+                        """)
+                    text_label.setStyleSheet("color: #1976D2; font-weight: bold;")
+                else:
+                    num_label.setStyleSheet("""
+                            QLabel {
+                                background-color: #E0E0E0;
+                                color: #212121;
+                                border-radius: 17px;
+                                font-weight: normal;
+                                font-size: 16px;
+                            }
+                        """)
+                    text_label.setStyleSheet("color: #757575; font-weight: normal;")
 
         self.question_container.setVisible(self.current_step == 0)
         if self.current_step == 0:
@@ -2097,7 +3111,8 @@ class TestPage(QWidget):
         if brain_load_bar:
             brain_load_bar.setVisible(self.current_step != 3)
         
-        # 控制摄像头组件的可见性（血压阶段隐藏疲劳度/摄像头）
+        # 控制摄像头组件的可见性
+        # ✅ 情绪检测阶段显示左侧摄像头（已设置固定宽度，不影响布局）
         self.camera_widget.setVisible(self.current_step == 0)
         if hasattr(self, 'schulte_camera_widget'):
             self.schulte_camera_widget.setVisible(self.current_step == 2)
@@ -2111,16 +3126,20 @@ class TestPage(QWidget):
                 self.audio_level.set_level(0)
 
         if self.current_step == 0:
-            # 🔄 朗读录音阶段
-            self.answer_stack.setCurrentIndex(0)
+            # 🔄 朗读录音阶段（情绪检测）
+            self.answer_stack.setCurrentIndex(2)  # 朗读页面是索引2（0基线提示，1SART提示）
             
             # 显示朗读文本（已在 _create_answer_area_widgets 中设置）
             if hasattr(self, 'lbl_reading_text'):
                 self.lbl_reading_text.setPlainText(self.reading_text_content)
             
-            self.btn_next.setText("完成录音")
-            self.btn_next.setVisible(True)
-            self.btn_next.setEnabled(False)  # 初始禁用，录音完成后启用
+            # 情绪检测页面使用卡片内的btn_next,隐藏底部按钮
+            if hasattr(self, 'btn_next'):
+                self.btn_next.setText("完成录音")
+                self.btn_next.setVisible(True)
+                self.btn_next.setEnabled(False)  # 初始禁用，录音完成后启用
+            if hasattr(self, 'btn_next_bottom'):
+                self.btn_next_bottom.setVisible(False)  # 隐藏底部按钮
             self.btn_finish.setVisible(False)
             
             # ❌ 不再需要 TTS 朗读
@@ -2128,24 +3147,52 @@ class TestPage(QWidget):
             #     self._speak_current_question()
 
         elif self.current_step == 1:
-            self.answer_stack.setCurrentIndex(1)
-            if hasattr(self, 'bp_results') and self.bp_results['systolic'] is not None:
-                self.btn_next.setText("进入舒特格测试")
-                self.btn_next.setEnabled(True)
-            else:
-                self.btn_next.setText("请先完成血压测试")
-                self.btn_next.setEnabled(False)
+            self.answer_stack.setCurrentIndex(3)  # 血压页面现在是索引3（0基线提示，1SART提示，2朗读）
+            
+            # 重置血压页面控件的可见性（当重新进入或从其他页面返回时）
+            if hasattr(self, 'bp_progress_circle'):
+                self.bp_progress_circle.setVisible(True)
+            if hasattr(self, 'bp_start_button'):
+                self.bp_start_button.setVisible(True)
+            if hasattr(self, 'bp_status_container'):
+                self.bp_status_container.setVisible(True)
+            if hasattr(self, 'bp_control_container'):
+                self.bp_control_container.setVisible(True)
+            if hasattr(self, 'result_container'):
+                # 如果已有测试结果则显示，否则隐藏
+                if hasattr(self, 'bp_results') and self.bp_results.get('systolic') is not None:
+                    self.result_container.setVisible(True)
+                    # 已有结果时，隐藏状态和控制区域
+                    self.bp_status_container.setVisible(False)
+                    self.bp_control_container.setVisible(False)
+                    # 更新卡片内按钮文字
+                    if hasattr(self, 'bp_next_button'):
+                        self.bp_next_button.setText("进入舒特格测试")
+                        self.bp_next_button.setEnabled(True)
+                else:
+                    self.result_container.setVisible(False)
+                    # 重置卡片内按钮状态
+                    if hasattr(self, 'bp_next_button'):
+                        self.bp_next_button.setText("请先完成血压测试")
+                        self.bp_next_button.setEnabled(False)
+            
+            # 血压页面隐藏底部按钮（使用卡片内按钮代替）
+            if hasattr(self, 'btn_next_bottom'):
+                self.btn_next_bottom.setVisible(False)
+            self.btn_finish.setVisible(False)  # 血压阶段不显示完成测试按钮
             if self.mic_anim.state() == QPropertyAnimation.Running:
                 self.mic_anim.stop()
 
         elif self.current_step == 2:
-            self.answer_stack.setCurrentIndex(2)
-            self.btn_next.setVisible(False)
+            logger.info(f"📍 update_step_ui: current_step=2 (舒尔特)，设置 answer_stack index=4")
+            self.answer_stack.setCurrentIndex(4)  # 舒尔特页面现在是索引4
+            if hasattr(self, 'btn_next_bottom'):
+                self.btn_next_bottom.setVisible(False)
             self.btn_finish.setVisible(False)
             if self.mic_anim.state() == QPropertyAnimation.Running:
                 self.mic_anim.stop()
         elif self.current_step == 3:
-            self.answer_stack.setCurrentWidget(self.score_page)
+            self.answer_stack.setCurrentWidget(self.score_page)  # 分数页面现在是索引6
             # 异步更新分数页数据，避免阻塞UI
             def update_scores_async():
                 try:
@@ -2156,13 +3203,12 @@ class TestPage(QWidget):
                 except Exception as e:
                     logger.error(f"更新分数页失败: {e}")
             
-            # 先更新基本UI，然后异步加载数据
-            self.btn_next.setVisible(False)
+            # 先更新基本UI
+            if hasattr(self, 'btn_next_bottom'):
+                self.btn_next_bottom.setVisible(False)
             self.btn_finish.setVisible(True)
             if self.mic_anim.state() == QPropertyAnimation.Running:
                 self.mic_anim.stop()
-            self.score_value_label.setText(str(self.score) if self.score is not None else "计算中...")
-            self.score_chart.update_chart(self.history_scores)
             
             # 使用 QTimer 异步更新分数页，不阻塞UI切换
             self._invoke_later(update_scores_async, 50)
@@ -2178,6 +3224,9 @@ class TestPage(QWidget):
             # 这样可以避免在血压测试、答题等操作时意外停止数据更新
 
         self._update_camera_previews_for_step()
+        
+        # 🔄 最后更新阶段导航状态（确保answer_stack已切换完成）
+        self._update_stage_nav_status()
 
     def start_test(self):
         # 摄像头预览在 AV 采集准备好后启动
@@ -2188,10 +3237,11 @@ class TestPage(QWidget):
 
         # 🔄 重置朗读录音状态
         self.reading_completed = False
+
+        self.mark_stage_completed('多模态疲劳检测')
         
         # 重置分数累积列表
         self._fatigue_scores_list = []
-        self._brain_load_scores_list = []
         self._emotion_score = None
         self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
         logger.info("已重置分数累积列表和情绪分析标志")
@@ -2274,6 +3324,7 @@ class TestPage(QWidget):
                 
                 # 尝试启动AV采集（即使后端未连接也尝试，可能使用本地摄像头）
                 try:
+                    logger.info(f"🎥 准备启动 AV 采集，session_dir={self.session_dir}")
                     av_start_collection(
                         save_dir=self.session_dir,
                         camera_index=config.ACTIVE_CAMERA_INDEX,
@@ -2327,6 +3378,9 @@ class TestPage(QWidget):
                 task_name="启动多模态采集"
             )
         
+
+    def start_eeg_collection(self) -> None:
+        self._brain_load_scores_list = []
         # EEG采集也使用异步方式（非阻塞），由后端统一管理硬件连接
         # ⚠️ 注意：如果EEG已经在基线/SART阶段启动，这里会返回 "already-running"，这是正常的
         def start_eeg_async():
@@ -2359,36 +3413,47 @@ class TestPage(QWidget):
         try:
             if self.camera_preview:
                 self.camera_preview.stop_preview()
+                logger.debug("✅ 已停止情绪检测摄像头预览")
         except Exception as e:
             logger.debug(f"停止camera_preview时出错: {e}")
         
         try:
             if self.schulte_camera_preview:
                 self.schulte_camera_preview.stop_preview()
+                logger.debug("✅ 已停止舒尔特摄像头预览")
         except Exception as e:
             logger.debug(f"停止schulte_camera_preview时出错: {e}")
 
     def _update_camera_previews_for_step(self) -> None:
-        """根据当前步骤切换摄像头预览（安全启动，失败不影响UI）。"""
-        if not self.test_started:
-            self._stop_camera_preview()
-            return
-
+        """根据当前步骤切换摄像头预览（两个独立widget，根据步骤启停）。"""
         try:
             if self.current_step == 0:
+                # 情绪检测阶段：启动情绪检测摄像头，停止舒尔特摄像头
                 if self.schulte_camera_preview:
                     self.schulte_camera_preview.stop_preview()
+                    logger.debug("已停止舒尔特摄像头")
                 if self.camera_preview:
                     self.camera_preview.start_preview()
+                    logger.debug("✅ 已启动情绪检测摄像头预览")
+                    
             elif self.current_step == 2:
+                # 舒尔特测试阶段：停止情绪检测摄像头，启动舒尔特摄像头
+                if self.camera_preview:
+                    self.camera_preview.stop_preview()
+                    logger.debug("已停止情绪检测摄像头")
+                if self.schulte_camera_preview:
+                    self.schulte_camera_preview.start_preview()
+                    logger.debug("✅ 已启动舒尔特摄像头预览")
+            else:
+                # 其他阶段：停止所有摄像头预览
                 if self.camera_preview:
                     self.camera_preview.stop_preview()
                 if self.schulte_camera_preview:
-                    self.schulte_camera_preview.start_preview()
-            else:
-                self._stop_camera_preview()
+                    self.schulte_camera_preview.stop_preview()
+                logger.debug("✅ 其他阶段：已停止所有摄像头预览")
+                
         except Exception as e:
-            logger.error(f"切换摄像头预览时出错: {e}")
+            logger.error(f"切换摄像头预览时出错: {e}", exc_info=True)
             logger.info("摄像头将显示占位符，但不影响其他功能")
 
     def _start_video_recording(self, target_path: str = None):
@@ -2433,9 +3498,51 @@ class TestPage(QWidget):
 
     def _toggle_recording(self):
         if self.is_recording:
+            # 原有停止逻辑
             self._stop_recording()
+
+            # 视觉：停止“录制中”效果 → 恢复麦克风图标
+            try:
+                # 如果用了光晕动画，停止它（可选）
+                if hasattr(self, "mic_anim") and self.mic_anim.state() == QPropertyAnimation.Running:
+                    self.mic_anim.stop()
+            except Exception:
+                pass
+
+            # 恢复麦克风图标与提示
+            try:
+                self.btn_mic.setIcon(qta.icon('fa5s.microphone-alt', color='white'))
+            except Exception:
+                pass
+            self.btn_mic.setToolTip("点击开始录音")
+
+            self.is_recording = False
+
         else:
+            # 原有开始逻辑
             self._start_recording()
+
+            # 视觉：显示“录制中”的图标（红点/圆）
+            try:
+                # 任选一个你喜欢的录制图标；三选一：
+                # 1) 红色圆点
+                self.btn_mic.setIcon(qta.icon('fa5s.circle', color='#e74c3c'))
+                # 2) 靶心圆点（更像“录制”）
+                # self.btn_mic.setIcon(qta.icon('fa5s.dot-circle', color='#e74c3c'))
+                # 3) 黑胶样式（如果你喜欢）
+                # self.btn_mic.setIcon(qta.icon('fa5s.record-vinyl', color='#e74c3c'))
+            except Exception:
+                pass
+            self.btn_mic.setToolTip("录音中，点击结束")
+
+            # 可选：开启现有的光晕动画，让“正在录制”更醒目（不喜欢就注释）
+            try:
+                if hasattr(self, "mic_anim"):
+                    self.mic_anim.start()
+            except Exception:
+                pass
+
+            self.is_recording = True
 
     def _start_recording(self):
         if self.mic_anim.state() == QPropertyAnimation.Running:
@@ -2455,7 +3562,7 @@ class TestPage(QWidget):
         # 📍 记录朗读录音开始时间戳（第一次录音时）
         if not self._text_qa_start_timestamp_recorded:
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录朗读录音开始时间戳: {call_timestamp}")
             self._text_qa_start_timestamp_recorded = True
 
@@ -2506,21 +3613,35 @@ class TestPage(QWidget):
     #     已删除 TTS 朗读相关代码
 
     def _next_step_or_question(self):
+        logger.info(f"🔍 _next_step_or_question 被调用: current_step={self.current_step}")
+
         if self.current_step == 0:
             # 🔄 朗读录音阶段，不再有多个问题，直接进入下一步
             # 📍 记录朗读录音结束时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录朗读录音结束时间戳: {call_timestamp}")
-            
+
             self.reading_completed = True
-            self.current_step += 1
+            self.mark_stage_completed('情绪检测')  # ✅ 标记阶段完成(新命名)
             
+            # ✅ 立即更新分数页面，传递情绪检测结果
+            try:
+                if hasattr(self, 'score_page') and self.score_page:
+                    logger.info(f"📊 情绪检测完成，立即更新分数页面 (emotion={self._emotion_score})")
+                    self._send_scores_to_score_page()
+                    logger.info("✅ 情绪检测结果已发送到分数页面")
+            except Exception as e:
+                logger.error(f"发送情绪结果到分数页面失败: {e}", exc_info=True)
+            
+            self.current_step += 1
+            logger.info(f"✅ 情绪检测完成，current_step 增加到: {self.current_step}")
+
             try:
                 self._close_camera()
             except Exception as e:
                 logger.warning(f"关闭摄像头失败: {e}")
-            
+
             # 停止音视频录制并获取路径
             try:
                 logger.info("📹 正在停止音视频录制...")
@@ -2535,40 +3656,73 @@ class TestPage(QWidget):
                     self._audio_paths = []
                 if not hasattr(self, '_video_paths'):
                     self._video_paths = []
-            
+
+            try:
+                self._trigger_emotion_analysis()
+            except Exception as e:
+                logger.warning(f"触发情绪分析失败: {e}")
+
+            # ✅ 停止疲劳度推理与多模态数据采集（EEG 保持运行）
+            if HAS_MULTIMODAL:
+                try:
+                    self._stop_multimodal_monitoring()
+                    logger.info("✅ 朗读阶段结束，已停止疲劳度监控定时器")
+                except Exception as e:
+                    logger.warning(f"停止疲劳度监控失败: {e}")
+
+                try:
+                    stop_result = multidata_stop_collection()
+                    status = (stop_result or {}).get("status", "unknown")
+                    logger.info(f"✅ 朗读阶段结束，已停止多模态采集 (状态={status})")
+                    self.multimodal_collector = None
+
+                    try:
+                        self._persist_multimodal_paths_to_db(clear_recognition_cache=False)
+                        logger.info("💾 朗读阶段结束，多模态数据路径已写入数据库")
+                    except Exception as persist_exc:
+                        logger.warning(f"多模态数据路径写入数据库失败: {persist_exc}")
+                except Exception as stop_exc:
+                    logger.warning(f"停止多模态数据采集失败: {stop_exc}")
+
             # 📍 记录血压测试开始时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录血压测试开始时间戳: {call_timestamp}")
-            
-            # ✅ 疲劳度检测已结束，后续阶段不再进行疲劳度监控
+
+            logger.info(f"🔄 准备调用 update_step_ui()，当前 current_step={self.current_step}")
             self.update_step_ui()
-            
+            logger.info(f"✅ update_step_ui() 调用完成，answer_stack.currentIndex={self.answer_stack.currentIndex()}")
+
             # 保存音视频路径到数据库
             self._persist_av_paths_to_db()
         elif self.current_step == 1:
             # 📍 记录血压测试结束时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录血压测试结束时间戳: {call_timestamp}")
+
+            self.mark_stage_completed('血压脉搏检测')  # ✅ 标记阶段完成(新命名)
             
-            # ✅ 确保多模态监控在舒尔特阶段仍然运行（保持脑负荷推理）
-            if HAS_MULTIMODAL:
-                try:
-                    self._start_multimodal_monitoring(force=True)
-                    logger.info("✅ 舒尔特阶段继续更新脑负荷推理")
-                except Exception as restart_exc:
-                    logger.error(f"舒尔特阶段刷新疲劳度监控失败: {restart_exc}")
-            
+            # ✅ 立即更新分数页面，传递血压测试结果
+            try:
+                if hasattr(self, 'score_page') and self.score_page:
+                    logger.info(f"📊 血压测试完成，立即更新分数页面 (bp={self.bp_results})")
+                    self._send_scores_to_score_page()
+                    logger.info("✅ 血压测试结果已发送到分数页面")
+            except Exception as e:
+                logger.error(f"发送血压结果到分数页面失败: {e}", exc_info=True)
+
+            # ❌ 舒尔特阶段不再需要疲劳度监控（已在朗读阶段结束时停止）
+            # 💡 EEG采集仍在后台运行，只是不进行疲劳度分数推理
+
             # 📍 记录舒尔特测试开始时间戳
             call_timestamp = time.time()
-            self.part_timestamps.append(call_timestamp)
+            self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录舒尔特测试开始时间戳: {call_timestamp}")
-                        
-            # 📍 在切换到舒尔特测试时，先保存语音识别结果，再触发情绪分析
+
+            # 📍 在切换到舒尔特测试时，保存语音识别结果
             self._save_speech_recognition_results()
-            self._trigger_emotion_analysis()
-            
+
             self.current_step += 1
             self.update_step_ui()
 
@@ -2577,14 +3731,25 @@ class TestPage(QWidget):
         
         # 📍 记录舒尔特测试结束时间戳
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        self._save_timestamp_immediately(call_timestamp)
         logger.info(f"📍 已记录舒尔特测试结束时间戳: {call_timestamp}")
         
-        # ✅ 舒尔特阶段结束，停止疲劳度监控
+        self.mark_stage_completed('舒尔特专注度检测')  # ✅ 标记阶段完成(新命名)
+        
+        # ✅ 立即更新分数页面，传递舒尔特测试结果
+        try:
+            if hasattr(self, 'score_page') and self.score_page:
+                logger.info(f"📊 舒尔特测试完成，立即更新分数页面 (score={self.score}, accuracy={self.schulte_accuracy}%)")
+                self._send_scores_to_score_page()
+                logger.info("✅ 舒尔特测试结果已发送到分数页面")
+        except Exception as e:
+            logger.error(f"发送舒尔特结果到分数页面失败: {e}", exc_info=True)
+        
+        # ✅ 舒尔特阶段结束，确保疲劳度监控已停止（防御性代码，实际在朗读阶段已停止）
         try:
             self._stop_multimodal_monitoring()
             multidata_stop_collection()
-            logger.info("舒尔特测试完成，已停止疲劳度监控与多模态采集")
+            logger.info("舒尔特测试完成，已确认疲劳度监控与多模态采集已停止")
         except Exception as e:
             logger.warning(f"舒尔特阶段停止疲劳度监控或采集失败: {e}")
         
@@ -2635,24 +3800,10 @@ class TestPage(QWidget):
         # except Exception as e:
         #     logger.error(f"停止EEG采集或保存路径时出错: {e}")
         
+        # 📍 最后的完成时间戳（已通过实时保存自动写入）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
-        if self.part_timestamps:
-            import json
-            call_timestamp_json_path = os.path.join(self.session_dir, 'eeg')
-            os.makedirs(call_timestamp_json_path, exist_ok=True)
-            call_timestamp_json_path = os.path.join(call_timestamp_json_path, 'part_timestamps.json')
-            call_timestamps_formatted = [
-                {
-                    'timestamp': ts,
-                    'datetime': datetime.fromtimestamp(ts).isoformat(),
-                    'call_index': i
-                }
-                for i, ts in enumerate(self.part_timestamps)
-            ]
-            with open(call_timestamp_json_path, 'w', encoding='utf-8') as f:
-                json.dump(call_timestamps_formatted, f, ensure_ascii=False, indent=2)
-            logger.info(f"调用时间戳JSON数据已保存: {call_timestamp_json_path}")
+        self._save_timestamp_immediately(call_timestamp)
+        logger.info(f"📍 已记录评估完成时间戳: {call_timestamp}")
         QMessageBox.information(self, "评估完成", "感谢您的参与！")
         self.btn_finish.setEnabled(False)
         self._invoke_later(self._auto_close_page, 2000)
@@ -2773,10 +3924,12 @@ class TestPage(QWidget):
         except Exception as e:
             logger.exception(f"❌ 保存音视频路径时发生异常: {e}")
 
-    def _persist_multimodal_paths_to_db(self):
+    def _persist_multimodal_paths_to_db(self, *, clear_recognition_cache: bool = True):
         """保存多模态数据文件路径到数据库（RGB/Depth/Eyetrack）
         
-        注意：语音识别结果已在情绪分析前保存，这里不再重复保存
+        Args:
+            clear_recognition_cache: 是否在写入后清理语音识别缓存。
+                朗读阶段结束时需要保留语音识别结果用于后续情绪分析，因此允许调用方禁用缓存清理。
         """
         try:
             if not HAS_MULTIMODAL:
@@ -2791,12 +3944,13 @@ class TestPage(QWidget):
                 logger.warning("未获取到多模态数据文件路径")
                 return
 
-            # 清理语音识别结果（避免内存泄漏），结果已在 _save_speech_recognition_results 中保存
-            try:
-                clear_recognition_results()
-                logger.debug("已清理语音识别结果缓存")
-            except Exception as e:
-                logger.debug(f"清理语音识别结果失败: {e}")
+            # 根据需要清理语音识别结果缓存
+            if clear_recognition_cache:
+                try:
+                    clear_recognition_results()
+                    logger.debug("已清理语音识别结果缓存")
+                except Exception as e:
+                    logger.debug(f"清理语音识别结果失败: {e}")
 
             update_payload = {}
             if file_paths.get('rgb'):
@@ -2904,6 +4058,16 @@ class TestPage(QWidget):
 
     def set_current_user(self, username: str):
         self.current_user = username or 'anonymous'
+        
+        # ✅ 用户登录后立即创建数据库记录，确保后续测试数据能正常保存
+        # 这样无论用户从哪个阶段开始测试，都能正常保存数据
+        try:
+            if not self._db_disabled and not self.row_id:
+                logger.info(f"📝 用户 '{self.current_user}' 登录，准备创建数据库记录...")
+                self._ensure_db_row()
+        except Exception as e:
+            logger.error(f"❌ 创建数据库记录失败: {e}", exc_info=True)
+        
         if hasattr(self, 'schulte_widget') and self.schulte_widget:
             try:
                 self.schulte_widget.set_username(self.current_user)
@@ -2996,25 +4160,33 @@ class TestPage(QWidget):
         
         # 准备数据
         score_data = {
-            # 疲劳检测 (平均值)
+            # 疲劳检测 (平均值) - 仅朗读录音阶段测试
             "疲劳检测": avg_scores["fatigue_avg"] if avg_scores["fatigue_avg"] is not None else 0,
             
-            # 情绪分数
+            # 情绪分数 - 仅朗读录音阶段测试
             "情绪": self._emotion_score if self._emotion_score is not None else 0,
             
-            # 脑负荷 (平均值)
+            # 脑负荷 (平均值) - 贯穿整个流程
             "脑负荷": avg_scores["brain_load_avg"] if avg_scores["brain_load_avg"] is not None else 0,
             
-            # 舒尔特准确率
+            # 舒尔特准确率 - 舒尔特测试阶段
             "舒尔特准确率": self.schulte_accuracy if self.schulte_accuracy is not None else 0,
             
-            # 血压数据
+            # 血压数据 - 血压测试阶段
             "收缩压": self.bp_results.get("systolic", 0) if hasattr(self, 'bp_results') else 0,
             "舒张压": self.bp_results.get("diastolic", 0) if hasattr(self, 'bp_results') else 0,
             "脉搏": self.bp_results.get("pulse", 0) if hasattr(self, 'bp_results') else 0,
             
             # 舒尔特综合得分
             "舒尔特综合得分": self.score if self.score is not None else 0,
+            
+            # 🔄 阶段完成状态(用于控制分数页面显示) - 新命名
+            "_stage_completed": {
+                "多模态疲劳检测": self.stage_completed.get('多模态疲劳检测', False),
+                "情绪检测": self.stage_completed.get('情绪检测', False),
+                "血压脉搏检测": self.stage_completed.get('血压脉搏检测', False),
+                "舒尔特专注度检测": self.stage_completed.get('舒尔特专注度检测', False),
+            },
             
             # 元数据
             "_metadata": {
@@ -3027,6 +4199,7 @@ class TestPage(QWidget):
         }
         
         logger.info(f"准备分数数据完成: {score_data}")
+        logger.info(f"阶段完成状态: {score_data['_stage_completed']}")
         return score_data
     
     def _send_scores_to_score_page(self):

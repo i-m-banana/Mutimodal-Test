@@ -2,6 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
@@ -34,6 +35,7 @@ from PyQt5.QtCore import (
     pyqtSlot,
 )
 from PyQt5.QtGui import (
+    QBitmap,
     QBrush,
     QColor,
     QFont,
@@ -45,6 +47,7 @@ from PyQt5.QtGui import (
     QPainter,
     QPainterPath,
     QPixmap,
+    QRegion,
     QScreen,
 )
 import cv2  # type: ignore
@@ -54,6 +57,7 @@ import qtawesome as qta
 
 __all__ = [
     "QApplication",
+    "QDialog",
     "QFrame",
     "QGraphicsDropShadowEffect",
     "QGraphicsOpacityEffect",
@@ -81,6 +85,8 @@ __all__ = [
     "pyqtSignal",
     "pyqtSlot",
     "QSize",
+    "QMetaObject",
+    "QBitmap",
     "QBrush",
     "QColor",
     "QFont",
@@ -92,6 +98,7 @@ __all__ = [
     "QPainter",
     "QPainterPath",
     "QPixmap",
+    "QRegion",
     "QScreen",
     "cv2",
     "np",

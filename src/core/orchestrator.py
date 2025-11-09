@@ -71,6 +71,9 @@ class Orchestrator:
         self.inference_models_config = list(inference_models or [])
         self.inference_service = None
         
+        # 疲劳度评估服务
+        self.fatigue_assessment_service = None
+        
         self._running = False
 
     @classmethod
@@ -124,6 +127,17 @@ class Orchestrator:
                 self.inference_service.start()
             except Exception as e:
                 self.logger.error(f"启动推理服务失败: {e}", exc_info=True)
+        
+        # 启动疲劳度评估服务
+        try:
+            from ..services.fatigue_assessment_service import FatigueAssessmentService
+            self.fatigue_assessment_service = FatigueAssessmentService(
+                self.bus,
+                logger=logging.getLogger("fatigue_assessment")
+            )
+            self.fatigue_assessment_service.start()
+        except Exception as e:
+            self.logger.error(f"启动疲劳度评估服务失败: {e}", exc_info=True)
         self.command_router.start()
         # 移除采集器和检测器启动
         if self.system_config.get("enable_monitor", True):
@@ -149,6 +163,13 @@ class Orchestrator:
                 self.inference_service.stop()
             except Exception:
                 self.logger.exception("Failed to stop inference service")
+        
+        # 停止疲劳度评估服务
+        if self.fatigue_assessment_service:
+            try:
+                self.fatigue_assessment_service.stop()
+            except Exception:
+                self.logger.exception("Failed to stop fatigue assessment service")
         
         for interface in self.interfaces.values():
             try:

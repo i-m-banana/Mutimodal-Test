@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -68,7 +69,8 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._setup_debug_shortcuts()
         
-        # 延迟预加载摄像头（不阻塞UI启动）
+        # ✅ 恢复预加载：应用启动时预加载摄像头(使用临时目录)
+        # 在校准页面时会用正确的session_dir重新初始化
         from .qt import QTimer
         QTimer.singleShot(800, self._preload_camera)
 
@@ -86,7 +88,7 @@ class MainWindow(QMainWindow):
             mode = "short"
         
         self.sart_mode = mode
-        self.sart_duration = 300 if mode == "short" else 1500
+        self.sart_duration = 60 if mode == "short" else 1500
         
         logger.info(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
         
@@ -96,6 +98,16 @@ class MainWindow(QMainWindow):
 
     def _setup_main_window(self) -> None:
         self.setWindowTitle('非接触人员状态评估系统')
+        self.setStyleSheet("""
+                   QStackedWidget {
+                       background: qlineargradient(
+                           x1:0, y1:0, x2:1, y2:1,
+                           stop:0 #E5F7F9,
+                           stop:0.5 #F2FBFC,
+                           stop:1 white
+                       );
+                   }
+               """)
         
         # 使用响应式缩放
         scaler = get_scaler()
@@ -111,6 +123,16 @@ class MainWindow(QMainWindow):
     def _create_pages(self) -> None:
         self.stack = FadingStackedWidget()
         self.stack.set_animation_duration(400)
+        # ⭐ 设置从左上到右下的渐变背景
+        self.stack.setStyleSheet("""
+                         QStackedWidget {
+                             background: qlineargradient(
+                                 x1:0, y1:0, x2:1, y2:1,
+                                 stop:0 #E5F7F9,
+                                 stop:1 white
+                             );
+                         }
+                     """)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -140,20 +162,26 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.stack, 1)
 
-        self.brain_load_tip = QLabel("本测试需要全程采集您的脑电信号来进行脑负荷测试")
+        # brain_load_tip 占位符（不显示文字，仅保持布局）
+        self.brain_load_tip = QLabel("")  # 空文本占位
         self.brain_load_tip.setAlignment(Qt.AlignCenter)
-        self.brain_load_tip.setWordWrap(True)
-        # 减小字体和上下边距，适配小屏幕
-        self.brain_load_tip.setStyleSheet("color: #666; font-size: 14px; padding: 2px 0;")
-        self.brain_load_tip.setMaximumHeight(scale(26))  # 进一步减小最大高度
-
-        main_layout.addWidget(self.brain_load_tip, 0, Qt.AlignBottom)
+        self.brain_load_tip.setStyleSheet("""
+            QLabel {
+                background: transparent;
+                color: transparent;
+                font-size: 0px;
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
+        self.brain_load_tip.setVisible(False)  # 默认隐藏
+        main_layout.addWidget(self.brain_load_tip)
 
         self.stack.setCurrentWidget(self.login_page)
 
     def _connect_signals(self) -> None:
-        self.calibration_page.calibration_finished.connect(self.show_baseline_page)
-        self.baseline_page.baseline_finished.connect(self.show_sart_page)
+        self.calibration_page.calibration_finished.connect(self.show_baseline_prompt_in_test)  # 修改：显示基线提示而不是直接进入基线
+        self.baseline_page.baseline_finished.connect(self.show_sart_prompt_in_test)  # 修改：显示SART提示而不是直接进入SART
         self.sart_page.sart_finished.connect(self.show_test_page)
 
     def _setup_debug_shortcuts(self) -> None:
@@ -170,8 +198,8 @@ class MainWindow(QMainWindow):
 
     def _debug_show_login(self) -> None:
         logger.info("调试快捷键：跳转到登录页面")
+        self.brain_load_tip.setVisible(False)
         self.stack.fade_to_index(0)
-        self.brain_load_tip.setVisible(True)
 
     def _debug_show_calibration(self) -> None:
         logger.info("调试快捷键：跳转到校准页面")
@@ -181,11 +209,11 @@ class MainWindow(QMainWindow):
             self.test_page.set_current_user(self.current_user)
         except Exception as exc:  # noqa: BLE001
             logger.debug("同步调试用户名失败: %s", exc)
+        self.brain_load_tip.setVisible(False)
         self.stack.fade_to_index(1)
-        self.brain_load_tip.setVisible(True)
 
     def _debug_show_test(self) -> None:
-        logger.info("调试快捷键：跳转到测试页面")
+        logger.info("调试快捷键：跳转到测试页面（显示基线提示）")
         if not getattr(self, "current_user", None):
             self.current_user = "debug"
         try:
@@ -193,12 +221,22 @@ class MainWindow(QMainWindow):
             self.sart_page.set_session_dir(self.test_page.session_dir if hasattr(self.test_page, 'session_dir') else 'recordings')
         except Exception as exc:  # noqa: BLE001
             logger.debug("同步调试用户名失败: %s", exc)
-        self.stack.fade_to_index(4)  # 跳到测试页面（索引4）
-        self.brain_load_tip.setVisible(False)
+        
+        # 后门跳过时也要停止多模态数据采集
+        logger.info("⏭️ 调试后门跳过SART，停止多模态数据采集...")
         try:
-            self.test_page.start_test()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("调试快捷键启动测试失败: %s", exc)
+            multidata_stop_collection()
+            logger.info("✅ 多模态数据采集已停止（调试后门）")
+        except Exception as exc:
+            logger.error(f"❌ 停止多模态数据采集失败（调试后门）: {exc}")
+        
+        self.brain_load_tip.setVisible(False)
+        self.stack.fade_to_index(4)  # 跳到测试页面（索引4）
+        
+        # 显示基线提示页面（索引0），而不是情绪检测
+        if hasattr(self.test_page, 'answer_stack'):
+            self.test_page.answer_stack.setCurrentIndex(0)
+            logger.info("✅ 已显示基线校准提示页面")
 
     def show_calibration_page(self, username: str) -> None:
         logger.info("正在切换到校准页面...")
@@ -207,35 +245,82 @@ class MainWindow(QMainWindow):
             self.test_page.set_current_user(self.current_user)
         except Exception as exc:  # noqa: BLE001
             logger.warning("同步用户名到测试页失败: %s", exc)
-        self.stack.fade_to_index(1)
-
-    def show_baseline_page(self) -> None:
-        """切换到基线校准页面"""
-        logger.info("正在切换到基线校准页面...")
         
-        # 为基线创建会话目录（因为基线在 TestPage 的 start_test 之前运行）
+        # ⚠️ 修复：在切换到校准页面时就创建session_dir，避免EEG预连接和后续数据使用不同目录
+        # 这样确保整个测试流程（校准→基线→文本QA→血压→舒尔特）使用同一个session_dir
         if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
             from datetime import datetime
             import os
             session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             user_dir = self.current_user or 'anonymous'
             
-            # 🐛 修复：使用项目根目录的绝对路径，而不是相对路径
-            # 项目根目录 = ui/ 的父目录
+            # 使用项目根目录的绝对路径
             project_root = Path(__file__).parent.parent.parent
             session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
             
-            # 保存到 test_page 以便后续使用
+            # 保存到 test_page，供所有后续阶段使用
             self.test_page.session_timestamp = session_timestamp
             self.test_page.session_dir = session_dir
             
-            logger.info(f"为基线创建会话目录: {session_dir}")
+            logger.info(f"🆕 创建整个测试会话的session目录: {session_dir}")
+            
+            # ✅ 更新session_dir：即使摄像头已预加载，也要用正确的session_dir重新初始化
+            # 这样可以确保后续录制的文件保存到正确的目录
+            logger.info(f"🎥 用正确的session_dir更新摄像头服务: {session_dir}")
+            from .utils.helpers import init_camera
+            
+            def on_camera_update_finished(success: bool) -> None:
+                if success:
+                    logger.info("✅ 摄像头session_dir更新成功")
+                    self.camera_preloaded = True
+                else:
+                    logger.warning("⚠️ 摄像头session_dir更新失败")
+                    self.camera_preloaded = False
+            
+            try:
+                # 传递正确的session_dir，更新后端AV服务的保存路径
+                init_camera(on_camera_update_finished, session_dir=session_dir)
+            except Exception as e:
+                logger.error(f"更新摄像头session_dir失败: {e}")
+                # 即使更新失败也标记为已加载，校准页面会fallback到自己初始化
+                self.camera_preloaded = False
+        else:
+            logger.info(f"✅ 已有session目录: {self.test_page.session_dir}")
         
-        # 传递时间戳列表和会话信息
+        self.brain_load_tip.setVisible(False)
+        self.stack.fade_to_index(1)
+
+    def show_baseline_page(self) -> None:
+        """切换到基线校准页面"""
+        logger.info("正在切换到基线校准页面...")
+        
+        # ✅ session_dir应该已经在校准页面创建了，这里只是防御性检查
+        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
+            logger.warning("⚠️ session_dir未在校准阶段创建，现在创建（这不应该发生）")
+            from datetime import datetime
+            import os
+            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            user_dir = self.current_user or 'anonymous'
+            
+            project_root = Path(__file__).parent.parent.parent
+            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
+            
+            self.test_page.session_timestamp = session_timestamp
+            self.test_page.session_dir = session_dir
+            
+            logger.info(f"⚠️ 补救：创建会话目录: {session_dir}")
+        else:
+            logger.info(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
+        
+        # 传递时间戳列表和会话信息（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
-            self.baseline_page.set_part_timestamps(self.test_page.part_timestamps)
+            save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
+            self.baseline_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 传递会话信息（用于EEG采集）
+        logger.info(f"📂 传递会话信息到基线页面:")
+        logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        logger.info(f"   - current_user = {self.current_user}")
         self.baseline_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
@@ -244,12 +329,21 @@ class MainWindow(QMainWindow):
         # 🔥 关键修改：在进入基线页面前启动EEG采集，保持整个流程连续
         self._start_eeg_collection_for_session()
         
+        # ✅ 重置基线页面状态（防止上次的完成提示残留）
+        self.baseline_page.reset()
+        logger.info("✅ 已重置基线校准页面状态")
+        
+        self.brain_load_tip.setVisible(True)
         self.stack.fade_to_index(2)
-        self.brain_load_tip.setVisible(False)  # 基线页面隐藏脑电提示
-        # 基线页面有自己的开始按钮，不需要自动启动
+        # 基线页面会在showEvent()中自动开始
     
     def _start_eeg_collection_for_session(self) -> None:
-        """为整个测试会话启动EEG采集（异步，非阻塞）"""
+        """为整个测试会话启动EEG采集（异步，非阻塞）
+        
+        ⚠️ 注意：如果EEG已经在校准阶段启动（calibration页面的预连接），
+        后端会返回 'already-running' 状态，这是正常的。重要的是确保
+        使用的是当前的 session_dir。
+        """
         from ..utils_common.thread_process_manager import get_thread_manager
         thread_manager = get_thread_manager()
         
@@ -261,8 +355,24 @@ class MainWindow(QMainWindow):
                     save_dir=self.test_page.session_dir,
                     part=1
                 )
-                logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
-                logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+                status = result.get('status', '').lower()
+                
+                if status == 'already-running':
+                    # EEG已在运行（可能在校准阶段启动）
+                    old_dir = result.get('save_dir', 'unknown')
+                    if old_dir != os.path.join(self.test_page.session_dir, 'eeg'):
+                        logger.warning(f"⚠️ EEG已在运行但目录不匹配！")
+                        logger.warning(f"   当前EEG目录: {old_dir}")
+                        logger.warning(f"   期望session目录: {self.test_page.session_dir}/eeg")
+                        logger.info("💡 建议：在校准页面时应该已经设置了正确的session_dir")
+                    else:
+                        logger.info(f"✅ EEG采集已在运行（校准阶段启动），继续使用: {old_dir}")
+                elif status == 'started':
+                    logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
+                    logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+                else:
+                    logger.warning(f"⚠️ EEG启动返回未知状态: {status}")
+                    
             except Exception as e:
                 logger.error(f"❌ 启动测试会话EEG采集失败: {e}")
                 logger.info("测试将继续运行，但不会记录EEG数据")
@@ -272,13 +382,53 @@ class MainWindow(QMainWindow):
             task_name="测试会话EEG采集启动"
         )
     
+    def show_baseline_prompt_in_test(self) -> None:
+        """设备校准完成后，跳转到test页面显示基线提示"""
+        logger.info("设备校准完成，显示基线校准提示页面...")
+        
+        # 切换到test页面
+        self.brain_load_tip.setVisible(False)
+        self.stack.fade_to_index(4)
+        self.test_page.start_eeg_collection()  # 启动SART阶段的EEG采集
+        
+        # 显示基线提示页面（answer_stack中的第0个widget）
+        if hasattr(self.test_page, 'answer_stack'):
+            self.test_page.answer_stack.setCurrentIndex(0)
+            # 隐藏摄像头和按钮
+            if hasattr(self.test_page, '_hide_camera_and_buttons'):
+                self.test_page._hide_camera_and_buttons()
+            # 更新导航栏状态
+            if hasattr(self.test_page, '_update_stage_nav_status'):
+                self.test_page._update_stage_nav_status()
+            logger.info("✅ 已显示基线校准提示页面")
+    
+    def show_sart_prompt_in_test(self) -> None:
+        """基线校准完成后，返回test页面显示SART提示"""
+        logger.info("基线校准完成，显示SART实验提示页面...")
+        
+        # 切换到test页面
+        self.brain_load_tip.setVisible(False)
+        self.stack.fade_to_index(4)
+        
+        # 显示SART提示页面（answer_stack中的第1个widget）
+        if hasattr(self.test_page, 'answer_stack'):
+            self.test_page.answer_stack.setCurrentIndex(1)
+            # 隐藏摄像头和按钮
+            if hasattr(self.test_page, '_hide_camera_and_buttons'):
+                self.test_page._hide_camera_and_buttons()
+            # 更新导航栏状态
+            if hasattr(self.test_page, '_update_stage_nav_status'):
+                self.test_page._update_stage_nav_status()
+            logger.info("✅ 已显示SART实验提示页面")
+    
     def show_sart_page(self) -> None:
         """切换到SART实验页面"""
         logger.info("正在切换到SART实验页面...")
         
-        # 同步时间戳列表
+        # 同步时间戳列表（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
-            self.sart_page.set_part_timestamps(self.test_page.part_timestamps)
+            save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
+            self.sart_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 确保会话目录已创建（可能已在基线阶段创建）
         if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
@@ -298,43 +448,62 @@ class MainWindow(QMainWindow):
             logger.info(f"为 SART 创建会话目录: {session_dir}")
         
         # 传递会话信息（用于EEG采集和结果保存）
+        logger.info(f"📂 传递会话信息到SART页面:")
+        logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        logger.info(f"   - current_user = {self.current_user}")
         self.sart_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
         )
         
-        self.stack.fade_to_index(3)
-        self.brain_load_tip.setVisible(False)  # SART页面隐藏脑电提示
+        # ✅ 重置SART页面状态（防止上次的完成提示残留）
+        self.sart_page.reset()
+        logger.info("✅ 已重置SART实验页面状态")
         
-        # SART有按空格开始的说明，不自动启动
-        # 用户需要按空格来开始测试
+        self.brain_load_tip.setVisible(True)
+        self.stack.fade_to_index(3)
+        
+        # SART会在showEvent()中自动开始测试
     
     def show_test_page(self) -> None:
         """切换到测试主流程页面"""
         logger.info("正在切换到测试页面（文本问答、血压、舒尔特）...")
-        self.stack.fade_to_index(4)
+        
+        # SART测试结束，停止多模态数据采集（EEG、RGB等）
+        logger.info("📊 SART测试已完成，停止多模态数据采集...")
+        try:
+            multidata_stop_collection()
+            logger.info("✅ 多模态数据采集已停止，疲劳度评估将自动开始")
+        except Exception as exc:
+            logger.error(f"❌ 停止多模态数据采集失败: {exc}")
+        
         self.brain_load_tip.setVisible(False)
+        self.stack.fade_to_index(4)
         self.test_page.start_test()
 
     def _preload_camera(self) -> None:
         """在后台预加载摄像头，不阻塞UI"""
         from .utils.helpers import init_camera
         
-        logger.info("🎥 开始预加载摄像头（后台异步）...")
+        logger.info("🎥 开始预加载摄像头（后台异步，使用临时目录）...")
         
         def on_preload_finished(success: bool) -> None:
             if success:
-                logger.info("✅ 摄像头预加载成功，校准页面将立即就绪")
+                logger.info("✅ 摄像头预加载成功，校准页面将更新为正确的session_dir")
                 self.camera_preloaded = True
             else:
                 logger.warning("⚠️ 摄像头预加载失败，将在校准页重试")
                 self.camera_preloaded = False
         
         try:
-            init_camera(on_preload_finished)
+            # 预加载时不传session_dir，使用默认的'recordings'
+            # 在校准页面会用正确的session_dir重新初始化
+            init_camera(on_preload_finished, session_dir=None)
         except Exception as e:
             logger.error(f"启动摄像头预加载失败: {e}")
             self.camera_preloaded = False
+    
+
 
     def closeEvent(self, event) -> None:  # noqa: N802
         logger.info("应用程序正在关闭...")
@@ -384,7 +553,10 @@ class MainWindow(QMainWindow):
             logger.debug("关闭应用时停止血压测量失败: %s", exc)
 
         if hasattr(self, 'test_page') and hasattr(self.test_page, 'schulte_widget'):
-            self.test_page.schulte_widget.reset_for_next_stage()
+            try:
+                self.test_page.schulte_widget.reset_for_next_stage()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("关闭应用时重置舒尔特widget失败: %s", exc)
         try:
             shutdown_all_managers()
             logger.info("所有线程进程管理器已关闭")

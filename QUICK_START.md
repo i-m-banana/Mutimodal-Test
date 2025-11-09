@@ -4,6 +4,8 @@
 
 - Python 3.11+
 - Windows 10/11 / Linux / macOS
+- 8GB+ RAM（推荐16GB）
+- （可选）NVIDIA GPU with CUDA支持（用于加速推理）
 - 所需依赖包已安装
 
 ## 📋 启动步骤
@@ -14,7 +16,7 @@
 
 ```bash
 # 进入项目根目录
-cd d:\duomotai\project-root-cut
+cd d:\Mutimodal-Test
 
 # 安装核心依赖
 pip install -r requirements.txt
@@ -24,48 +26,42 @@ pip install -r requirements.txt
 
 打开命令行，运行:
 ```bash
-cd d:\duomotai\project-root-cut
-python -m src.main --root .
+cd d:\Mutimodal-Test
+python -m src.main
 
 # 可选：关闭控制台监听输出（减少日志）
-python -m src.main --root . --no-listeners
+python -m src.main --no-listeners
 
 # 可选：显示全部事件日志
-python -m src.main --root . --full-events
+python -m src.main --full-events
 ```
 
 **期望输出**:
 ```
 INFO  WebsocketPushInterface | Starting WebSocket interface on 127.0.0.1:8765
 INFO  orchestrator | Orchestrator started
-INFO  inference | ✅ 统一推理服务已启动 (共 3 个模型)
+INFO  fatigue_assessment | ✅ 疲劳度评估服务已启动
+INFO  eeg_service | ✅ EEG服务已启动
+INFO  inference | ✅ 统一推理服务已启动
 ```
 
 ### 3. 启动UI应用
 
 另开一个命令行窗口，运行:
 ```bash
-cd d:\duomotai\project-root-cut
+cd d:\Mutimodal-Test
 
-# 默认启动（短流程：5分钟SART实验）
+# 默认启动
 python -m ui.main
-
-# 长流程启动（25分钟SART疲劳诱发实验）
-python -m ui.main --sart-mode long
 
 # 可选：启用调试模式（使用模拟数据，无需硬件）
 python -m ui.main --debug
 ```
 
-**SART 实验模式说明**:
-- **短流程（默认）**: 5分钟低负荷采集，适用于常规测试
-- **长流程**: 25分钟疲劳诱发，用于深度疲劳研究（每5分钟记录KSS困倦评分）
-
 **期望输出**:
 ```
 应用程序主窗口初始化完成
-✅ SART 模式已设置为: short (低负荷采集, 时长: 5分钟)
-已成功连接到后端服务器 ws://127.0.0.1:8765
+✅ 已成功连接到后端服务器 ws://127.0.0.1:8765
 ```
 
 
@@ -163,6 +159,41 @@ python -m ui.main
 1. 检查 `config/models.yaml` 中模型是否启用
 2. 确认模型文件是否存在于 `models_data/` 目录
 3. 检查 GPU/CUDA 环境（如果使用 GPU）
+
+### 问题5: 分数页面雷达图为空
+
+**现象**: 测试完成后分数页面显示"暂无测试数据"或雷达图为空
+
+**原因分析**:
+1. **疲劳度评估未完成**: 
+   - 日志显示 `没有收集到疲劳度分数数据`
+   - 疲劳评估是异步的,需要等待1-3秒
+   
+2. **某些阶段未完成**:
+   - 血压测量被跳过 (`血压脉搏检测: False`)
+   - 对应指标不会显示在雷达图上
+
+**解决方案**:
+```bash
+# 1. 等待疲劳评估完成
+# 测试完成后,等待3-5秒,系统会自动更新疲劳度分数
+
+# 2. 检查后端日志
+# 查看是否有 "📊 收到疲劳度推理结果" 和 "🎯 收到会话疲劳评估结果"
+
+# 3. 完成所有测试阶段
+# 确保完成: 基线校准 → SART → 情绪 → 血压 → 舒尔特
+```
+
+**预期日志输出**:
+```
+✅ 疲劳度分数已添加到列表, 当前列表长度=1
+🎯 收到会话疲劳评估结果: 94.28
+🔄 分数页面已显示,立即更新疲劳度分数
+✅ 疲劳度数据已更新到分数展示页面
+```
+
+**临时解决**: 如果只是部分指标缺失,雷达图会显示已完成的指标。疲劳度为0时不会显示,但其他有效指标(情绪、脑负荷、专注度、血压)仍会正常显示。
 
 ## 🐛 调试与日志
 

@@ -43,14 +43,20 @@ class BaselineCalibrationPage(QWidget):
         self.thread_manager = get_thread_manager()
     
     def _init_ui(self) -> None:
-        """初始化UI - 白色背景，黑色文字，简洁样式"""
-        # 取消黑色背景设置，使用默认白色背景
-        # 只设置页面属性标识
+        """初始化UI - 浅色渐变背景，黑色文字，简洁样式"""
+        # 设置页面属性标识
         self.setProperty("page_type", "baseline")
         
-        # 不再设置背景色，让它保持默认白色
-        # 只确保文字是黑色
+        # 设置明显的渐变背景（从左上白色到右下深青色）+ 文字颜色
         self.setStyleSheet("""
+            BaselineCalibrationPage {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 1),
+                    stop:0.5 rgba(200, 235, 245, 0.6),
+                    stop:1 rgba(127, 219, 255, 0.5)
+                );
+            }
             #baselinePage QLabel {
                 color: #000000 !important;
                 background-color: transparent !important;
@@ -62,40 +68,29 @@ class BaselineCalibrationPage(QWidget):
         layout.setSpacing(scale(40))
         layout.setAlignment(Qt.AlignCenter)
         
-        # 添加顶部弹性空间，让说明文字居中
+        # 添加顶部弹性空间，让十字居中
         layout.addStretch(1)
         
-        # 说明文字（初始显示）
-        self.instruction_label = QLabel(
-            "接下来将进行 30 秒的静息基线采集\n\n"
-            "请保持放松，眼睛注视屏幕中央的十字\n"
-            "尽量减少眨眼和身体移动\n\n"
-            "按【空格】开始"
-        )
-        self.instruction_label.setAlignment(Qt.AlignCenter)
-        self.instruction_label.setWordWrap(True)
-        instruction_font = QFont("Arial", 24)  # 固定24px字号
-        self.instruction_label.setFont(instruction_font)
-        self.instruction_label.setStyleSheet(
-            "color: #000000 !important; line-height: 2.0; background-color: transparent !important; font-size: 24px !important;"
-        )
+        # 说明文字（移除，不再显示）
+        self.instruction_label = QLabel("")
+        self.instruction_label.setVisible(False)  # 隐藏提示文字
         layout.addWidget(self.instruction_label)
         
-        # 十字注视点（初始隐藏）- 占据主要空间
+        # 十字注视点(直接显示)- 占据主要空间
         self.fixation_cross = QLabel("+")
         self.fixation_cross.setAlignment(Qt.AlignCenter)
-        cross_font = QFont("Arial", 250, QFont.Bold)  # 固定250px超大字号
+        cross_font = QFont("阿里健康体2.0 中文 45 R", 250, 75)  # 固定250px超大字号
         self.fixation_cross.setFont(cross_font)
         self.fixation_cross.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
         )
-        self.fixation_cross.setVisible(False)
+        self.fixation_cross.setVisible(True)  # 直接显示
         layout.addWidget(self.fixation_cross, stretch=1)  # 占据主要空间
         
-        # 完成提示标签（初始隐藏）- 居中显示
+        # 完成提示标签(初始隐藏)- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("Arial", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, 75)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"
@@ -109,7 +104,7 @@ class BaselineCalibrationPage(QWidget):
         # 倒计时显示（初始隐藏）
         self.countdown_label = QLabel(f"剩余 {self.BASELINE_DURATION} 秒")
         self.countdown_label.setAlignment(Qt.AlignCenter)
-        countdown_font = QFont("Arial", 20)  # 固定20px字号
+        countdown_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px字号
         self.countdown_label.setFont(countdown_font)
         self.countdown_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"
@@ -127,10 +122,10 @@ class BaselineCalibrationPage(QWidget):
         """开始基线采集"""
         config.logger.info("📍 开始30秒基线校准")
         
-        # 隐藏说明，显示十字和倒计时
+        # 确保十字显示，隐藏倒计时
         self.instruction_label.setVisible(False)
         self.fixation_cross.setVisible(True)
-        self.countdown_label.setVisible(True)
+        self.countdown_label.setVisible(False)  # 隐藏倒计时
         
         # 重置倒计时
         self.remaining_time = self.BASELINE_DURATION
@@ -138,7 +133,10 @@ class BaselineCalibrationPage(QWidget):
         
         # 记录基线开始时间戳（触发10）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录基线开始时间戳: {call_timestamp}")
         
         # ✅ 启动疲劳度检测（多模态采集）
@@ -179,7 +177,10 @@ class BaselineCalibrationPage(QWidget):
         
         # 记录基线结束时间戳（触发11）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录基线结束时间戳: {call_timestamp}")
         
         # ⚠️ 注意：EEG采集继续运行，不在这里停止
@@ -205,19 +206,18 @@ class BaselineCalibrationPage(QWidget):
             self.baseline_finished.emit()
             return
         
-        # 空格键开始
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            if not self.is_running and self.instruction_label.isVisible():
-                self._start_baseline()
-        
-        # Q键跳过
-        elif event.key() == Qt.Key_Q and not event.isAutoRepeat():
+        # Q键跳过或中断
+        if event.key() == Qt.Key_Q and not event.isAutoRepeat():
             if not self.is_running:
                 config.logger.info("⏭️ 用户跳过基线校准")
                 # 记录开始和结束时间戳（快速标记）
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)  # 开始
-                self.part_timestamps.append(call_timestamp)  # 结束
+                if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+                    self._save_timestamp_callback(call_timestamp)  # 开始
+                    self._save_timestamp_callback(call_timestamp)  # 结束
+                else:
+                    self.part_timestamps.append(call_timestamp)  # 开始
+                    self.part_timestamps.append(call_timestamp)  # 结束
                 
                 # 显示跳过提示,等待按键继续
                 self.instruction_label.setVisible(False)
@@ -234,13 +234,29 @@ class BaselineCalibrationPage(QWidget):
         
         super().keyPressEvent(event)
     
-    def set_part_timestamps(self, timestamps: list) -> None:
+    def set_part_timestamps(self, timestamps: list, save_callback=None) -> None:
         """设置时间戳列表（与TestPage共享）
         
         Args:
             timestamps: 时间戳列表引用
+            save_callback: 保存时间戳的回调函数（可选）
         """
         self.part_timestamps = timestamps
+        self._save_timestamp_callback = save_callback
+    
+    def showEvent(self, event) -> None:
+        """页面显示时自动开始基线校准"""
+        super().showEvent(event)
+        # 只在第一次显示或重置后开始
+        if not self.is_running and not self.waiting_for_continue:
+            # 延迟500ms后自动开始，让用户有时间准备
+            QTimer.singleShot(500, self._auto_start_baseline)
+    
+    def _auto_start_baseline(self) -> None:
+        """自动开始基线校准（页面显示后触发）"""
+        if not self.is_running and not self.waiting_for_continue:
+            config.logger.info("🚀 页面显示，自动开始基线校准")
+            self._start_baseline()
     
     def set_session_info(self, session_dir: str, current_user: str) -> None:
         """设置会话信息（用于EEG采集）
@@ -261,15 +277,15 @@ class BaselineCalibrationPage(QWidget):
         self.waiting_for_continue = False  # 重置等待标志
         self.remaining_time = self.BASELINE_DURATION
         
-        self.instruction_label.setVisible(True)
-        self.fixation_cross.setVisible(False)
+        self.instruction_label.setVisible(False)  # 不显示提示
+        self.fixation_cross.setVisible(True)  # 直接显示十字
         self.completion_label.setVisible(False)
         self.completion_label.setText("")
-        self.countdown_label.setVisible(False)
+        self.countdown_label.setVisible(False)  # 倒计时初始隐藏，开始后才显示
         self.countdown_label.setText("")
         
         # 重置倒计时字体
-        countdown_font = QFont("Arial", 20)  # 固定20px
+        countdown_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px
         self.countdown_label.setFont(countdown_font)
         self.countdown_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"

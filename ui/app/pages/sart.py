@@ -54,14 +54,20 @@ class SARTPage(QWidget):
         self._reset_state()
     
     def _init_ui(self) -> None:
-        """初始化UI - 白色背景，黑色文字，简洁样式"""
-        # 取消黑色背景设置，使用默认白色背景
-        # 只设置页面属性标识
+        """初始化UI - 浅色渐变背景，黑色文字，简洁样式"""
+        # 设置页面属性标识
         self.setProperty("page_type", "sart")
         
-        # 不再设置背景色，让它保持默认白色
-        # 只确保文字是黑色
+        # 设置明显的渐变背景（从左上白色到右下深青色）+ 文字颜色
         self.setStyleSheet("""
+            SARTPage {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 255, 255, 1),
+                    stop:0.5 rgba(200, 235, 245, 0.6),
+                    stop:1 rgba(127, 219, 255, 0.5)
+                );
+            }
             #sartPage QLabel {
                 color: #000000 !important;
                 background-color: transparent !important;
@@ -75,29 +81,25 @@ class SARTPage(QWidget):
         # 添加顶部弹性空间，让说明文字居中
         layout.addStretch(1)
         
-        # 说明文字（初始显示）- 居中
+        # 说明文字（移除"按空格开始"提示，直接自动开始）- 居中
         mode_text = "低负荷采集" if self.mode == "short" else "疲劳诱发"
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
         
-        self.instruction_label = QLabel(
-            f"SART 任务 ({mode_text}, 时长: {duration_text})\n\n"
-            "规则：看到除'3'外的数字按【空格】，看到'3'不要按。\n\n"
-            "请保持安静、注视中央，不说话。\n\n"
-            "按【空格】开始测试"
-        )
+        self.instruction_label = QLabel("")  # 不显示任何说明文字
         self.instruction_label.setAlignment(Qt.AlignCenter)
         self.instruction_label.setWordWrap(True)
-        instruction_font = QFont("Arial", 24)  # 固定24px字号
+        instruction_font = QFont("阿里健康体2.0 中文 45 R", 24)  # 固定24px字号
         self.instruction_label.setFont(instruction_font)
         self.instruction_label.setStyleSheet(
             "color: #000000 !important; line-height: 2.0; background-color: transparent !important; font-size: 24px !important;"
         )
+        self.instruction_label.setVisible(False)  # 初始隐藏说明文字
         layout.addWidget(self.instruction_label)
         
         # 数字刺激显示 - 中央
         self.digit_label = QLabel("")
         self.digit_label.setAlignment(Qt.AlignCenter)
-        digit_font = QFont("Arial", 250, QFont.Bold)  # 固定250px超大字号
+        digit_font = QFont("阿里健康体2.0 中文 45 R", 250, 75)  # 固定250px超大字号
         self.digit_label.setFont(digit_font)
         self.digit_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 250px !important; font-weight: bold !important;"
@@ -105,10 +107,10 @@ class SARTPage(QWidget):
         self.digit_label.setVisible(False)
         layout.addWidget(self.digit_label, stretch=1)  # 占据主要空间
         
-        # 完成提示标签（初始隐藏）- 居中显示
+        # 完成提示标签(初始隐藏)- 居中显示
         self.completion_label = QLabel("")
         self.completion_label.setAlignment(Qt.AlignCenter)
-        completion_font = QFont("Arial", 36, QFont.Bold)  # 固定36px
+        completion_font = QFont("阿里健康体2.0 中文 45 R", 36, 75)  # 固定36px
         self.completion_label.setFont(completion_font)
         self.completion_label.setStyleSheet(
             "color: #000000 !important; background-color: transparent !important; font-size: 36px !important; font-weight: bold !important;"
@@ -122,7 +124,7 @@ class SARTPage(QWidget):
         # 进度信息 - 底部
         self.progress_label = QLabel("")
         self.progress_label.setAlignment(Qt.AlignCenter)
-        progress_font = QFont("Arial", 20)  # 固定20px字号
+        progress_font = QFont("阿里健康体2.0 中文 45 R", 20)  # 固定20px字号
         self.progress_label.setFont(progress_font)
         self.progress_label.setStyleSheet(
             "color: #666666 !important; background-color: transparent !important; padding-bottom: 10px; font-size: 20px !important;"
@@ -133,7 +135,7 @@ class SARTPage(QWidget):
         # 统计信息（调试用，初始隐藏）- 最底部
         self.stats_label = QLabel("")
         self.stats_label.setAlignment(Qt.AlignCenter)
-        stats_font = QFont("Arial", 16)  # 固定16px字号
+        stats_font = QFont("阿里健康体2.0 中文 45 R", 16)  # 固定16px字号
         self.stats_label.setFont(stats_font)
         self.stats_label.setStyleSheet(
             "color: #444444 !important; background-color: transparent !important; padding-bottom: 5px; font-size: 16px !important;"
@@ -187,7 +189,10 @@ class SARTPage(QWidget):
         
         # 记录SART开始时间戳（触发1 for short, 20 for long）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录SART开始时间戳: {call_timestamp} (模式={self.mode})")
         
         # ⚠️ 注意：EEG采集应该已经在运行中
@@ -287,7 +292,10 @@ class SARTPage(QWidget):
         
         # 记录SART结束时间戳（触发4 for short, 21 for long）
         call_timestamp = time.time()
-        self.part_timestamps.append(call_timestamp)
+        if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+            self._save_timestamp_callback(call_timestamp)
+        else:
+            self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录SART结束时间戳: {call_timestamp} (模式={self.mode})")
         
         # ⚠️ 注意：EEG采集继续运行，不在这里停止
@@ -307,7 +315,7 @@ class SARTPage(QWidget):
         # 显示完成信息,等待用户按键
         self.digit_label.setVisible(False)
         self.progress_label.setVisible(False)
-        self.completion_label.setText(f"任务结束\n\n准确率: {accuracy:.1f}%\n\n按任意键继续")
+        self.completion_label.setText(f"任务结束\n\n\n\n按任意键继续")
         self.completion_label.setVisible(True)
         
         # 设置标志,表示等待按键确认
@@ -319,11 +327,16 @@ class SARTPage(QWidget):
         
         # 获取会话目录
         session_dir = getattr(self, 'session_dir', None)
-        config.logger.info(f"📂 SART：当前session_dir = {session_dir}")
+        config.logger.info(f"📂 SART _ensure_sart_directory()调用:")
+        config.logger.info(f"   - session_dir属性 = {session_dir}")
+        config.logger.info(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
+        config.logger.info(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
         
         if not session_dir:
             # 如果没有设置会话目录，使用默认路径
-            config.logger.warning("⚠️ SART 会话目录未设置，使用默认路径")
+            config.logger.error("❌ SART 会话目录未设置！")
+            config.logger.error("   这意味着 set_session_info() 从未被调用，或session_dir为None")
+            config.logger.error("   SART数据将保存到默认路径，这不应该发生！")
             session_dir = 'recordings/default'
         
         # 在会话目录下创建 sart 子目录
@@ -397,13 +410,15 @@ class SARTPage(QWidget):
         except Exception as e:
             config.logger.error(f"❌ 保存SART结果失败: {e}", exc_info=True)
     
-    def set_part_timestamps(self, timestamps: list) -> None:
+    def set_part_timestamps(self, timestamps: list, save_callback=None) -> None:
         """设置时间戳列表（与TestPage共享）
         
         Args:
             timestamps: 时间戳列表引用
+            save_callback: 保存时间戳的回调函数（可选）
         """
         self.part_timestamps = timestamps
+        self._save_timestamp_callback = save_callback
     
     def set_mode(self, mode: str, duration: int = None) -> None:
         """
@@ -414,20 +429,12 @@ class SARTPage(QWidget):
             duration: 自定义时长(秒)，None则使用默认值
         """
         self.mode = mode
-        self.total_duration = duration if duration else (300 if mode == "short" else 1500)
+        self.total_duration = duration if duration else (120 if mode == "short" else 1500)
         
         mode_text = "低负荷采集" if mode == "short" else "疲劳诱发"
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
         
         config.logger.info(f"✅ SART 模式已设置为: {mode} ({mode_text}, 时长: {duration_text})")
-        
-        # 更新说明文字
-        self.instruction_label.setText(
-            f"SART 任务 ({mode_text}, 时长: {duration_text})\n\n"
-            "规则：看到除'3'外的数字按【空格】，看到'3'不要按。\n\n"
-            "请保持安静、注视中央，不说话。\n\n"
-            "按【空格】开始测试"
-        )
     
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """键盘事件处理"""
@@ -438,13 +445,10 @@ class SARTPage(QWidget):
             self.sart_finished.emit()
             return
         
-        # 空格键：开始测试或响应刺激
+        # 空格键：响应刺激（移除手动启动功能，改为自动启动）
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
-            # 未开始时按空格启动测试
-            if not self.is_running and self.instruction_label.isVisible():
-                self.start_test()
             # 运行中按空格响应刺激
-            elif self.is_running and not self.key_pressed:
+            if self.is_running and not self.key_pressed:
                 self.key_pressed = True
                 self.response_time = (time.time() - self.trial_start_time) * 1000  # ms
                 config.logger.debug(f"按键响应: RT={self.response_time:.1f}ms")
@@ -455,8 +459,12 @@ class SARTPage(QWidget):
                 config.logger.info("⏭️ 用户跳过SART测试")
                 # 记录开始和结束时间戳（快速标记）
                 call_timestamp = time.time()
-                self.part_timestamps.append(call_timestamp)  # 开始
-                self.part_timestamps.append(call_timestamp)  # 结束
+                if hasattr(self, '_save_timestamp_callback') and self._save_timestamp_callback:
+                    self._save_timestamp_callback(call_timestamp)  # 开始
+                    self._save_timestamp_callback(call_timestamp)  # 结束
+                else:
+                    self.part_timestamps.append(call_timestamp)  # 开始
+                    self.part_timestamps.append(call_timestamp)  # 结束
                 
                 # 即使跳过也要创建 sart 目录并尝试保存数据（如果有试次记录）
                 self._ensure_sart_directory()
@@ -493,9 +501,18 @@ class SARTPage(QWidget):
             session_dir: 会话目录路径（例如：recordings/admin/20251024_185949）
             current_user: 当前用户名
         """
+        config.logger.info(f"🔧 SART.set_session_info()被调用:")
+        config.logger.info(f"   - 传入的session_dir = {session_dir}")
+        config.logger.info(f"   - 传入的current_user = {current_user}")
+        config.logger.info(f"   - session_dir是否为None? {session_dir is None}")
+        config.logger.info(f"   - session_dir是否为空字符串? {session_dir == ''}")
+        
         self.session_dir = session_dir
         self.current_user = current_user
-        config.logger.info(f"✅ SART页面已设置会话信息: user={current_user}, dir={session_dir}")
+        
+        config.logger.info(f"✅ SART页面已设置会话信息:")
+        config.logger.info(f"   - self.session_dir = {self.session_dir}")
+        config.logger.info(f"   - self.current_user = {self.current_user}")
         config.logger.info(f"📂 SART结果将保存到: {session_dir}/sart/")
     
     def reset(self) -> None:
@@ -505,12 +522,26 @@ class SARTPage(QWidget):
         self.waiting_for_continue = False  # 重置等待标志
         self._reset_state()
         
-        self.instruction_label.setVisible(True)
+        self.instruction_label.setVisible(False)  # 不显示说明文字
         self.digit_label.setVisible(False)
         self.completion_label.setVisible(False)
         self.completion_label.setText("")
         self.progress_label.setVisible(False)
         self.stats_label.setVisible(False)
+    
+    def showEvent(self, event) -> None:
+        """页面显示时自动开始SART测试"""
+        super().showEvent(event)
+        # 只在第一次显示或重置后自动开始
+        if not self.is_running and not self.waiting_for_continue:
+            # 延迟500ms后自动开始，让用户有时间准备
+            QTimer.singleShot(500, self._auto_start_sart)
+    
+    def _auto_start_sart(self) -> None:
+        """自动开始SART测试（页面显示后触发）"""
+        if not self.is_running and not self.waiting_for_continue:
+            config.logger.info("🚀 页面显示，自动开始SART测试")
+            self.start_test()
 
 
 __all__ = ["SARTPage"]

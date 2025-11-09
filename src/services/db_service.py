@@ -18,7 +18,7 @@ class DatabaseUnavailable(RuntimeError):
 
 class MysqlDB:
     """MySQL wrapper providing basic CRUD operations."""
-    def __init__(self, host="localhost", user="root", password="123456", database="tired"):
+    def __init__(self, host="localhost", user="root", password="123456", database="multimodal_test"):
         self.config = {
             'host': host,
             'user': user,
@@ -354,7 +354,7 @@ class DatabaseService:
             "host": os.getenv("UI_DB_HOST", "localhost"),
             "user": os.getenv("UI_DB_USER", "root"),
             "password": os.getenv("UI_DB_PASSWORD", "123456"),
-            "database": os.getenv("UI_DB_NAME", "tired"),
+            "database": os.getenv("UI_DB_NAME", "multimodal_test"),
         }
         if self._db_disabled:
             self.logger.warning("Database commands will be disabled (UI_SKIP_DATABASE=1)")
