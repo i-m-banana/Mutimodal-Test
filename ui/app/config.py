@@ -212,7 +212,7 @@ APP_MODE = "debug" if DEBUG_MODE else "normal"
 _bp_port_raw = os.getenv("UI_BP_PORT", "COM8")
 BP_PORT: Optional[str] = _bp_port_raw.strip() if _bp_port_raw else None
 
-DEFAULT_CAMERA_INDEX = env_int("UI_CAMERA_INDEX", 1)
+DEFAULT_CAMERA_INDEX = env_int("UI_CAMERA_INDEX", 0)
 DEFAULT_AUDIO_DEVICE_INDEX = env_int("UI_AUDIO_DEVICE_INDEX", None)
 ACTIVE_CAMERA_INDEX: int = DEFAULT_CAMERA_INDEX if DEFAULT_CAMERA_INDEX is not None else 0
 ACTIVE_AUDIO_DEVICE_INDEX: Optional[int] = DEFAULT_AUDIO_DEVICE_INDEX
@@ -220,7 +220,7 @@ ACTIVE_AUDIO_DEVICE_INDEX: Optional[int] = DEFAULT_AUDIO_DEVICE_INDEX
 DB_HOST = os.getenv("UI_DB_HOST", "localhost")
 DB_USER = os.getenv("UI_DB_USER", "root")
 DB_PASSWORD = os.getenv("UI_DB_PASSWORD", "123456")
-DB_NAME = os.getenv("UI_DB_NAME", "multimodal_test")
+DB_NAME = os.getenv("UI_DB_NAME", "test")
 
 # ---------------------------------------------------------------------------
 # Logging and data locations

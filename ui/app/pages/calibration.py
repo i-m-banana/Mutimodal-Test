@@ -488,12 +488,14 @@ class CalibrationPage(QWidget):
                     
                     # ✅ 第二步：启动脑负荷推理（多模态数据采集）
                     try:
-                        from ...services.backend_proxy import multidata_start_collection
-                        
-                        multidata_result = multidata_start_collection(
-                            current_user,
-                            part=1,
+                        # `backend_proxy` 提供的接口名为 multimodal_start_collection（不是 multidata_start_collection）
+                        from ...services.backend_proxy import multimodal_start_collection
+
+                        # 使用显式关键字参数以避免参数顺序或命名歧义
+                        multidata_result = multimodal_start_collection(
+                            username=current_user,
                             save_dir=session_dir,
+                            part=1,
                         )
                         multidata_status = (multidata_result or {}).get("status", "").lower()
                         if multidata_status in {"started", "running", "already-running"}:
