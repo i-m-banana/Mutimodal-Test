@@ -87,7 +87,7 @@ class UICommandRouter:
         try:
             eeg_diag = self.eeg_service.diagnostics()
             self.logger.info(
-                "EEG -> 驱动可用=%s 强制模拟=%s 运行中=%s",
+                "脑电设备 -> 驱动可用=%s 强制模拟=%s 运行中=%s",
                 eeg_diag.get("hardware_driver_available"),
                 eeg_diag.get("force_simulation"),
                 eeg_diag.get("running"),
@@ -121,16 +121,16 @@ class UICommandRouter:
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.warning("音视频模块状态检测失败: %s", exc)
 
-        try:
-            tts_diag = self.tts_service.diagnostics()
-            self.logger.info(
-                "语音播报 -> 默认后端=%s PowerShell=%s pyttsx3=%s",
-                tts_diag.get("default_backend"),
-                tts_diag.get("powershell_available"),
-                tts_diag.get("pyttsx3_available"),
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.warning("TTS 模块状态检测失败: %s", exc)
+        # try:
+        #     tts_diag = self.tts_service.diagnostics()
+        #     self.logger.info(
+        #         "语音播报 -> 默认后端=%s PowerShell=%s pyttsx3=%s",
+        #         tts_diag.get("default_backend"),
+        #         tts_diag.get("powershell_available"),
+        #         tts_diag.get("pyttsx3_available"),
+        #     )
+        # except Exception as exc:  # pragma: no cover - defensive
+        #     self.logger.warning("TTS 模块状态检测失败: %s", exc)
 
         try:
             db_diag = self.db_service.diagnostics()

@@ -138,7 +138,7 @@ def crop_video_to_file(video_path: Path, output_path: Path) -> bool:
         print(f"[WARN] No frames written for: {video_path}", file=sys.stderr)
         return False
 
-    print(f"Saved cropped video -> {output_path}")
+    # print(f"Saved cropped video -> {output_path}")
     return True
 
 

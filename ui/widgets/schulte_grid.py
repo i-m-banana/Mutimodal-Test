@@ -458,7 +458,7 @@ class SchulteGridDialog(QDialog):
         # 创建QMovie对象用于播放GIF
         # 使用绝对路径确保能找到文件
         gif_path = Path(__file__).resolve().parent.parent / "assets" / "gif" / "shuerte.gif"
-        logger.info(f"🔍 尝试加载GIF: {gif_path}")
+        logger.debug(f"🔍 尝试加载GIF: {gif_path}")
         
         if gif_path.exists():
             self.gif_movie = QMovie(str(gif_path))
@@ -467,7 +467,7 @@ class SchulteGridDialog(QDialog):
                 # 显示第一帧但不自动播放
                 self.gif_movie.jumpToFrame(0)  # 跳到第一帧
                 self.gif_playing = False
-                logger.info(f"✅ 舒尔特GIF已加载成功: {gif_path}")
+                logger.debug(f"✅ 舒尔特GIF已加载成功: {gif_path}")
             else:
                 logger.error(f"❌ GIF文件无效: {gif_path}")
                 self.gif_movie = None

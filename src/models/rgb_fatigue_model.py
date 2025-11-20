@@ -44,7 +44,7 @@ class RGBFatigueModel(BaseInferenceModel):
         if not HAS_DEPS:
             raise RuntimeError(f"无法加载依赖: {_import_error}")
         
-        self.logger.info("✅ RGB疲劳度模型初始化完成 (MediaPipe版本)")
+        self.logger.debug("✅ RGB疲劳度模型初始化完成 (MediaPipe版本)")
     
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """执行推理
@@ -144,13 +144,13 @@ class RGBFatigueModel(BaseInferenceModel):
             raw_score = fatigue_score
             rgb_fatigue_score = fatigue_score
             
-            # 判断疲劳等级（基于50-90分，分数越高越疲劳）
-            if rgb_fatigue_score < 65:  # <65分 = 不疲劳
-                fatigue_level = "正常😊"
+            # 判断疲劳等级（基于50-90分，分数越高越好）
+            if rgb_fatigue_score < 65:  # <65分 = 疲劳
+                fatigue_level = "重度疲劳😴"
             elif rgb_fatigue_score < 77.5:  # 65-77.5 = 轻度疲劳
                 fatigue_level = "轻度疲劳😐"
-            else:  # >=77.5 = 重度疲劳
-                fatigue_level = "重度疲劳😴"
+            else:  # >=77.5 = 正常
+                fatigue_level = "正常😊"
             
             # 单行输出推理结果
             self.logger.info(

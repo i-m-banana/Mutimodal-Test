@@ -326,11 +326,11 @@ class SARTPage(QWidget):
         import os
         
         # 获取会话目录
-        # session_dir = getattr(self, 'session_dir', None)
-        # config.logger.info(f"📂 SART _ensure_sart_directory()调用:")
-        # config.logger.info(f"   - session_dir属性 = {session_dir}")
-        # config.logger.info(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
-        # config.logger.info(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
+        session_dir = getattr(self, 'session_dir', None)
+        config.logger.debug(f"📂 SART _ensure_sart_directory()调用:")
+        config.logger.debug(f"   - session_dir属性 = {session_dir}")
+        config.logger.debug(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
+        config.logger.debug(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
         
         if not session_dir:
             # 如果没有设置会话目录，使用默认路径

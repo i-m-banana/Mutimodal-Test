@@ -63,7 +63,7 @@ def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = N
 
             # 使用传入的 session_dir,如果没有则使用默认值
             preview_dir = session_dir if session_dir else os.path.join('recordings')
-            config.logger.info(f"🎥 初始化摄像头，使用目录: {preview_dir}")
+            config.logger.debug(f"🎥 初始化摄像头，使用目录: {preview_dir}")
 
             primary_index = config.ACTIVE_CAMERA_INDEX if config.ACTIVE_CAMERA_INDEX is not None else 0
             camera_candidates = [primary_index]
@@ -93,7 +93,7 @@ def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = N
                         audio_desc = "默认" if audio_candidate is None else str(audio_candidate)
                         
                         config.logger.info(
-                            "摄像头初始化成功，使用设备索引 %s，音频设备 %s。",
+                            "✅摄像头初始化成功，使用设备索引 %s，音频设备 %s。",
                             index,
                             audio_desc,
                         )

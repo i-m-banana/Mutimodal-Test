@@ -102,7 +102,7 @@ class EmotionV2Model(BaseInferenceModel):
             num_classes=self.num_classes,
         )
 
-        self.logger.info(
+        self.logger.debug(
             f"EmotionV2 初始化完成 | device={self.device} | frames={self.vision_frames} | classes={self.num_classes}"
         )
 
@@ -175,7 +175,7 @@ class EmotionV2Model(BaseInferenceModel):
                     shutil.copy2(src_video, dst_video)
                     shutil.copy2(src_audio, dst_audio)
                 
-                self.logger.info(f"📹 已准备 {n} 对音视频文件，开始切分+批量推理...")
+                self.logger.debug(f"📹 已准备 {n} 对音视频文件，开始切分+批量推理...")
                 
                 # 调用 run_directory_inference：自动切分+推理+汇总（临时CSV）
                 temp_csv = temp_path / "predictions.csv"
@@ -203,7 +203,7 @@ class EmotionV2Model(BaseInferenceModel):
                 if temp_csv.exists():
                     csv_output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(temp_csv), str(csv_output))
-                    self.logger.info(f"📄 CSV结果已保存到: {csv_output}")
+                    self.logger.debug(f"📄 CSV结果已保存到: {csv_output}")
                 
                 if not results:
                     return {"status": "error", "error": "所有样本推理失败", "emotion_score": 0.0}

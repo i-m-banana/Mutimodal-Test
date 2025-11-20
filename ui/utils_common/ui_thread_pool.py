@@ -88,7 +88,7 @@ class UIThreadPool:
         if thread and thread.is_alive():
             thread.join(timeout=timeout)
             if thread.is_alive():
-                self.logger.warning("UI托管线程 '%s' 未在超时内停止", name)
+                self.logger.debug("UI托管线程 '%s' 未在超时内停止", name)
             else:
                 self.logger.debug("UI托管线程 '%s' 已停止", name)
 

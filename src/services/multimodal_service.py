@@ -281,7 +281,7 @@ class MultiModalDataCollector:
             daemon=True
         )
         thread.start()
-        self.logger.info("Multimodal collector started")
+        self.logger.debug("Multimodal collector started")
 
     def stop(self, *, join_timeout: float = 2.0) -> None:
         if not self.running:
@@ -291,7 +291,7 @@ class MultiModalDataCollector:
         self._thread_pool.unregister_managed_thread(self._thread_name, timeout=join_timeout)
         self._save_remaining_data()
         self._cleanup_devices()
-        self.logger.info("Multimodal collector stopped")
+        self.logger.debug("Multimodal collector stopped")
 
     # ------------------------------------------------------------------
     def _create_save_directory(self) -> None:
@@ -652,7 +652,7 @@ class MultimodalService:
         
         with self._lock:
             if self._collector and self._collector.running:
-                self.logger.info("Multimodal collector already running")
+                self.logger.debug("Multimodal collector already running")
                 self._snapshot_interval = max(0.5, snapshot_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
@@ -703,7 +703,7 @@ class MultimodalService:
                     self._assessed_sessions = set()
                 
                 if session_dir in self._assessed_sessions:
-                    self.logger.info(f"⏭️ 疲劳度评估已触发，跳过重复请求: {session_dir}")
+                    self.logger.debug(f"⏭️ 疲劳度评估已触发，跳过重复请求: {session_dir}")
                 else:
                     self._assessed_sessions.add(session_dir)
                     self.logger.info(f"📊 录制完成，触发疲劳度评估: {session_dir}, 被试ID: {username}")

@@ -71,14 +71,14 @@ class FatigueAssessmentService:
             self.logger.warning("疲劳度评估服务已在运行")
             return
         
-        self.logger.info("启动疲劳度评估服务...")
-        self.logger.info(f"权重配置: EEG={self.eeg_weight}, RGB={self.rgb_weight}")
+        self.logger.debug("启动疲劳度评估服务...")
+        self.logger.debug(f"权重配置: EEG={self.eeg_weight}, RGB={self.rgb_weight}")
         
         # 订阅疲劳度评估请求事件
         self.bus.subscribe(EventTopic.FATIGUE_ASSESSMENT_REQUEST, self._on_assessment_request)
         
         self._running = True
-        self.logger.info("✅ 疲劳度评估服务已启动")
+        self.logger.debug("✅ 疲劳度评估服务已启动")
     
     def stop(self) -> None:
         """停止服务"""
@@ -118,7 +118,7 @@ class FatigueAssessmentService:
                 from ..models.rgb_fatigue_model import RGBFatigueModel
                 self._rgb_model = RGBFatigueModel("rgb_fatigue", logger=self.logger)
                 self._rgb_model.load()
-                self.logger.info("✓ RGB疲劳度模型加载完成")
+                self.logger.debug("✓ RGB疲劳度模型加载完成")
             except Exception as e:
                 self.logger.error(f"加载RGB疲劳度模型失败: {e}")
         
@@ -127,7 +127,7 @@ class FatigueAssessmentService:
                 from ..models.eeg_fatigue_model import EEGFatigueModel
                 self._eeg_model = EEGFatigueModel("eeg_fatigue", logger=self.logger)
                 self._eeg_model.load()
-                self.logger.info("✓ EEG疲劳度模型加载完成")
+                self.logger.debug("✓ EEG疲劳度模型加载完成")
             except Exception as e:
                 self.logger.error(f"加载EEG疲劳度模型失败: {e}")
     
@@ -165,7 +165,7 @@ class FatigueAssessmentService:
             return
         
         # 提交到推理线程池异步执行（不阻塞事件总线）
-        self.logger.info(f"📤 提交疲劳度评估任务到线程池: {request_id}")
+        self.logger.debug(f"📤 提交疲劳度评估任务到线程池: {request_id}")
         future = self._thread_pool.submit_inference_task(
             self._do_assessment,
             request_id,
@@ -200,12 +200,12 @@ class FatigueAssessmentService:
         """
         session_path = Path(session_dir)
         
-        self.logger.info(f"\n{'='*60}")
-        self.logger.info(f"📊 [线程池] 开始疲劳度评估")
-        self.logger.info(f"{'='*60}")
-        self.logger.info(f"请求ID: {request_id}")
-        self.logger.info(f"会话目录: {session_dir}")
-        self.logger.info(f"被试ID: {subject_id}")
+        self.logger.debug(f"\n{'='*60}")
+        self.logger.debug(f"📊 [线程池] 开始疲劳度评估")
+        self.logger.debug(f"{'='*60}")
+        self.logger.debug(f"请求ID: {request_id}")
+        self.logger.debug(f"会话目录: {session_dir}")
+        self.logger.debug(f"被试ID: {subject_id}")
         
         try:
             # 确保模型已加载
@@ -253,7 +253,7 @@ class FatigueAssessmentService:
             path = session_dir / pattern
             if path.exists():
                 files["rgb_video"] = path
-                self.logger.info(f"  ✓ RGB视频: {path.name}")
+                self.logger.debug(f"  ✓ RGB视频: {path.name}")
                 break
         
         # 也在fatigue子目录中查找
@@ -264,7 +264,7 @@ class FatigueAssessmentService:
                     path = fatigue_dir / pattern
                     if path.exists():
                         files["rgb_video"] = path
-                        self.logger.info(f"  ✓ RGB视频: fatigue/{path.name}")
+                        self.logger.debug(f"  ✓ RGB视频: fatigue/{path.name}")
                         break
         
         # EEG数据
@@ -273,7 +273,7 @@ class FatigueAssessmentService:
             eeg_csvs = [f for f in eeg_dir.glob("*.csv") if "kss" not in f.name.lower()]
             if eeg_csvs:
                 files["eeg_csv"] = sorted(eeg_csvs)[-1]
-                self.logger.info(f"  ✓ EEG数据: eeg/{files['eeg_csv'].name}")
+                self.logger.debug(f"  ✓ EEG数据: eeg/{files['eeg_csv'].name}")
         
         return files
     
@@ -292,7 +292,7 @@ class FatigueAssessmentService:
             return {"status": "error", "rgb_fatigue_score": 0.0}
         
         try:
-            self.logger.info("\n📷 RGB疲劳度推理 (MediaPipe方法)...")
+            self.logger.debug("\n📷 RGB疲劳度推理 (MediaPipe方法)...")
             
             inference_data = {
                 "file_mode": True,
@@ -336,7 +336,7 @@ class FatigueAssessmentService:
             return {"status": "error", "eeg_fatigue_score": 0.0}
         
         try:
-            self.logger.info("\n🧠 EEG疲劳度推理...")
+            self.logger.debug("\n🧠 EEG疲劳度推理...")
             
             # 提取被试基础标识（去掉末尾数字）
             subject_base = ''.join(c for c in subject_id if not c.isdigit())
@@ -355,8 +355,8 @@ class FatigueAssessmentService:
                 # print(result,"---------------------------inferfatigueeeg---------------")
                 inference_time = (time.time() - start_time) * 1000
                 
-                self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
-                self.logger.info(f"  窗口数量: {result.get('num_windows', 0)}")
+                self.logger.debug(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
+                self.logger.debug(f"  窗口数量: {result.get('num_windows', 0)}")
                 
                 # 显示基线更新信息
                 if result.get('baseline_updated'):
@@ -612,10 +612,10 @@ class FatigueAssessmentService:
                 }
             ))
             
-            self.logger.info(f"✅ 同时发布前端兼容格式: fatigue_score={fatigue_score:.2f}, level={fatigue_level}")
+            self.logger.debug(f"✅ 同时发布前端兼容格式: fatigue_score={fatigue_score:.2f}, level={fatigue_level}")
         
         self.logger.info(f"\n✅ 疲劳度评估完成")
-        self.logger.info(f"{'='*60}\n")
+        self.logger.debug(f"{'='*60}\n")
     
     def _publish_error(self, request_id: str, error_message: str) -> None:
         """发布错误结果"""

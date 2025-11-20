@@ -51,7 +51,7 @@ class EmotionService:
             )
 
             if request_id and request_id in self._pending_requests:
-                self.logger.info(f"✅ 情绪分析完成: request_id={request_id}")
+                self.logger.debug(f"✅ 情绪分析完成: request_id={request_id}")
                 future, loop = self._pending_requests.pop(request_id)
                 try:
                     # 在创建 future 的事件循环上线程安全地设置结果
@@ -105,7 +105,7 @@ class EmotionService:
             future = loop.create_future()
             self._pending_requests[request_id] = (future, loop)
             
-            self.logger.info(f"📤 发布情绪请求: request_id={request_id}, 等待结果...")
+            self.logger.debug(f"📤 发布情绪请求: request_id={request_id}, 等待结果...")
             
             # 发布情绪分析请求事件
             self.bus.publish(Event(

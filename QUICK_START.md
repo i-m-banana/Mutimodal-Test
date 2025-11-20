@@ -22,6 +22,8 @@ cd d:\Mutimodal-Test
 pip install -r requirements.txt
 ```
 
+### 1. 初始化一个数据库
+
 ### 2. 启动后端服务
 
 打开命令行，运行:

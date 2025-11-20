@@ -1116,7 +1116,7 @@ class ScorePage(QWidget):
                     
                     if fatigue_score is not None:
                         logger.info(f"📊 分数页面收到疲劳度评估结果: score={fatigue_score:.2f}/90, class={prediction_class}")
-                        logger.info(f"   融合方法={fusion_method}, 置信度={confidence:.2%}")
+                        logger.debug(f"   融合方法={fusion_method}, 置信度={confidence:.2%}")
                         
                         # 更新测试结果中的疲劳度分数
                         if not self._test_results:
@@ -1220,7 +1220,7 @@ class ScorePage(QWidget):
             # 血压脉搏综合健康度 (三者平均)
             bp_health_score = (systolic_score + diastolic_score + pulse_score) / 3.0
 
-            print(f"-------------------------------- {fatigue_score} {emotion_score} {brain_load_score} {attention_score} {bp_health_score} ")
+            # print(f"-------------------------------- {fatigue_score} {emotion_score} {brain_load_score} {attention_score} {bp_health_score} ")
             
             # 6. 加权计算综合得分
             total_score = 40+ (
@@ -1365,8 +1365,8 @@ class ScorePage(QWidget):
             is_completed = stage_completed.get(required_stage, False) if required_stage else True
             has_real_data.append(is_completed)
         
-        logger.info(f"雷达图七维显示: {metrics}")
-        logger.info(f"真实数据状态: {dict(zip(metric_labels, has_real_data))}")
+        logger.debug(f"雷达图七维显示: {metrics}")
+        logger.debug(f"真实数据状态: {dict(zip(metric_labels, has_real_data))}")
         
         # 获取本次测试值
         current_values = []

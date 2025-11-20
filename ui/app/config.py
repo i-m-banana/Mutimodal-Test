@@ -228,10 +228,64 @@ DB_NAME = os.getenv("UI_DB_NAME", "test")
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 logging.getLogger("comtypes").setLevel(logging.CRITICAL)
 
-LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+# Project-level logs root (shared with backend). Create a per-session timestamp file
+LOGS_ROOT = BASE_DIR.parent / "logs"
+try:
+    LOGS_ROOT.mkdir(parents=True, exist_ok=True)
+except Exception:
+    LOGS_ROOT = BASE_DIR / "logs"
 
-log_filename = LOG_DIR / f"app_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+ts_file = LOGS_ROOT / "session_timestamp.txt"
+try:
+    # Prefer to use an existing timestamp created by the backend. Wait a
+    # short moment for the backend to create the file; only if the file
+    # remains absent do we create a new timestamp. This avoids UI appending
+    # a second timestamp when both processes start independently.
+    new_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = None
+    # If file exists already, use its last non-empty line
+    if ts_file.exists():
+        try:
+            with ts_file.open('r', encoding='utf-8') as fh:
+                lines = [ln.strip() for ln in fh if ln.strip()]
+            timestamp = lines[-1] if lines else None
+        except Exception:
+            timestamp = None
+    else:
+        # Wait briefly for backend to create the file (up to 3s)
+        import time
+        waited = 0.0
+        interval = 0.2
+        while waited < 3.0 and not ts_file.exists():
+            time.sleep(interval)
+            waited += interval
+
+        if ts_file.exists():
+            try:
+                with ts_file.open('r', encoding='utf-8') as fh:
+                    lines = [ln.strip() for ln in fh if ln.strip()]
+                timestamp = lines[-1] if lines else None
+            except Exception:
+                timestamp = None
+
+    # If still no timestamp found, create one (single write, not append)
+    if not timestamp:
+        try:
+            ts_file.write_text(new_ts + '\n', encoding='utf-8')
+            timestamp = new_ts
+        except Exception:
+            timestamp = new_ts
+except Exception:
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+# UI-specific log dir
+UI_LOG_DIR = LOGS_ROOT / "ui"
+try:
+    UI_LOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    UI_LOG_DIR = BASE_DIR / "logs"
+
+log_filename = UI_LOG_DIR / f"app_log_{timestamp}.txt"
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

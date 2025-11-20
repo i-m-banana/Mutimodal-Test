@@ -152,7 +152,7 @@ class EEGService:
             # 在recorder的线程中执行保存
             self._recorder._save_data()
             file_paths = self.get_file_paths()
-            self.logger.info("💾 EEG数据已保存（SART结束触发）")
+            self.logger.debug("💾 EEG数据已保存（SART结束触发）")
             return {"status": "saved", "file_paths": file_paths}
         except Exception as exc:
             self.logger.error("保存EEG数据失败: %s", exc)
@@ -186,7 +186,7 @@ class EEGService:
         )
         self._inference_active = True
         thread.start()
-        self.logger.info("✅ EEG推理轮询已启动 (间隔=%.2fs)", self._inference_interval)
+        self.logger.debug("✅ EEG推理轮询已启动 (间隔=%.2fs)", self._inference_interval)
 
     def _stop_inference_polling(self) -> None:
         """停止脑负荷推理轮询。"""
@@ -204,7 +204,7 @@ class EEGService:
         finally:
             self._inference_active = False
             self._inference_stop.clear()
-            self.logger.info("⏹️ EEG推理轮询已停止")
+            self.logger.debug("⏹️ EEG推理轮询已停止")
 
     def _inference_polling_loop(self) -> None:
         self.logger.debug("EEG推理轮询线程已启动")
@@ -442,7 +442,7 @@ class EEGRecorder:
                 await self._send_stop_command()
                 await asyncio.sleep(0.5)
                 await self.device.ensure_disconnected()
-                self.logger.info("EEG设备已断开")
+                self.logger.debug("EEG设备已断开")
             except Exception as exc:
                 self.logger.error("断开EEG设备失败: %s", exc)
             finally:
@@ -471,7 +471,7 @@ class EEGRecorder:
             # 命令格式: 48 4E 55 9F 04 00 00 00
             command = bytes([0x48, 0x4E, 0x55, 0x9F, 0x04, 0x00, 0x00, 0x00])
             await self.device.write(command)
-            self.logger.info("⏹️ 已发送停止记录命令")
+            self.logger.debug("⏹️ 已发送停止记录命令")
         except Exception as exc:
             self.logger.warning("⚠️ 停止记录命令发送失败: %s", exc)
 
@@ -501,7 +501,7 @@ class EEGRecorder:
                     self.lost_packets += parsed.get('packet_loss', 0)
 
                 # 定期输出统计
-                if self.packets_received % 1500 == 0:
+                if self.packets_received % 3000 == 0:
                     total_pkts = self.packets_received + self.lost_packets
                     loss_rate = (self.lost_packets / total_pkts) * 100 if total_pkts > 0 else 0
                     self.logger.info(

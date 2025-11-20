@@ -409,7 +409,7 @@ def run_directory_inference(
             fh.write(f"平均推理时间(ms),{avg_time:.1f}\n")
             fh.write(f"总推理时间(ms),{total_time:.1f}\n")
             
-        print(f"✅ 已保存 {len(results)} 条推理记录到: {output_path}")
+        # print(f"✅ 已保存 {len(results)} 条推理记录到: {output_path}")
 
     from .infer_v2 import summarize_emotion_predictions  # local import for reuse
     summary = summarize_emotion_predictions(results, num_classes=num_classes)
@@ -420,11 +420,11 @@ def run_directory_inference(
             "class_1": "neutral (1)",
             "class_2": "negative (2)",
         }
-        print("\nAggregate emotion statistics:")
+        # print("\nAggregate emotion statistics:")
         for cls_name in sorted(mean_probs):
             label = label_alias.get(cls_name, cls_name)
             print(f"  {label}: {mean_probs[cls_name]:.4f}")
-        print(f"Emotion score (50-90): {summary['emotion_score']:.2f}")
+        # print(f"Emotion score (50-90): {summary['emotion_score']:.2f}")
 
     return results, summary
 

@@ -364,7 +364,7 @@ class DatabaseService:
         if self._store is None:
             try:
                 self._store = TestTableStore(**self._config)
-                self.logger.info(
+                self.logger.debug(
                     "Database connection ready -> %s/%s",
                     self._config["host"],
                     self._config["database"],

@@ -110,7 +110,7 @@ class Orchestrator:
     def start(self) -> None:
         if self._running:
             return
-        self.logger.info("Starting orchestrator")
+        self.logger.info(" 协调器启动")
         self.model_manager.load_enabled()
         self._instantiate_interfaces()
         # 启动统一推理服务
@@ -153,7 +153,7 @@ class Orchestrator:
     def stop(self) -> None:
         if not self._running:
             return
-        self.logger.info("Stopping orchestrator")
+        self.logger.info("协调器关闭")
         # 移除采集器和检测器停止
         self.monitor.stop()
         
