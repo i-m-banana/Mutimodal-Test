@@ -495,7 +495,7 @@ class CalibrationPage(QWidget):
                         multidata_result = multimodal_start_collection(
                             username=current_user,
                             save_dir=session_dir,
-                            part=1,
+                            part=0,
                         )
                         multidata_status = (multidata_result or {}).get("status", "").lower()
                         if multidata_status in {"started", "running", "already-running"}:

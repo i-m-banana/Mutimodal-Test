@@ -209,7 +209,7 @@ BP_SIMULATION = FORCE_SIMULATION or env_flag("UI_BP_SIMULATION")
 SKIP_DATABASE = env_flag("UI_SKIP_DATABASE")
 APP_MODE = "debug" if DEBUG_MODE else "normal"
 
-_bp_port_raw = os.getenv("UI_BP_PORT", "COM8")
+_bp_port_raw = os.getenv("UI_BP_PORT", "COM4")
 BP_PORT: Optional[str] = _bp_port_raw.strip() if _bp_port_raw else None
 
 DEFAULT_CAMERA_INDEX = env_int("UI_CAMERA_INDEX", 0)

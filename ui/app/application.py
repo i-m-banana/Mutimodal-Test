@@ -448,9 +448,9 @@ class MainWindow(QMainWindow):
             logger.info(f"为 SART 创建会话目录: {session_dir}")
         
         # 传递会话信息（用于EEG采集和结果保存）
-        logger.info(f"📂 传递会话信息到SART页面:")
-        logger.info(f"   - session_dir = {self.test_page.session_dir}")
-        logger.info(f"   - current_user = {self.current_user}")
+        # logger.info(f"📂 传递会话信息到SART页面:")
+        # logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        # logger.info(f"   - current_user = {self.current_user}")
         self.sart_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
