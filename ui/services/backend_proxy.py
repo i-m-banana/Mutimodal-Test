@@ -242,7 +242,7 @@ def emotion_analyze(
     audio_paths: list,
     video_paths: list,
     text_data: list,
-    timeout: float = 30.0
+    timeout: float = 90.0
 ) -> Dict[str, Any]:
     """
     执行情绪分析.

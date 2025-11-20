@@ -242,7 +242,7 @@ class BackendClient(QObject):
         return future
 
     def send_command_sync(self, action: str, payload: Optional[Dict[str, Any]] = None,
-                          timeout: float | None = 10.0) -> Dict[str, Any]:
+                          timeout: float | None = 30.0) -> Dict[str, Any]:
         future = self.send_command_future(action, payload)
         result = future.result(timeout=timeout)
         return result or {}
