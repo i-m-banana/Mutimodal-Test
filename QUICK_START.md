@@ -5,7 +5,7 @@
 - Python 3.11+
 - Windows 10/11 / Linux / macOS
 - 8GB+ RAM（推荐16GB）
-- （可选）NVIDIA GPU with CUDA支持（用于加速推理）
+- NVIDIA GPU with CUDA支持（用于加速推理）
 - 所需依赖包已安装
 
 ## 📋 启动步骤
@@ -22,57 +22,92 @@ cd d:\Mutimodal-Test
 pip install -r requirements.txt
 ```
 
-### 1. 初始化一个数据库
+### 2. 初始化数据库
 
-### 2. 启动后端服务
+项目默认使用 MySQL 风格的表结构, 下面是一个示例表 `test` 的建表语句：
+
+```sql
+CREATE TABLE `test` (
+   `id` int NOT NULL AUTO_INCREMENT COMMENT '记录id',
+   `name` varchar(255) NOT NULL COMMENT '被试姓名',
+   `datetime` datetime NOT NULL COMMENT '测试时间',
+   `audio` json DEFAULT NULL COMMENT '音频路径列表（JSON数组）',
+   `video` json DEFAULT NULL COMMENT '视频路径列表（JSON数组）',
+   `record` json DEFAULT NULL COMMENT '录音文本列表（JSON数组）',
+   `rgb` varchar(512) DEFAULT NULL COMMENT '可见光',
+   `depth` varchar(512) DEFAULT NULL COMMENT '深度',
+   `tobii` varchar(512) DEFAULT NULL COMMENT '眼动',
+   `blood` varchar(512) DEFAULT NULL COMMENT '高压/低压/心率',
+   `ptime` varchar(512) DEFAULT NULL COMMENT '调用疲劳队列时间戳',
+   `eeg1` varchar(512) DEFAULT NULL COMMENT '脑电1.txt',
+   `eeg2` varchar(512) DEFAULT NULL COMMENT '脑电2.txt',
+   `score` float DEFAULT NULL COMMENT '综合舒尔特分数',
+   `accuracy` float DEFAULT NULL COMMENT '舒尔特准确率',
+   `elapsed` float DEFAULT NULL COMMENT '舒尔特用时',
+   `fatigue_score` float DEFAULT NULL COMMENT '疲劳检测分数(0-100)',
+   `brain_load_score` float DEFAULT NULL COMMENT '脑负荷分数(0-100)',
+   `emotion_score` float DEFAULT NULL COMMENT '情绪分数(0-100)',
+   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+在 MySQL 中运行：
+
+```powershell
+# 登录 MySQL 并选择数据库 (示例)
+mysql -u root -p 123456
+CREATE DATABASE multimodal_test;
+USE multimodal_test;
+# 复制并执行上面的 CREATE TABLE 语句
+```
+
+>注意：UI 中默认数据库配置位于 `ui/app/config.py`，默认值为 host=localhost, user=root, password=123456, db=test。请根据你的实际数据库修改。
+
+### 3. 启动程序
+
+本程序有自动和手动两种启动方式，任选一种即可。
+
+#### 3.0 启动后端服务（自动启动）
+双击根目录下的start.bat即可开始测试
+
+
+#### 3.1 启动后端服务（手动启动）
 
 打开命令行，运行:
 ```bash
 cd d:\Mutimodal-Test
+
 python -m src.main
-
-# 可选：关闭控制台监听输出（减少日志）
-python -m src.main --no-listeners
-
-# 可选：显示全部事件日志
-python -m src.main --full-events
 ```
 
 **期望输出**:
 ```
-INFO  WebsocketPushInterface | Starting WebSocket interface on 127.0.0.1:8765
-INFO  orchestrator | Orchestrator started
-INFO  fatigue_assessment | ✅ 疲劳度评估服务已启动
-INFO  eeg_service | ✅ EEG服务已启动
-INFO  inference | ✅ 统一推理服务已启动
+| INFO     | orchestrator |  协调器启动
+| INFO     | inference | 启动统一推理服务...
 ```
 
-### 3. 启动UI应用
+#### 3.2. 启动UI应用（手动启动）
 
 另开一个命令行窗口，运行:
 ```bash
 cd d:\Mutimodal-Test
 
-# 默认启动
 python -m ui.main
-
-# 可选：启用调试模式（使用模拟数据，无需硬件）
-python -m ui.main --debug
 ```
 
 **期望输出**:
 ```
-应用程序主窗口初始化完成
-✅ 已成功连接到后端服务器 ws://127.0.0.1:8765
+INFO - 应用程序主窗口初始化完成。
+INFO - 应用程序启动（模式：正常）。
 ```
 
 
 ## 🎯 测试流程
 
-### 完整流程（约30-50分钟）
+### 完整流程（约3-5分钟）
 
 ```
-登录 → 设备校准 → 基线校准(30s) → SART实验(5/25分钟) → 文本问答 → 血压测量 → 舒尔特方格 → 结果展示
+登录 → 设备校准 → 基线校准(30s) → SART实验(1分钟) → 文本朗读 → 血压测量 → 舒尔特方格 → 结果展示
 ```
 
 ### 各阶段详细说明
@@ -83,8 +118,9 @@ python -m ui.main --debug
    - 用户数据存储在 `ui/data/users/users.csv`
 
 2. **设备校准**
-   - 等待摄像头初始化（自动检测或使用模拟模式）
-   - 调整摄像头位置确保人脸清晰可见
+   - 等待摄像头初始化
+   - 调整座椅位置确保人脸清晰可见
+   - 调整脑电设备直到显示"已连接"
    - 点击"校准完成"进入基线校准
 
 3. **基线校准（30秒）**
@@ -93,13 +129,15 @@ python -m ui.main --debug
    - 系统采集静息态脑电基线数据
 
 4. **SART注意力测试**
-   - **短流程（默认）**: 5分钟，约260个试次
-   - **长流程**: 25分钟，约1300个试次，每5分钟评估困倦度
+   - 1分钟，约60个试次
    - 规则：看到除"3"外的数字按【空格】，看到"3"不要按
    - 保持安静、注视中央，不说话
+   - 系统采集脑电和多模态数据
 
-5. **文本问答**
-   - 回答系统提出的问题
+5. **文本朗读**
+   - 点击麦克风图标开始录制
+   - 朗读系统提供的文本
+   - 再次点击图标以停止录制
    - 系统采集情绪数据和生理数据
 
 6. **血压测量**
@@ -107,7 +145,7 @@ python -m ui.main --debug
    - 系统记录生理健康指标
 
 7. **舒尔特方格**
-   - 按顺序点击数字1-25
+   - 按顺序点击数字
    - 测试注意力和高脑负荷状态
 
 8. **结果展示**
@@ -118,42 +156,24 @@ python -m ui.main --debug
 
 ### 问题1: 后端服务无法启动
 
-**现象**: `端口 8765 已被占用`
+**现象**: `OSError: [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8765): 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。`
 
 **解决**:
-```bash
-# Windows 查找占用端口的进程
-netstat -ano | findstr :8765
-# 结束该进程
-taskkill /F /PID <进程ID>
+1. 有一个终端已经在运行后端程序了，关闭那个后端，确保只有一个终端在运行后端程序。
 
-# Linux/macOS
-lsof -i :8765
-kill -9 <PID>
-```
 
-### 问题2: UI无法连接后端
-
-**现象**: `Backend connection not established` 或 `连接超时`
-
-**解决**:
-1. 确认后端服务已启动（查看控制台输出）
-2. 检查防火墙是否阻止了 8765 端口
-3. 确认 `config/interfaces.yaml` 中的地址配置正确
-4. 尝试使用 `python -m ui.main --debug` 启用调试模式
-
-### 问题3: 摄像头初始化失败
+### 问题2: 摄像头初始化失败
 
 **现象**: `无法打开摄像头` 或 `Camera not found`
 
-**解决方案 - 指定摄像头索引**:
+**解决**:
 ```bash
 # 尝试不同的摄像头索引（0, 1, 2...）
 set UI_CAMERA_INDEX=1
 python -m ui.main
 ```
 
-### 问题4: 模型推理失败
+### 问题3: 模型推理失败
 
 **现象**: `Model inference failed` 或 `模型未响应`
 
@@ -162,11 +182,11 @@ python -m ui.main
 2. 确认模型文件是否存在于 `models_data/` 目录
 3. 检查 GPU/CUDA 环境（如果使用 GPU）
 
-### 问题5: 分数页面雷达图为空
+### 问题4: 分数页面雷达图为空
 
 **现象**: 测试完成后分数页面显示"暂无测试数据"或雷达图为空
 
-**原因分析**:
+**解决**:
 1. **疲劳度评估未完成**: 
    - 日志显示 `没有收集到疲劳度分数数据`
    - 疲劳评估是异步的,需要等待1-3秒
@@ -174,18 +194,6 @@ python -m ui.main
 2. **某些阶段未完成**:
    - 血压测量被跳过 (`血压脉搏检测: False`)
    - 对应指标不会显示在雷达图上
-
-**解决方案**:
-```bash
-# 1. 等待疲劳评估完成
-# 测试完成后,等待3-5秒,系统会自动更新疲劳度分数
-
-# 2. 检查后端日志
-# 查看是否有 "📊 收到疲劳度推理结果" 和 "🎯 收到会话疲劳评估结果"
-
-# 3. 完成所有测试阶段
-# 确保完成: 基线校准 → SART → 情绪 → 血压 → 舒尔特
-```
 
 **预期日志输出**:
 ```
@@ -213,22 +221,13 @@ python -m src.main --root . --full-events
 
 ### 日志文件位置
 
+日志以会话（session）为单位保存，UI 与后端共享同一会话 ID（保存在 `logs/session_timestamp.txt` 的最后一行）。每次运行会追加一个新的时间戳行，从而生成新的日志文件并保留历史记录。
+
 | 日志类型 | 路径 | 说明 |
 |---------|------|------|
-| UI日志 | `ui/logs/app_log_*.txt` | UI应用运行日志 |
+| UI 日志 | `logs/ui/app_log_<timestamp>.txt` | UI 应用运行日志，`<timestamp>` 由 `logs/session_timestamp.txt` 的最后一行决定 |
+| 后端日志 | `logs/src/src_log_<timestamp>.txt` | 后端运行日志，使用与 UI 相同的 `<timestamp>` |
 
-### 性能监控
-
-
-**测试后端连接**:
-```bash
-# 使用 wscat 工具测试 WebSocket
-npm install -g wscat
-wscat -c ws://127.0.0.1:8765
-
-# 发送心跳测试
-{"type": "ping"}
-```
 
 ## 🎓 开发者指南
 
@@ -262,9 +261,6 @@ wscat -c ws://127.0.0.1:8765
 
 
 ## 📞 获取帮助
-
-### 参考文档
-- **AGENTS.MD**: 编码规范和开发准则
 
 ### 问题反馈
 - 在项目仓库提交 Issue
