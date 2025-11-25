@@ -96,15 +96,15 @@ class EEGFatigueModel(BaseInferenceModel):
         # 特征名称（默认为theta/beta和theta/alpha比值）
         self.feature_names = ["theta_beta_ratio", "theta_alpha_ratio"]
         
-        self.logger.info(f"  ✓ 特征数量: {len(self.feature_names)}")
-        self.logger.info(f"  ✓ 分位数范围: [{self.q_lo:.3f}, {self.q_hi:.3f}]")
-        self.logger.info(f"  ✓ 缩放器类型: {type(self.scaler).__name__}")
+        self.logger.debug(f"  ✓ 特征数量: {len(self.feature_names)}")
+        self.logger.debug(f"  ✓ 分位数范围: [{self.q_lo:.3f}, {self.q_hi:.3f}]")
+        self.logger.debug(f"  ✓ 缩放器类型: {type(self.scaler).__name__}")
         
         # 初始化基线管理器
         self.baseline_manager = BaselineManager(str(models_dir))
-        self.logger.info("  ✓ 基线管理器初始化完成")
+        self.logger.debug("  ✓ 基线管理器初始化完成")
         
-        self.logger.info("✅ EEG疲劳度模型初始化完成")
+        self.logger.debug("✅ EEG疲劳度模型初始化完成")
     
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """执行EEG疲劳度推理
@@ -140,18 +140,18 @@ class EEGFatigueModel(BaseInferenceModel):
         """
         # 优先使用会话目录模式（完整评估）
         if "session_dir" in data:
-            print("会话目录模式------------------------------------")
+            # print("会话目录模式------------------------------------")
             return self._infer_from_session(data)
         # 内存模式
         elif data.get("memory_mode") == True:
-            print("内存模式------------------------------------")
+            # print("内存模式------------------------------------")
             return self._infer_from_memory(data)
         # 文件路径模式
         elif data.get("file_mode") == True:
-            print("文件路径模式------------------------------------")
+            # print("文件路径模式------------------------------------")
             return self._infer_from_file(data)
         else:
-            print("未指定有效的输入模式------------------------------------")
+            # print("未指定有效的输入模式------------------------------------")
             return {
                 "status": "error",
                 "error": "未指定有效的输入模式",
@@ -306,9 +306,9 @@ class EEGFatigueModel(BaseInferenceModel):
             win = int(self.WIN_SEC * sampling_rate)
             step = win
             window_results = []
-            print(f"EEG signal length: {len(ch1)}, window size: {win}, step size: {step},winow count:{len(ch1) - win + 1}")
+            # print(f"EEG signal length: {len(ch1)}, window size: {win}, step size: {step},winow count:{len(ch1) - win + 1}")
             for i in range(0, len(ch1) - win + 1, step):
-                print(f"zxProcessing window {i // step + 1} of {len(ch1) // step}")
+                # print(f"zxProcessing window {i // step + 1} of {len(ch1) // step}")
                 # 提取窗口
                 w1, w2 = ch1[i:i+win], ch2[i:i+win]
                 
@@ -361,8 +361,8 @@ class EEGFatigueModel(BaseInferenceModel):
                 f"🧠💤 EEG疲劳度: {round(avg_score, 2)} ({fatigue_level}, "
                 f"{len(window_results)}窗口, {round(inference_time, 1)}ms)"
             )
-            print(f"🧠💤 -------zx的EEG疲劳度: {round(avg_score, 2)} ({fatigue_level}, ")
-            print(f"{len(window_results)}窗口, {round(inference_time, 1)}ms)-------")
+            # print(f"🧠💤 -------zx的EEG疲劳度: {round(avg_score, 2)} ({fatigue_level}, ")
+            # print(f"{len(window_results)}窗口, {round(inference_time, 1)}ms)-------")
             return {
                 "status": "success",
                 "eeg_fatigue_score": round(avg_score, 2),
@@ -514,7 +514,7 @@ class EEGFatigueModel(BaseInferenceModel):
             }
         
         try:
-            self.logger.info(f"\n{'='*60}")
+            self.logger.debug(f"\n{'='*60}")
             self.logger.info(f"🧠💤 EEG疲劳度分析 - 会话模式（含基线更新）")
             self.logger.info(f"{'='*60}")
             self.logger.info(f"📂 会话目录: {session_dir.name}")
@@ -539,14 +539,14 @@ class EEGFatigueModel(BaseInferenceModel):
             eeg_csv_files = sorted(eeg_dir.glob("eeg_data_*.csv"), reverse=True)
             if eeg_csv_files:
                 eeg_csv = eeg_csv_files[0]  # 取最新的文件
-                self.logger.info(f"  ✓ 找到EEG数据文件（新格式）: {eeg_csv.name}")
+                self.logger.debug(f"  ✓ 找到EEG数据文件（新格式）: {eeg_csv.name}")
             else:
                 # 回退到旧格式
                 for part_name in ["part3.csv", "part1.csv"]:
                     candidate = eeg_dir / part_name
                     if candidate.exists():
                         eeg_csv = candidate
-                        self.logger.info(f"  ✓ 找到EEG数据文件（旧格式）: {eeg_csv.name}")
+                        self.logger.debug(f"  ✓ 找到EEG数据文件（旧格式）: {eeg_csv.name}")
                         break
             
             if not eeg_csv:
@@ -612,12 +612,12 @@ class EEGFatigueModel(BaseInferenceModel):
                                 baseline_updated = update_result.get("updated", False)
                                 baseline_reason = update_result.get("reason", "未知")
                                 
-                                self.logger.info(
+                                self.logger.debug(
                                     f"  🔄 基线更新: {'✅成功' if baseline_updated else '❌跳过'} "
                                     f"({baseline_reason})"
                                 )
-                                self.logger.info(
-                                    f"     基线段: {num_baseline}样本 ({num_baseline/self.FS:.1f}秒), "
+                                self.logger.debug(
+                                    f"  基线段: {num_baseline}样本 ({num_baseline/self.FS:.1f}秒), "
                                     f"坏信号率={bad_ratio:.2%}"
                                 )
                         else:
@@ -651,7 +651,7 @@ class EEGFatigueModel(BaseInferenceModel):
                         if num_task > 500:
                             task_signal = np.column_stack([ch1[mask_task], ch2[mask_task]])
                             self.logger.info(
-                                f"  ✓ 任务段: {num_task}样本 ({num_task/self.FS:.1f}秒)"
+                                f"  任务段: {num_task}样本 ({num_task/self.FS:.1f}秒)"
                             )
                 except Exception as e:
                     self.logger.warning(f"  ⚠️ 任务段提取失败: {e}")

@@ -91,7 +91,7 @@ class AVService:
                       input_device_index: Optional[int] = None) -> None:
         with self._preview_lock:
             self._stop_event.clear()
-            self.logger.info(f"📁 设置 session_dir = {session_dir}")
+            self.logger.debug(f"📁 设置 session_dir = {session_dir}")
             self._session_dir = session_dir
             os.makedirs(self._session_dir, exist_ok=True)
             self._camera_index = camera_index

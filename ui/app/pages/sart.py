@@ -327,10 +327,10 @@ class SARTPage(QWidget):
         
         # 获取会话目录
         session_dir = getattr(self, 'session_dir', None)
-        config.logger.info(f"📂 SART _ensure_sart_directory()调用:")
-        config.logger.info(f"   - session_dir属性 = {session_dir}")
-        config.logger.info(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
-        config.logger.info(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
+        config.logger.debug(f"📂 SART _ensure_sart_directory()调用:")
+        config.logger.debug(f"   - session_dir属性 = {session_dir}")
+        config.logger.debug(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
+        config.logger.debug(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
         
         if not session_dir:
             # 如果没有设置会话目录，使用默认路径
@@ -343,12 +343,12 @@ class SARTPage(QWidget):
         sart_dir = os.path.join(session_dir, 'sart')
         sart_dir_abs = os.path.abspath(sart_dir)
         
-        config.logger.info(f"📂 SART：创建目录 {sart_dir}")
-        config.logger.info(f"📂 SART：绝对路径 {sart_dir_abs}")
+        # config.logger.info(f"📂 SART：创建目录 {sart_dir}")
+        # config.logger.info(f"📂 SART：绝对路径 {sart_dir_abs}")
         
         try:
             os.makedirs(sart_dir_abs, exist_ok=True)
-            config.logger.info(f"✅ SART目录创建成功: {sart_dir_abs}")
+            # config.logger.info(f"✅ SART目录创建成功: {sart_dir_abs}")
             
             # 验证目录确实存在
             if os.path.exists(sart_dir_abs) and os.path.isdir(sart_dir_abs):
@@ -372,12 +372,12 @@ class SARTPage(QWidget):
             sart_dir = self._ensure_sart_directory()
             
             # 🐛 添加详细调试日志
-            config.logger.info(f"🔍 SART保存调试：")
-            config.logger.info(f"  - sart_dir = {sart_dir}")
-            config.logger.info(f"  - 绝对路径 = {os.path.abspath(sart_dir)}")
-            config.logger.info(f"  - 目录存在？ {os.path.exists(sart_dir)}")
-            config.logger.info(f"  - 当前工作目录 = {os.getcwd()}")
-            config.logger.info(f"  - trial_records数量 = {len(self.trial_records)}")
+            # config.logger.info(f"🔍 SART保存调试：")
+            # config.logger.info(f"  - sart_dir = {sart_dir}")
+            # config.logger.info(f"  - 绝对路径 = {os.path.abspath(sart_dir)}")
+            # config.logger.info(f"  - 目录存在？ {os.path.exists(sart_dir)}")
+            # config.logger.info(f"  - 当前工作目录 = {os.getcwd()}")
+            # config.logger.info(f"  - trial_records数量 = {len(self.trial_records)}")
             
             # 保存试次记录
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -501,19 +501,19 @@ class SARTPage(QWidget):
             session_dir: 会话目录路径（例如：recordings/admin/20251024_185949）
             current_user: 当前用户名
         """
-        config.logger.info(f"🔧 SART.set_session_info()被调用:")
-        config.logger.info(f"   - 传入的session_dir = {session_dir}")
-        config.logger.info(f"   - 传入的current_user = {current_user}")
-        config.logger.info(f"   - session_dir是否为None? {session_dir is None}")
-        config.logger.info(f"   - session_dir是否为空字符串? {session_dir == ''}")
+        # config.logger.info(f"🔧 SART.set_session_info()被调用:")
+        # config.logger.info(f"   - 传入的session_dir = {session_dir}")
+        # config.logger.info(f"   - 传入的current_user = {current_user}")
+        # config.logger.info(f"   - session_dir是否为None? {session_dir is None}")
+        # config.logger.info(f"   - session_dir是否为空字符串? {session_dir == ''}")
         
         self.session_dir = session_dir
         self.current_user = current_user
         
-        config.logger.info(f"✅ SART页面已设置会话信息:")
-        config.logger.info(f"   - self.session_dir = {self.session_dir}")
-        config.logger.info(f"   - self.current_user = {self.current_user}")
-        config.logger.info(f"📂 SART结果将保存到: {session_dir}/sart/")
+        # config.logger.info(f"✅ SART页面已设置会话信息:")
+        # config.logger.info(f"   - self.session_dir = {self.session_dir}")
+        # config.logger.info(f"   - self.current_user = {self.current_user}")
+        # config.logger.info(f"📂 SART结果将保存到: {session_dir}/sart/")
     
     def reset(self) -> None:
         """重置页面（供下次使用）"""

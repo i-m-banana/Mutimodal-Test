@@ -89,7 +89,7 @@ class UnifiedInferenceService:
         self.bus.subscribe(EventTopic.MULTIMODAL_SNAPSHOT, self._on_multimodal_data)
         self.bus.subscribe(EventTopic.EMOTION_REQUEST, self._on_emotion_request)
         self.bus.subscribe(EventTopic.EEG_REQUEST, self._on_eeg_request)
-        self.logger.info(f"已订阅事件: {EventTopic.MULTIMODAL_SNAPSHOT.value}, {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
+        self.logger.debug(f"已订阅事件: {EventTopic.MULTIMODAL_SNAPSHOT.value}, {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
         
         self._running = True
         self.logger.info(f"✅ 统一推理服务已启动 (共 {enabled_count} 个模型)")
@@ -127,7 +127,7 @@ class UnifiedInferenceService:
             model.load()
             
             self.integrated_models[model_type] = model
-            self.logger.info(f"✅ 集成模型已加载: {model_name} ({model_type})")
+            self.logger.debug(f"✅ 集成模型已加载: {model_name} ({model_type})")
             return 1
             
         except Exception as e:
@@ -156,7 +156,7 @@ class UnifiedInferenceService:
         for model_type, model in self.integrated_models.items():
             try:
                 model.unload()
-                self.logger.info(f"已卸载集成模型: {model_type}")
+                self.logger.debug(f"已卸载集成模型: {model_type}")
             except Exception as e:
                 self.logger.error(f"卸载集成模型失败 ({model_type}): {e}")
         self.integrated_models.clear()

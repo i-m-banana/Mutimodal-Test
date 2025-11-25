@@ -272,7 +272,7 @@ class CalibrationPage(QWidget):
         # 检查主窗口是否已预加载摄像头
         main_window = self.window()
         if hasattr(main_window, 'camera_preloaded') and main_window.camera_preloaded:
-            config.logger.info("✅ 检测到摄像头已预加载，立即切换到校准视图")
+            config.logger.debug("✅ 检测到摄像头已预加载，立即切换到校准视图")
             try:
                 # 直接切换到校准视图，无需等待
                 self._switch_to_calibration_view()
@@ -458,7 +458,7 @@ class CalibrationPage(QWidget):
                     if test_page and hasattr(test_page, 'session_dir') and test_page.session_dir:
                         # 使用已有的 session_dir（正常情况）
                         session_dir = test_page.session_dir
-                        config.logger.info(f"🔗 使用已创建的session目录进行EEG预连接: {session_dir}")
+                        config.logger.debug(f"🔗 使用已创建的session目录进行EEG预连接: {session_dir}")
                     else:
                         # 防御性代码：如果session_dir不存在，创建新的（这不应该发生）
                         config.logger.warning("⚠️ session_dir不存在，创建临时目录（这不应该发生）")
@@ -488,16 +488,18 @@ class CalibrationPage(QWidget):
                     
                     # ✅ 第二步：启动脑负荷推理（多模态数据采集）
                     try:
-                        from ...services.backend_proxy import multidata_start_collection
-                        
-                        multidata_result = multidata_start_collection(
-                            current_user,
-                            part=1,
+                        # `backend_proxy` 提供的接口名为 multimodal_start_collection（不是 multidata_start_collection）
+                        from ...services.backend_proxy import multimodal_start_collection
+
+                        # 使用显式关键字参数以避免参数顺序或命名歧义
+                        multidata_result = multimodal_start_collection(
+                            username=current_user,
                             save_dir=session_dir,
+                            part=0,
                         )
                         multidata_status = (multidata_result or {}).get("status", "").lower()
                         if multidata_status in {"started", "running", "already-running"}:
-                            config.logger.info(f"🧠 脑负荷推理已在校准阶段启动，保存目录: {session_dir}")
+                            config.logger.debug(f"🧠 脑负荷推理已在校准阶段启动，保存目录: {session_dir}")
                         else:
                             config.logger.warning(f"⚠️ 脑负荷推理启动失败: {multidata_result}")
                     except Exception as e:

@@ -18,7 +18,7 @@ else:  # pragma: no cover - runtime branch when bleak is available
 HAS_EEG_HARDWARE = BleakClient is not None
 
 # Default BLE configuration for the current EEG headband model.
-DEFAULT_DEVICE_ADDRESS = "CB:D1:D1:B7:F2:B9"
+DEFAULT_DEVICE_ADDRESS = "E5:47:E3:C1:CE:BE"
 # DEFAULT_DEVICE_ADDRESS = "C2:67:CD:E9:16:E4"
 TX_CHARACTERISTIC = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 RX_CHARACTERISTIC = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"

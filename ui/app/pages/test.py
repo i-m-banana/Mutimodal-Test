@@ -188,7 +188,7 @@ class TestPage(QWidget):
         self._invoke_later_signal.connect(self._handle_invoke_later_signal)
 
         self.load_history_scores()
-        logger.info("TestPage 初始化完成。")
+        logger.debug("TestPage 初始化完成。")
         self._is_shutting_down = False
 
     def _setup_properties(self):
@@ -385,7 +385,7 @@ class TestPage(QWidget):
                 self._multimodal_poll_timer.stop()
                 timer_active = False
 
-            logger.info("启动多模态数据监控（内嵌显示模式）")
+            logger.debug("启动多模态数据监控（内嵌显示模式）")
             self._multimodal_poll_active = True
             self._multimodal_last_status = None
             # 重置一次性日志标志，避免复用旧状态导致不更新
@@ -413,7 +413,7 @@ class TestPage(QWidget):
                 self._multimodal_poll_timer.stop()
             self._multimodal_poll_active = False
             self._multimodal_last_status = None
-            logger.info("多模态数据监控已停止")
+            logger.debug("多模态数据监控已停止")
         except Exception as e:
             logger.debug(f"停止多模态监控时出错: {e}")
 
@@ -496,7 +496,7 @@ class TestPage(QWidget):
                 try:
                     from ...services.backend_proxy import emotion_analyze
                     
-                    logger.info("正在进行情绪分析...")
+                    logger.debug("正在进行情绪分析...")
                     result = emotion_analyze(
                         audio_paths=audio_paths,
                         video_paths=video_paths,
@@ -508,7 +508,7 @@ class TestPage(QWidget):
                     emotion_label = result.get("emotion_label", "unknown")
                     confidence = result.get("confidence", 0.0)
                     
-                    logger.info(
+                    logger.debug(
                         f"情绪分析完成: {emotion_label} "
                         f"(score={emotion_score:.3f}, confidence={confidence:.3f})"
                     )
@@ -550,7 +550,7 @@ class TestPage(QWidget):
 
             # 首次收到数据时记录日志
             if not hasattr(self, '_multimodal_first_data'):
-                logger.info(f"多模态数据轮询已启动，当前状态: {status}")
+                logger.debug(f"多模态数据轮询已启动，当前状态: {status}")
                 self._multimodal_first_data = True
 
             # ⚠️ 注意：多模态快照中的分数数据已废弃
@@ -574,7 +574,7 @@ class TestPage(QWidget):
             if status != "running" and self._multimodal_poll_active:
                 self._multimodal_poll_timer.stop()
                 self._multimodal_poll_active = False
-                logger.info("多模态采集已停止，停止轮询")
+                logger.debug("多模态采集已停止，停止轮询")
 
         except Exception as exc:
             logger.error(f"处理多模态快照数据时出错: {exc}")
@@ -1014,7 +1014,7 @@ class TestPage(QWidget):
             # 执行所有待处理的更新
             self._flush_pending_db_updates(row_id)
 
-        logger.info("📝 创建新的数据库记录...")
+        logger.debug("📝 创建新的数据库记录...")
         self._row_id_future = self._send_db_command(
             "db.insert_test_record",
             payload,
@@ -1238,10 +1238,10 @@ class TestPage(QWidget):
             main_window = self.window()
             if hasattr(main_window, 'baseline_page'):
                 main_window.baseline_page.reset()
-                logger.info("✅ 已重置基线校准页面状态")
+                logger.debug("✅ 已重置基线校准页面状态")
             if hasattr(main_window, 'sart_page'):
                 main_window.sart_page.reset()
-                logger.info("✅ 已重置SART实验页面状态")
+                logger.debug("✅ 已重置SART实验页面状态")
         except Exception as e:
             logger.error(f"❌ 重置页面状态失败: {e}")
         
@@ -1260,7 +1260,7 @@ class TestPage(QWidget):
             if hasattr(main_window, 'show_baseline_page'):
                 # ✅ 使用 show_baseline_page() 方法，会正确设置 session_info
                 main_window.show_baseline_page()
-                logger.info("✅ 已通过show_baseline_page()跳转到基线校准页面")
+                logger.debug("✅ 已通过show_baseline_page()跳转到基线校准页面")
             elif hasattr(main_window, 'stack'):
                 # 后备方案：直接跳转（但可能没有正确设置session_dir）
                 logger.warning("⚠️ show_baseline_page()不存在，使用后备方案")
@@ -1282,12 +1282,12 @@ class TestPage(QWidget):
             if hasattr(main_window, 'show_sart_page'):
                 # ✅ 使用 show_sart_page() 方法，会正确设置 session_info
                 main_window.show_sart_page()
-                logger.info("✅ 已通过show_sart_page()跳转到SART实验页面")
+                logger.debug("✅ 已通过show_sart_page()跳转到SART实验页面")
             elif hasattr(main_window, 'stack'):
                 # 后备方案：直接跳转（但可能没有正确设置session_dir）
                 logger.warning("⚠️ show_sart_page()不存在，使用后备方案")
                 main_window.stack.setCurrentIndex(3)
-                logger.info("✅ 已跳转到SART实验页面（全屏）")
+                logger.debug("✅ 已跳转到SART实验页面（全屏）")
             else:
                 logger.warning("⚠️ 无法找到主窗口堆栈")
                 QMessageBox.information(self, "提示", "无法启动SART实验")
@@ -1491,7 +1491,7 @@ class TestPage(QWidget):
         mapped_stage = name_mapping.get(stage_name, stage_name)
 
         self.stage_completed[mapped_stage] = True
-        logger.info(f"✅ 阶段已完成: {stage_name} → {mapped_stage}")
+        logger.debug(f"✅ 阶段已完成: {stage_name} → {mapped_stage}")
         self._update_stage_nav_status()
 
     def _create_main_content_area(self):
@@ -2556,7 +2556,7 @@ class TestPage(QWidget):
                 self._stop_bp_test()
                 return
 
-            logger.info("血压测试已开始")
+            logger.debug("血压测试已开始")
 
         except Exception as e:
             logger.error(f"开始血压测试失败: {e}")
@@ -2585,7 +2585,7 @@ class TestPage(QWidget):
             self.bp_progress_label.setText("测试已停止")
             self.bp_progress_circle.setText("停止")
 
-            logger.info("血压测试已停止")
+            logger.debug("血压测试已停止")
 
         except Exception as e:
             logger.error(f"停止血压测试失败: {e}")
@@ -2649,7 +2649,7 @@ class TestPage(QWidget):
                     'diastolic': diastolic,
                     'pulse': pulse,
                 }
-                logger.info(
+                logger.debug(
                     "血压测试完成: 收缩压=%s, 舒张压=%s, 脉搏=%s",
                     systolic,
                     diastolic,
@@ -2828,7 +2828,7 @@ class TestPage(QWidget):
                 
                 # 停止音视频录制并获取路径
                 try:
-                    logger.info("📹 正在停止音视频录制...")
+                    logger.debug("📹 正在停止音视频录制...")
                     av_stop_recording()
                     self._audio_paths = av_get_audio_paths()
                     self._video_paths = av_get_video_paths()
@@ -3184,7 +3184,7 @@ class TestPage(QWidget):
                 self.mic_anim.stop()
 
         elif self.current_step == 2:
-            logger.info(f"📍 update_step_ui: current_step=2 (舒尔特)，设置 answer_stack index=4")
+            logger.debug(f"📍 update_step_ui: current_step=2 (舒尔特)，设置 answer_stack index=4")
             self.answer_stack.setCurrentIndex(4)  # 舒尔特页面现在是索引4
             if hasattr(self, 'btn_next_bottom'):
                 self.btn_next_bottom.setVisible(False)
@@ -3244,7 +3244,7 @@ class TestPage(QWidget):
         self._fatigue_scores_list = []
         self._emotion_score = None
         self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
-        logger.info("已重置分数累积列表和情绪分析标志")
+        logger.debug("已重置分数累积列表和情绪分析标志")
 
         # ❌ 不再需要语音识别功能（用户自己朗读，不需要识别）
         # if HAS_SPEECH_RECOGNITION:
@@ -3262,7 +3262,7 @@ class TestPage(QWidget):
                 self.session_dir = _build_session_dir(base_dir, user_dir, self.session_timestamp)
                 logger.info(f"创建新的会话目录: {self.session_dir}")
             else:
-                logger.info(f"使用已有会话目录: {self.session_dir}")
+                logger.debug(f"使用已有会话目录: {self.session_dir}")
         except Exception as e:
             logger.error(f"处理会话目录失败: {e}")
             self.session_dir = 'recordings'
@@ -3286,10 +3286,10 @@ class TestPage(QWidget):
                 timer_active = False
             
             if not self._multimodal_poll_active or not timer_active:
-                config.logger.info("疲劳度监控未运行，启动监控轮询")
+                config.logger.debug("疲劳度监控未运行，启动监控轮询")
                 self._start_multimodal_monitoring()
             else:
-                config.logger.info("✅ 疲劳度监控已在运行（从基线阶段继续）")
+                config.logger.debug("✅ 疲劳度监控已在运行（从基线阶段继续）")
 
         # 使用线程异步启动AV采集，完成后启动摄像头更新（非阻塞）
         def start_av_async():
@@ -3305,7 +3305,7 @@ class TestPage(QWidget):
                     logger.warning(f"后端自动启动失败: {e}")
                 
                 # 等待后端连接建立（减少超时时间，避免长时间阻塞）
-                logger.info("等待后端服务器连接...")
+                logger.debug("等待后端服务器连接...")
                 connection_ok = False
                 try:
                     connection_ok = backend_client.wait_for_connection(timeout=3.0)
@@ -3320,7 +3320,7 @@ class TestPage(QWidget):
                         logger.warning("非调试模式，请手动启动后端: python -m src.main --root .")
                     # 不抛出异常，让UI继续运行
                 else:
-                    logger.info("✅ 后端服务器连接成功")
+                    logger.debug("✅ 后端服务器连接成功")
                 
                 # 尝试启动AV采集（即使后端未连接也尝试，可能使用本地摄像头）
                 try:
@@ -3365,7 +3365,7 @@ class TestPage(QWidget):
                         # 【重要修改】立即在主线程中启动监控，从测试开始就获取脑负荷和疲劳度数据
                         # 延迟800ms确保采集器完全启动并开始产生数据
                         self._invoke_later(self._start_multimodal_monitoring, 800)
-                        logger.info("✅ 多模态监控将在800ms后启动，从语音答题开始就可以看到脑负荷和疲劳度数据")
+                        logger.debug("✅ 多模态监控将在800ms后启动，从语音答题开始就可以看到脑负荷和疲劳度数据")
                     else:
                         logger.warning("多模态数据采集启动失败: %s", result)
                 except Exception as e:
@@ -3388,7 +3388,7 @@ class TestPage(QWidget):
                 from ...services.backend_proxy import eeg_start
                 result = eeg_start(username=self.current_user, save_dir=self.session_dir, part=1)
                 if result.get('status') == 'already-running':
-                    logger.info(f"✅ EEG采集已在运行中，继续使用现有连接: {result.get('save_dir')}")
+                    logger.debug(f"✅ EEG采集已在运行中，继续使用现有连接: {result.get('save_dir')}")
                 else:
                     logger.info(f"✅ EEG采集已启动，保存目录: {self.session_dir}\\eeg")
             except Exception as e:
@@ -3613,7 +3613,7 @@ class TestPage(QWidget):
     #     已删除 TTS 朗读相关代码
 
     def _next_step_or_question(self):
-        logger.info(f"🔍 _next_step_or_question 被调用: current_step={self.current_step}")
+        logger.debug(f"🔍 _next_step_or_question 被调用: current_step={self.current_step}")
 
         if self.current_step == 0:
             # 🔄 朗读录音阶段，不再有多个问题，直接进入下一步
@@ -3630,12 +3630,12 @@ class TestPage(QWidget):
                 if hasattr(self, 'score_page') and self.score_page:
                     logger.info(f"📊 情绪检测完成，立即更新分数页面 (emotion={self._emotion_score})")
                     self._send_scores_to_score_page()
-                    logger.info("✅ 情绪检测结果已发送到分数页面")
+                    logger.debug("✅ 情绪检测结果已发送到分数页面")
             except Exception as e:
                 logger.error(f"发送情绪结果到分数页面失败: {e}", exc_info=True)
             
             self.current_step += 1
-            logger.info(f"✅ 情绪检测完成，current_step 增加到: {self.current_step}")
+            logger.debug(f"✅ 情绪检测完成，current_step 增加到: {self.current_step}")
 
             try:
                 self._close_camera()
@@ -3644,7 +3644,7 @@ class TestPage(QWidget):
 
             # 停止音视频录制并获取路径
             try:
-                logger.info("📹 正在停止音视频录制...")
+                logger.debug("📹 正在停止音视频录制...")
                 av_stop_recording()
                 self._audio_paths = av_get_audio_paths()
                 self._video_paths = av_get_video_paths()
@@ -3666,7 +3666,7 @@ class TestPage(QWidget):
             if HAS_MULTIMODAL:
                 try:
                     self._stop_multimodal_monitoring()
-                    logger.info("✅ 朗读阶段结束，已停止疲劳度监控定时器")
+                    logger.debug("✅ 朗读阶段结束，已停止疲劳度监控定时器")
                 except Exception as e:
                     logger.warning(f"停止疲劳度监控失败: {e}")
 
@@ -3689,9 +3689,9 @@ class TestPage(QWidget):
             self._save_timestamp_immediately(call_timestamp)
             logger.info(f"📍 已记录血压测试开始时间戳: {call_timestamp}")
 
-            logger.info(f"🔄 准备调用 update_step_ui()，当前 current_step={self.current_step}")
+            logger.debug(f"🔄 准备调用 update_step_ui()，当前 current_step={self.current_step}")
             self.update_step_ui()
-            logger.info(f"✅ update_step_ui() 调用完成，answer_stack.currentIndex={self.answer_stack.currentIndex()}")
+            logger.debug(f"✅ update_step_ui() 调用完成，answer_stack.currentIndex={self.answer_stack.currentIndex()}")
 
             # 保存音视频路径到数据库
             self._persist_av_paths_to_db()
@@ -3708,7 +3708,7 @@ class TestPage(QWidget):
                 if hasattr(self, 'score_page') and self.score_page:
                     logger.info(f"📊 血压测试完成，立即更新分数页面 (bp={self.bp_results})")
                     self._send_scores_to_score_page()
-                    logger.info("✅ 血压测试结果已发送到分数页面")
+                    logger.debug("✅ 血压测试结果已发送到分数页面")
             except Exception as e:
                 logger.error(f"发送血压结果到分数页面失败: {e}", exc_info=True)
 
@@ -3727,7 +3727,7 @@ class TestPage(QWidget):
             self.update_step_ui()
 
     def _on_schulte_completed(self):
-        logger.info("舒特格测试完成，自动进入分数展示页面")
+        logger.debug("舒特格测试完成，自动进入分数展示页面")
         
         # 📍 记录舒尔特测试结束时间戳
         call_timestamp = time.time()
@@ -3749,7 +3749,7 @@ class TestPage(QWidget):
         try:
             self._stop_multimodal_monitoring()
             multidata_stop_collection()
-            logger.info("舒尔特测试完成，已确认疲劳度监控与多模态采集已停止")
+            logger.debug("舒尔特测试完成，已确认疲劳度监控与多模态采集已停止")
         except Exception as e:
             logger.warning(f"舒尔特阶段停止疲劳度监控或采集失败: {e}")
         
@@ -3914,7 +3914,7 @@ class TestPage(QWidget):
                 "audio": list(self._audio_paths),
             }
             
-            logger.info(f"准备保存音视频路径: {len(self._video_paths)} 视频, {len(self._audio_paths)} 音频")
+            logger.debug(f"准备保存音视频路径: {len(self._video_paths)} 视频, {len(self._audio_paths)} 音频")
             
             # 使用排队更新机制，如果记录不存在会自动创建
             self._queue_db_update(update_payload, "保存音视频路径失败")
@@ -4038,7 +4038,7 @@ class TestPage(QWidget):
                 with open(SCORES_CSV_FILE, 'a', newline='', encoding='utf-8') as f:
                     csv.writer(f).writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), self.score])
                 self.history_scores.append(self.score)
-                logger.info(f"分数已保存到CSV文件: {self.score}")
+                logger.debug(f"分数已保存到CSV文件: {self.score}")
             else:
                 logger.warning("分数尚未计算，跳过CSV保存")
         except Exception as e:
@@ -4063,7 +4063,7 @@ class TestPage(QWidget):
         # 这样无论用户从哪个阶段开始测试，都能正常保存数据
         try:
             if not self._db_disabled and not self.row_id:
-                logger.info(f"📝 用户 '{self.current_user}' 登录，准备创建数据库记录...")
+                logger.info(f"📝 用户 '{self.current_user}' 登录，创建新的数据库记录...")
                 self._ensure_db_row()
         except Exception as e:
             logger.error(f"❌ 创建数据库记录失败: {e}", exc_info=True)
@@ -4128,7 +4128,7 @@ class TestPage(QWidget):
         if self._fatigue_scores_list:
             result["fatigue_avg"] = sum(self._fatigue_scores_list) / len(self._fatigue_scores_list)
             result["fatigue_count"] = len(self._fatigue_scores_list)
-            logger.info(
+            logger.debug(
                 f"疲劳度平均分数: {result['fatigue_avg']:.2f} "
                 f"(基于 {result['fatigue_count']} 个样本)"
             )
@@ -4139,7 +4139,7 @@ class TestPage(QWidget):
         if self._brain_load_scores_list:
             result["brain_load_avg"] = sum(self._brain_load_scores_list) / len(self._brain_load_scores_list)
             result["brain_load_count"] = len(self._brain_load_scores_list)
-            logger.info(
+            logger.debug(
                 f"脑负荷平均分数: {result['brain_load_avg']:.2f} "
                 f"(基于 {result['brain_load_count']} 个样本)"
             )
@@ -4198,8 +4198,8 @@ class TestPage(QWidget):
             }
         }
         
-        logger.info(f"准备分数数据完成: {score_data}")
-        logger.info(f"阶段完成状态: {score_data['_stage_completed']}")
+        logger.debug(f"准备分数数据完成: {score_data}")
+        logger.debug(f"阶段完成状态: {score_data['_stage_completed']}")
         return score_data
     
     def _send_scores_to_score_page(self):

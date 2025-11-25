@@ -142,7 +142,7 @@ class BaselineCalibrationPage(QWidget):
         # ✅ 启动疲劳度检测（多模态采集）
         if HAS_MULTIMODAL:
             try:
-                config.logger.info("🚀 启动疲劳度检测（基线校准开始）")
+                config.logger.debug("🚀 启动疲劳度检测（基线校准开始）")
                 result = multidata_start_collection(
                     self.current_user,
                     part=0,  # 基线阶段为part 0
@@ -255,7 +255,7 @@ class BaselineCalibrationPage(QWidget):
     def _auto_start_baseline(self) -> None:
         """自动开始基线校准（页面显示后触发）"""
         if not self.is_running and not self.waiting_for_continue:
-            config.logger.info("🚀 页面显示，自动开始基线校准")
+            config.logger.debug("🚀 页面显示，自动开始基线校准")
             self._start_baseline()
     
     def set_session_info(self, session_dir: str, current_user: str) -> None:

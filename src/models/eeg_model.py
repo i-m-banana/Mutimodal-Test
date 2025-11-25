@@ -67,18 +67,18 @@ class EEGModel(BaseInferenceModel):
             raise FileNotFoundError(f"Calibrator文件不存在: {self.calibrator_path}")
         
         # 加载scaler和calibrator
-        self.logger.info("加载EEG模型组件...")
+        self.logger.debug("加载EEG模型组件...")
         self.scaler = joblib.load(str(self.scaler_path))
-        self.logger.info("  ✓ Scaler加载完成")
+        self.logger.debug("  ✓ Scaler加载完成")
         
         self.calibrator = joblib.load(str(self.calibrator_path))
-        self.logger.info("  ✓ Calibrator加载完成")
+        self.logger.debug("  ✓ Calibrator加载完成")
         
         # 初始化EMA状态
         self.ema = None
         self.state = "low"
         
-        self.logger.info("✅ EEG脑负荷模型初始化完成")
+        self.logger.debug("✅ EEG脑负荷模型初始化完成")
     
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """执行EEG脑负荷推理

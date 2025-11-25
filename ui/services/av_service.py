@@ -103,7 +103,7 @@ class _RemoteAVProxy(QObject):
             self._latest_frame = frame
             if not hasattr(self, '_frame_received_logged'):
                 self._frame_received_logged = True
-                _logger.info("✅ 首个摄像头帧已接收，尺寸: %s", frame.shape)
+                _logger.debug("✅ 首个摄像头帧已接收，尺寸: %s", frame.shape)
 
     @pyqtSlot(dict)
     def _handle_audio_level(self, payload: Dict) -> None:
@@ -118,7 +118,7 @@ class _RemoteAVProxy(QObject):
     # ------------------------------------------------------------------
     def start_collection(self, save_dir: str, *, camera_index: int = 0, video_fps: float = 30.0,
                          audio_rate: int = 8000, input_device_index: Optional[int] = None) -> None:
-        _logger.info(f"🎥 前端 start_collection: save_dir={save_dir}, camera_index={camera_index}")
+        _logger.info(f"🎥 前端发布音视频采集指令: save_dir={save_dir}, camera_index={camera_index}")
         self._segment_index = 0
         self._paths = SessionPaths(audio_paths=[], video_paths=[])
         self._recording_active = False
@@ -147,7 +147,7 @@ class _RemoteAVProxy(QObject):
             }
             try:
                 if idx == requested_index:
-                    _logger.info("Requesting backend to start preview: %s", payload)
+                    _logger.info("音视频采集参数: %s", payload)
                 else:
                     _logger.warning("Primary camera index %s failed, retrying with fallback index %s", requested_index, idx)
                 self._client.send_command_sync("av.start_preview", payload)
@@ -179,7 +179,7 @@ class _RemoteAVProxy(QObject):
             self._stop_simulated_recording()
             self._stop_simulation()
         else:
-            _logger.info("Requesting backend to stop preview")
+            _logger.debug("Requesting backend to stop preview")
             try:
                 result = self._client.send_command_sync("av.stop_preview")
                 self._update_paths(result)
@@ -192,14 +192,14 @@ class _RemoteAVProxy(QObject):
         if self._simulate:
             self._start_simulated_recording()
             return
-        _logger.info("Requesting backend to start recording")
+        _logger.debug("Requesting backend to start recording")
         self._client.send_command_sync("av.start_recording")
 
     def stop_recording(self) -> None:
         if self._simulate:
             self._stop_simulated_recording()
             return
-        _logger.info("Requesting backend to stop recording")
+        _logger.debug("Requesting backend to stop recording")
         result = self._client.send_command_sync("av.stop_recording")
         self._update_paths(result)
 

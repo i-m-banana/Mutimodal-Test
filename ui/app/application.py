@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
         self.sart_mode = mode
         self.sart_duration = 60 if mode == "short" else 1500
         
-        logger.info(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
+        logger.debug(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
         
         # 如果 SART 页面已创建，更新其配置
         if hasattr(self, 'sart_page'):
@@ -262,16 +262,16 @@ class MainWindow(QMainWindow):
             self.test_page.session_timestamp = session_timestamp
             self.test_page.session_dir = session_dir
             
-            logger.info(f"🆕 创建整个测试会话的session目录: {session_dir}")
+            logger.debug(f"🆕 创建整个测试会话的session目录: {session_dir}")
             
             # ✅ 更新session_dir：即使摄像头已预加载，也要用正确的session_dir重新初始化
             # 这样可以确保后续录制的文件保存到正确的目录
-            logger.info(f"🎥 用正确的session_dir更新摄像头服务: {session_dir}")
+            logger.debug(f"🎥 用正确的session_dir更新摄像头服务: {session_dir}")
             from .utils.helpers import init_camera
             
             def on_camera_update_finished(success: bool) -> None:
                 if success:
-                    logger.info("✅ 摄像头session_dir更新成功")
+                    logger.debug("✅ 摄像头session_dir更新成功")
                     self.camera_preloaded = True
                 else:
                     logger.warning("⚠️ 摄像头session_dir更新失败")
@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
             
             logger.info(f"⚠️ 补救：创建会话目录: {session_dir}")
         else:
-            logger.info(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
+            logger.debug(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
         
         # 传递时间戳列表和会话信息（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
@@ -318,9 +318,9 @@ class MainWindow(QMainWindow):
             self.baseline_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
         # 传递会话信息（用于EEG采集）
-        logger.info(f"📂 传递会话信息到基线页面:")
-        logger.info(f"   - session_dir = {self.test_page.session_dir}")
-        logger.info(f"   - current_user = {self.current_user}")
+        logger.debug(f"📂 传递会话信息到基线页面:")
+        logger.debug(f"   - session_dir = {self.test_page.session_dir}")
+        logger.debug(f"   - current_user = {self.current_user}")
         self.baseline_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
@@ -331,7 +331,7 @@ class MainWindow(QMainWindow):
         
         # ✅ 重置基线页面状态（防止上次的完成提示残留）
         self.baseline_page.reset()
-        logger.info("✅ 已重置基线校准页面状态")
+        logger.debug("✅ 已重置基线校准页面状态")
         
         self.brain_load_tip.setVisible(True)
         self.stack.fade_to_index(2)
@@ -364,9 +364,9 @@ class MainWindow(QMainWindow):
                         logger.warning(f"⚠️ EEG已在运行但目录不匹配！")
                         logger.warning(f"   当前EEG目录: {old_dir}")
                         logger.warning(f"   期望session目录: {self.test_page.session_dir}/eeg")
-                        logger.info("💡 建议：在校准页面时应该已经设置了正确的session_dir")
+                        logger.debug("💡 建议：在校准页面时应该已经设置了正确的session_dir")
                     else:
-                        logger.info(f"✅ EEG采集已在运行（校准阶段启动），继续使用: {old_dir}")
+                        logger.debug(f"✅ EEG采集已在运行（校准阶段启动），继续使用: {old_dir}")
                 elif status == 'started':
                     logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
                     logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
@@ -448,9 +448,9 @@ class MainWindow(QMainWindow):
             logger.info(f"为 SART 创建会话目录: {session_dir}")
         
         # 传递会话信息（用于EEG采集和结果保存）
-        logger.info(f"📂 传递会话信息到SART页面:")
-        logger.info(f"   - session_dir = {self.test_page.session_dir}")
-        logger.info(f"   - current_user = {self.current_user}")
+        # logger.info(f"📂 传递会话信息到SART页面:")
+        # logger.info(f"   - session_dir = {self.test_page.session_dir}")
+        # logger.info(f"   - current_user = {self.current_user}")
         self.sart_page.set_session_info(
             self.test_page.session_dir,
             self.current_user
@@ -458,7 +458,7 @@ class MainWindow(QMainWindow):
         
         # ✅ 重置SART页面状态（防止上次的完成提示残留）
         self.sart_page.reset()
-        logger.info("✅ 已重置SART实验页面状态")
+        logger.debug("✅ 已重置SART实验页面状态")
         
         self.brain_load_tip.setVisible(True)
         self.stack.fade_to_index(3)
@@ -485,11 +485,11 @@ class MainWindow(QMainWindow):
         """在后台预加载摄像头，不阻塞UI"""
         from .utils.helpers import init_camera
         
-        logger.info("🎥 开始预加载摄像头（后台异步，使用临时目录）...")
+        logger.debug("🎥 开始预加载摄像头（后台异步，使用临时目录）...")
         
         def on_preload_finished(success: bool) -> None:
             if success:
-                logger.info("✅ 摄像头预加载成功，校准页面将更新为正确的session_dir")
+                logger.debug("✅ 摄像头预加载成功，校准页面将更新为正确的session_dir")
                 self.camera_preloaded = True
             else:
                 logger.warning("⚠️ 摄像头预加载失败，将在校准页重试")
@@ -606,7 +606,7 @@ def create_application(argv: Sequence[str] | None = None) -> tuple[QApplication,
     # 设置 SART 模式
     if known_args.sart_mode:
         window.set_sart_mode(known_args.sart_mode)
-        logger.info(f"✅ 从命令行参数设置 SART 模式: {known_args.sart_mode}")
+        logger.debug(f"✅ 从命令行参数设置 SART 模式: {known_args.sart_mode}")
     
     return app, window
 

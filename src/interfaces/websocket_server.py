@@ -61,7 +61,7 @@ class WebsocketPushInterface(BaseInterface):
         if serve is None:
             self.logger.error("websockets package not installed; interface disabled")
             return
-        self.logger.info("Starting WebSocket interface on %s:%s", self.host, self.port)
+        self.logger.debug("Starting WebSocket interface on %s:%s", self.host, self.port)
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, name=f"ws-{self.name}", daemon=True)
         self._thread.start()
@@ -111,7 +111,7 @@ class WebsocketPushInterface(BaseInterface):
             await self._server.wait_closed()
 
     async def _client_handler(self, websocket: WebSocketServerProtocol) -> None:
-        self.logger.info("Client connected: %s", websocket.remote_address)
+        self.logger.debug("Client connected: %s", websocket.remote_address)
         self._clients.add(websocket)
         token = uuid.uuid4().hex
         self._client_tokens[websocket] = token
@@ -143,7 +143,7 @@ class WebsocketPushInterface(BaseInterface):
             request_id = data.get("id") or uuid.uuid4().hex
             body = data.get("payload") or {}
             # 过滤掉频繁的命令日志(避免刷屏)
-            if action not in ["av.audio_level", "bp.status", "multimodal.snapshot"]:
+            if action not in ["av.audio_level", "bp.status", "multimodal.snapshot", "eeg.diagnostics", "bp.snapshot"]:
                 self.logger.info("Received command from client: %s", action)
             self._emit_command(action, body, request_id, websocket)
             return

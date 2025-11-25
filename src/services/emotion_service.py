@@ -29,11 +29,13 @@ class EmotionService:
     ):
         self.bus = bus
         self.logger = logger or logging.getLogger("service.emotion")
-        self._pending_requests = {}  # 存储待处理的请求
-        
+        # 存储待处理的请求: request_id -> (asyncio.Future, loop)
+        # 使用二元组以便从任意线程使用 loop.call_soon_threadsafe 安全地设置结果
+        self._pending_requests = {}
+
         # 订阅推理结果
         self.bus.subscribe(EventTopic.DETECTION_RESULT, self._on_detection_result)
-        
+
         self.logger.info("情绪分析服务已初始化")
     
     def _on_detection_result(self, event: Event) -> None:
@@ -41,15 +43,26 @@ class EmotionService:
         payload = event.payload or {}
         detector = payload.get("detector", "")
         request_id = payload.get("request_id")
-        
+
         # 只记录情绪相关的检测结果
         if detector == "model_emotion":
-            self.logger.debug(f"📥 收到情绪检测结果: request_id={request_id}, pending={list(self._pending_requests.keys())}")
-            
+            self.logger.debug(
+                f"📥 收到情绪检测结果: request_id={request_id}, pending={list(self._pending_requests.keys())}"
+            )
+
             if request_id and request_id in self._pending_requests:
-                self.logger.info(f"✅ 情绪分析完成: request_id={request_id}")
-                future = self._pending_requests.pop(request_id)
-                future.set_result(payload)
+                self.logger.debug(f"✅ 情绪分析完成: request_id={request_id}")
+                future, loop = self._pending_requests.pop(request_id)
+                try:
+                    # 在创建 future 的事件循环上线程安全地设置结果
+                    if loop and loop.is_running():
+                        loop.call_soon_threadsafe(future.set_result, payload)
+                    else:
+                        # 退回到直接设置（兼容性）
+                        future.set_result(payload)
+                except Exception:
+                    # 保守处理: 如果设置结果失败, 仍记录警告并忽略
+                    self.logger.exception("设置情绪请求结果失败: %s", request_id)
             else:
                 self.logger.warning(f"⚠️  未找到对应请求: request_id={request_id}")
         # 其他检测器结果静默忽略
@@ -59,7 +72,7 @@ class EmotionService:
         audio_paths: List[str],
         video_paths: List[str],
         text_data: List[Dict],
-        timeout: float = 15.0
+        timeout: float = 30.0
     ) -> Dict[str, Any]:
         """
         📍 情绪分析接口 - 异步版本
@@ -87,12 +100,12 @@ class EmotionService:
             # 生成请求ID
             request_id = f"emotion_{int(time.time() * 1000)}"
             
-            # 创建Future用于接收结果
-            import asyncio
-            future = asyncio.Future()
-            self._pending_requests[request_id] = future
+            # 创建Future用于接收结果，并存储创建时的事件循环以便线程安全地设置结果
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            self._pending_requests[request_id] = (future, loop)
             
-            self.logger.info(f"📤 发布情绪请求: request_id={request_id}, 等待结果...")
+            self.logger.debug(f"📤 发布情绪请求: request_id={request_id}, 等待结果...")
             
             # 发布情绪分析请求事件
             self.bus.publish(Event(
@@ -124,7 +137,14 @@ class EmotionService:
                 }
                 
             except asyncio.TimeoutError:
-                self._pending_requests.pop(request_id, None)
+                # 超时时从 pending 中移除并取消 future
+                entry = self._pending_requests.pop(request_id, None)
+                if entry:
+                    fut, _ = entry
+                    try:
+                        fut.cancel()
+                    except Exception:
+                        pass
                 self.logger.error(f"情绪分析超时 (>{timeout}s)")
                 return {
                     "emotion_score": 0.0,

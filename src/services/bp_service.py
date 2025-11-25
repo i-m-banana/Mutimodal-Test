@@ -41,7 +41,7 @@ class BloodPressureService:
         self._mode = "hardware"
         self._current_port: Optional[str] = None
         self._last_error: Optional[str] = None
-        self._preferred_port = "COM8"
+        self._preferred_port = "COM4"
 
     # ------------------------------------------------------------------
     def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:

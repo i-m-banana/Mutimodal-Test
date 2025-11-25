@@ -1,15 +1,55 @@
 """CLI entrypoint for the refactored multimodal platform."""
 
 from __future__ import annotations
+import os
+
+# Quiet native C++ logs from TensorFlow / TFLite / absl / glog / mediapipe.
+# Values: 0 = all, 1 = filter out INFO, 2 = filter out INFO and WARNING, 3 = filter out INFO/WARNING/ERROR
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("ABSL_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("GLOG_minloglevel", "2")
+os.environ.setdefault("GLOG_logtostderr", "1")
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import threading
 from pathlib import Path
 from typing import Optional
+
+# Reduce noisy transformers/tokenizers logs for cleaner backend output.
+# This is safe to run even if transformers isn't installed (guarded import).
+try:
+    # transformers provides a dedicated logging control API
+    from transformers import logging as transformers_logging
+
+    transformers_logging.set_verbosity_error()
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("tokenizers").setLevel(logging.ERROR)
+except Exception:
+    # If transformers isn't available or import fails, continue silently.
+    pass
+
+# Suppress specific Python warnings from transformers/tokenizers about
+# tokenization parameter defaults and mismatched weight shapes. This hides
+# noisy messages like the clean_up_tokenization_spaces FutureWarning and the
+# "Some weights ... were not initialized from the model checkpoint" UserWarning.
+import warnings
+
+# suppress the tokenizer FutureWarning about clean_up_tokenization_spaces
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    message="`clean_up_tokenization_spaces` was not set.*",
+)
+
+# suppress transformers warnings about mismatched checkpoint shapes
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message="Some weights of .* were not initialized from the model checkpoint.*",
+)
 
 from .constants import EventTopic
 from .core.event_bus import Event
@@ -44,7 +84,7 @@ def _make_event_logger(key_info_mode: bool):
             if last_payload.get(event.topic) == key:
                 return
             last_payload[event.topic] = key
-            _logger.info(
+            _logger.debug(
                 "[关键检测] detector=%s status=%s label=%s",
                 key[0],
                 key[1],
@@ -93,7 +133,7 @@ def run(
     _install_signal_handler(stop)
 
     orchestrator.start()
-    _logger.info("Orchestrator started. Press Ctrl+C to stop.")
+    _logger.info("后端程序已启动. 按 Ctrl+C 可强制停止。")
 
     try:
         while not stop_event.is_set():
