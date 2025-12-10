@@ -3349,34 +3349,34 @@ class TestPage(QWidget):
             task_name="启动AV采集"
         )
 
-        if HAS_MULTIMODAL:
-            # 使用线程异步启动多模态采集，避免阻塞UI
-            def start_multimodal_async():
-                try:
-                    result = multidata_start_collection(
-                        self.current_user,
-                        part=1,
-                        save_dir=self.session_dir,
-                    )
-                    self.multimodal_collector = result
-                    if result and result.get("status") in {"running", "already-running"}:
-                        logger.info("多模态数据采集已启动，用户: %s", self.current_user)
-                        logger.info("多模态数据保存目录: %s\\fatigue", self.session_dir)
-                        # 【重要修改】立即在主线程中启动监控，从测试开始就获取脑负荷和疲劳度数据
-                        # 延迟800ms确保采集器完全启动并开始产生数据
-                        self._invoke_later(self._start_multimodal_monitoring, 800)
-                        logger.debug("✅ 多模态监控将在800ms后启动，从语音答题开始就可以看到脑负荷和疲劳度数据")
-                    else:
-                        logger.warning("多模态数据采集启动失败: %s", result)
-                except Exception as e:
-                    logger.error(f"启动多模态数据采集时出错: {e}")
-                    logger.info("UI将继续运行，但疲劳度监测功能不可用")
+        # if HAS_MULTIMODAL:
+        #     # 使用线程异步启动多模态采集，避免阻塞UI
+        #     def start_multimodal_async():
+        #         try:
+        #             result = multidata_start_collection(
+        #                 self.current_user,
+        #                 part=1,
+        #                 save_dir=self.session_dir,
+        #             )
+        #             self.multimodal_collector = result
+        #             if result and result.get("status") in {"running", "already-running"}:
+        #                 logger.info("多模态数据采集已启动，用户: %s", self.current_user)
+        #                 logger.info("多模态数据保存目录: %s\\fatigue", self.session_dir)
+        #                 # 【重要修改】立即在主线程中启动监控，从测试开始就获取脑负荷和疲劳度数据
+        #                 # 延迟800ms确保采集器完全启动并开始产生数据
+        #                 self._invoke_later(self._start_multimodal_monitoring, 800)
+        #                 logger.debug("✅ 多模态监控将在800ms后启动，从语音答题开始就可以看到脑负荷和疲劳度数据")
+        #             else:
+        #                 logger.warning("多模态数据采集启动失败: %s", result)
+        #         except Exception as e:
+        #             logger.error(f"启动多模态数据采集时出错: {e}")
+        #             logger.info("UI将继续运行，但疲劳度监测功能不可用")
             
-            # 提交到后台线程执行（非阻塞）
-            self.thread_manager.submit_data_task(
-                start_multimodal_async,
-                task_name="启动多模态采集"
-            )
+        #     # 提交到后台线程执行（非阻塞）
+        #     self.thread_manager.submit_data_task(
+        #         start_multimodal_async,
+        #         task_name="启动多模态采集"
+        #     )
         
 
     def start_eeg_collection(self) -> None:

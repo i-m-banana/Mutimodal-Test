@@ -486,24 +486,24 @@ class CalibrationPage(QWidget):
                     else:
                         config.logger.warning(f"⚠️ EEG预连接启动失败: {result}")
                     
-                    # ✅ 第二步：启动脑负荷推理（多模态数据采集）
-                    try:
-                        # `backend_proxy` 提供的接口名为 multimodal_start_collection（不是 multidata_start_collection）
-                        from ...services.backend_proxy import multimodal_start_collection
+                    # # ✅ 第二步：启动脑负荷推理（多模态数据采集）
+                    # try:
+                    #     # `backend_proxy` 提供的接口名为 multimodal_start_collection（不是 multidata_start_collection）
+                    #     from ...services.backend_proxy import multimodal_start_collection
 
-                        # 使用显式关键字参数以避免参数顺序或命名歧义
-                        multidata_result = multimodal_start_collection(
-                            username=current_user,
-                            save_dir=session_dir,
-                            part=0,
-                        )
-                        multidata_status = (multidata_result or {}).get("status", "").lower()
-                        if multidata_status in {"started", "running", "already-running"}:
-                            config.logger.debug(f"🧠 脑负荷推理已在校准阶段启动，保存目录: {session_dir}")
-                        else:
-                            config.logger.warning(f"⚠️ 脑负荷推理启动失败: {multidata_result}")
-                    except Exception as e:
-                        config.logger.error(f"❌ 启动脑负荷推理失败: {e}", exc_info=True)
+                    #     # 使用显式关键字参数以避免参数顺序或命名歧义
+                    #     multidata_result = multimodal_start_collection(
+                    #         username=current_user,
+                    #         save_dir=session_dir,
+                    #         part=0,
+                    #     )
+                    #     multidata_status = (multidata_result or {}).get("status", "").lower()
+                    #     if multidata_status in {"started", "running", "already-running"}:
+                    #         config.logger.debug(f"🧠 脑负荷推理已在校准阶段启动，保存目录: {session_dir}")
+                    #     else:
+                    #         config.logger.warning(f"⚠️ 脑负荷推理启动失败: {multidata_result}")
+                    # except Exception as e:
+                    #     config.logger.error(f"❌ 启动脑负荷推理失败: {e}", exc_info=True)
                         
                 except Exception as e:
                     config.logger.error(f"❌ EEG预连接失败: {e}", exc_info=True)

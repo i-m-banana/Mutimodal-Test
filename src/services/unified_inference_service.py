@@ -254,8 +254,16 @@ class UnifiedInferenceService:
         # 前端录制完成后,发送 FATIGUE_ASSESSMENT_REQUEST 事件
         # 使用保存的视频文件进行离线推理
         
-        # 保留情绪识别的实时推理(如果需要)
-        if "emotion" in self.integrated_models:
+        # ===== 情绪识别推理策略调整 =====
+        # 为避免在录制期间每次 snapshot 都触发情绪推理（导致频繁的文件打开错误），
+        # 现在仅在采集停止后（status != "running"）触发情绪推理
+        # 这样可以确保视频文件已完全写入并关闭，避免 OpenCV 报错
+        # 如果需要实时推理，可以在 payload 中添加 "trigger_emotion": True 标志
+        
+        # 情绪识别: 仅在录制停止后触发（避免录制期间频繁推理）
+        if "emotion" in self.integrated_models and status != "running":
+            self.logger.debug(f"📊 准备触发情绪推理 (status={status}, 采集已停止)")
+            
             inference_data = {
                 "elapsed_time": elapsed_time
             }
@@ -283,6 +291,9 @@ class UnifiedInferenceService:
                 })
             
             self._submit_inference("emotion", inference_data, metadata)
+        elif "emotion" in self.integrated_models and status == "running":
+            # 录制期间跳过情绪推理，避免频繁触发
+            self.logger.debug("⏭️  跳过情绪推理 (status=running, 等待录制完成)")
     
     def _on_emotion_request(self, event: Event) -> None:
         """处理情绪分析请求"""
