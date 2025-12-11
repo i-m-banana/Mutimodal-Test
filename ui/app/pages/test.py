@@ -58,6 +58,8 @@ from ...widgets.camera_preview import CameraPreviewWidget
 from ...widgets.schulte_grid import SchulteGridWidget
 from...widgets.score_page import ScorePage
 from ...services.backend_client import get_backend_client
+from ...services.database_service import DatabaseService
+from ...services.session_manager import SessionManager
 from ...utils_common.thread_process_manager import get_thread_manager
 
 # ---------------------------------------------------------------------------
@@ -213,21 +215,18 @@ class TestPage(QWidget):
         # 音频录制已转移到AVCollector，这里只保留定时器用于更新UI
         self.audio_timer = QTimer(self)
         self.camera_preview: Optional[CameraPreviewWidget] = None
-        # ✅ 两个独立的摄像头widget，都从同一个AV服务获取帧数据
         self.schulte_camera_preview: Optional[CameraPreviewWidget] = None
-        # 会话与录制文件管理
-        self.session_timestamp = None
-        self.session_dir = None
         self._audio_paths = []
         self._video_paths = []
         self._current_audio_target = None
         self._current_video_target = None
-        # 当前登录用户名（默认匿名）
         self.current_user = 'anonymous'
+        
+        self.session_manager = SessionManager.get_instance()
         
         # SART模式配置（从命令行参数读取）
         self.sart_mode = "short"  # 默认短时模式
-        self.sart_duration = 300  # 默认5分钟
+        self.sart_duration = 60  # 默认1分钟
 
         # 多模态数据采集相关（不再使用独立预览窗口）
         self.multimodal_collector = None
@@ -250,12 +249,11 @@ class TestPage(QWidget):
         self._emotion_score: Optional[float] = None
         self._emotion_analysis_triggered: bool = False  # 防止重复触发情绪分析
 
-        # 数据库交互状态
-        self._db_warning_logged = False
+        # ✅ 数据库服务（替代原有的数据库交互状态变量）
         self._db_disabled = SKIP_DATABASE
-        self._row_id_future = None
-        self._pending_db_updates = []
-        self.row_id = None  # 数据库记录尚未创建前保持空值
+        self.db_service = DatabaseService(parent=self, username=self.current_user)
+        if SKIP_DATABASE:
+            self.db_service.disable_writes("用户设置了 SKIP_DATABASE，数据库写入已禁用")
 
         # 血压后端采集状态
         self.bp_simulation_enabled = BP_SIMULATION
@@ -279,6 +277,11 @@ class TestPage(QWidget):
 
         # 测试流程状态标志
         self.test_started = False
+    
+    @property
+    def row_id(self) -> Optional[int]:
+        """数据库记录 ID（通过 db_service 获取，保持向后兼容）"""
+        return self.db_service.get_row_id()
 
     def _invoke_later(self, callback: Callable[[], None], delay_ms: int = 0) -> None:
         """Run `callback` on the UI thread after the given delay.
@@ -319,13 +322,8 @@ class TestPage(QWidget):
             call_timestamp: 时间戳（Unix时间戳）
         """
         try:
-            # 确保文件路径已初始化
             if self._timestamps_file_path is None:
-                if not hasattr(self, 'session_dir') or not self.session_dir:
-                    logger.warning("session_dir 未初始化，无法保存时间戳")
-                    return
-                
-                eeg_dir = os.path.join(self.session_dir, 'eeg')
+                eeg_dir = self.session_manager.get_eeg_dir()
                 os.makedirs(eeg_dir, exist_ok=True)
                 self._timestamps_file_path = os.path.join(eeg_dir, 'part_timestamps.json')
             
@@ -361,9 +359,9 @@ class TestPage(QWidget):
             # ✅ 确保数据库记录已创建（防御性检查）
             # 如果用户直接跳转到基线/SART阶段而没有先登录，这里会触发创建
             try:
-                if not self._db_disabled and not self.row_id and not self._row_id_future:
+                if not self.db_service.is_disabled() and not self.db_service.get_row_id():
                     logger.info("📝 开始多模态监控前确保数据库记录已创建...")
-                    self._ensure_db_row()
+                    self.db_service.create_test_record(self.current_user)
             except Exception as e:
                 logger.warning(f"⚠️ 创建数据库记录失败（将在后续尝试）: {e}")
 
@@ -431,10 +429,10 @@ class TestPage(QWidget):
             
             logger.info(f"💾 保存 {len(record_payload)} 条语音识别结果")
             
-            # 写入到文件
             try:
-                record_txt = os.path.join(self.session_dir, 'emotion', "record.txt")
-                os.makedirs(os.path.dirname(record_txt), exist_ok=True)
+                emotion_dir = self.session_manager.get_emotion_dir()
+                os.makedirs(emotion_dir, exist_ok=True)
+                record_txt = os.path.join(emotion_dir, "record.txt")
                 with open(record_txt, 'w', encoding='utf-8') as f:
                     f.write(str(record_payload))
                 logger.info(f"✅ 语音识别结果已写入文件: {record_txt}")
@@ -443,7 +441,7 @@ class TestPage(QWidget):
             
             # 更新到数据库
             try:
-                self._queue_db_update(
+                self.db_service.update_test_record(
                     {'record_text': record_payload},
                     "保存语音识别结果到数据库失败"
                 )
@@ -930,129 +928,36 @@ class TestPage(QWidget):
         except Exception as e:
             logger.warning(f"注册调试快捷键失败: {e}")
 
+    # =========================================================================
+    # ⚠️ 已废弃的数据库方法 - 已迁移到 DatabaseService
+    # =========================================================================
+    # 以下方法已迁移到 ui/services/database_service.py，请使用：
+    # - self.db_service.create_test_record(username) 替代 _ensure_db_row()
+    # - self.db_service.update_test_record(payload, context) 替代 _queue_db_update()
+    # - self.db_service.update_test_record_with_callback() 替代 _queue_db_update_with_callback()
+    # 保留这些方法仅为了向后兼容，避免一次修改太多调用点
+    # =========================================================================
+    
     def _disable_db_writes(self, reason: str):
-        if not self._db_warning_logged:
-            logger.warning(reason)
-            logger.warning("后续数据库写入已禁用；请检查 MySQL 服务或设置 UI_SKIP_DATABASE=1 后重启应用。")
-        self._db_warning_logged = True
-        self._db_disabled = True
-        self._row_id_future = None
-        self._pending_db_updates.clear()
+        """[已废弃] 使用 self.db_service.disable_writes(reason)"""
+        self.db_service.disable_writes(reason)
         if hasattr(self, 'score_page') and self.score_page:
             try:
                 self.score_page.set_force_mock(True)
             except Exception as exc:
                 logger.debug("切换分数页数据模式失败: %s", exc)
 
-    def _handle_db_failure(self, error: Exception, context: str):
-        logger.error(f"{context}: {error}")
-        message = str(error)
-        lower = message.lower()
-        if any(keyword in lower for keyword in ["10061", "2003", "connection refused", "econnrefused", "timeout"]):
-            self._disable_db_writes("检测到数据库连接被拒绝，已暂停后续数据库写入以避免界面卡顿。")
-        elif "skip_database" in lower or "disabled" in lower:
-            self._disable_db_writes(message or "数据库写入已禁用")
-
-    def _send_db_command(self, action: str, payload: dict, *, context: str,
-                          on_success=None):
-        if self._db_disabled:
-            return None
-        try:
-            client = get_backend_client()
-        except Exception as exc:
-            self._handle_db_failure(exc, context)
-            return None
-
-        future = client.send_command_future(action, payload)
-
-        def _dispatch_result(fut):
-            try:
-                result = fut.result()
-            except Exception as exc:
-                # 修复闭包变量捕获问题：使用默认参数捕获 exc
-                self._invoke_later(lambda error=exc, ctx=context: self._handle_db_failure(error, ctx))
-                return
-            if on_success:
-                # 同样修复 result 的捕获
-                self._invoke_later(lambda res=result: on_success(res or {}))
-
-        future.add_done_callback(_dispatch_result)
-        return future
-
-    def _flush_pending_db_updates(self, row_id: int) -> None:
-        if not self._pending_db_updates:
-            return
-        callbacks = list(self._pending_db_updates)
-        self._pending_db_updates.clear()
-        for callback in callbacks:
-            try:
-                callback(row_id)
-            except Exception as exc:
-                logger.error(f"延迟数据库更新执行失败: {exc}")
-
     def _ensure_db_row(self):
-        """确保数据库记录已创建（仅创建一次，后续使用更新）"""
-        if self._db_disabled or self.row_id:
-            return
-        if self._row_id_future:
-            logger.debug("数据库记录创建请求已在处理中，跳过重复创建")
-            return
-
-        # 只包含必填字段，其他数据通过后续更新添加
-        payload = {
-            "name": self.current_user or 'anonymous',
-        }
-
-        def _on_created(result: dict):
-            row_id = result.get("row_id")
-            if not row_id:
-                logger.warning("数据库返回的记录ID无效，后续更新将被忽略。")
-                return
-            self.row_id = row_id
-            self._row_id_future = None
-            logger.info(f"✅ 数据库记录已创建，ID: {row_id}")
-            # 执行所有待处理的更新
-            self._flush_pending_db_updates(row_id)
-
-        logger.debug("📝 创建新的数据库记录...")
-        self._row_id_future = self._send_db_command(
-            "db.insert_test_record",
-            payload,
-            context="创建数据库记录失败",
-            on_success=_on_created,
-        )
+        """[已废弃] 使用 self.db_service.create_test_record(username)"""
+        self.db_service.create_test_record(self.current_user)
 
     def _queue_db_update(self, update_payload: dict, context: str) -> None:
-        """排队数据库更新（无回调）"""
-        if self._db_disabled:
-            return
-
-        def _dispatch(row_id: int) -> None:
-            payload = dict(update_payload)
-            payload["row_id"] = row_id
-            self._send_db_command("db.update_test_record", payload, context=context)
-
-        if self.row_id:
-            _dispatch(self.row_id)
-        else:
-            self._pending_db_updates.append(_dispatch)
-            self._ensure_db_row()
+        """[已废弃] 使用 self.db_service.update_test_record()"""
+        self.db_service.update_test_record(update_payload, context)
     
     def _queue_db_update_with_callback(self, update_payload: dict, context: str, on_success=None) -> None:
-        """排队数据库更新（带成功回调）"""
-        if self._db_disabled:
-            return
-
-        def _dispatch(row_id: int) -> None:
-            payload = dict(update_payload)
-            payload["row_id"] = row_id
-            self._send_db_command("db.update_test_record", payload, context=context, on_success=on_success)
-
-        if self.row_id:
-            _dispatch(self.row_id)
-        else:
-            self._pending_db_updates.append(_dispatch)
-            self._ensure_db_row()
+        """[已废弃] 使用 self.db_service.update_test_record_with_callback()"""
+        self.db_service.update_test_record_with_callback(update_payload, on_success, context)
 
     # --- UI 创建辅助方法 ---
     def _create_step_navigator(self):
@@ -3253,20 +3158,7 @@ class TestPage(QWidget):
         # 📍 记录朗读录音开始时间戳
         self._text_qa_start_timestamp_recorded = False
 
-        try:
-            # 如果 session_dir 已经存在（由 SART 页面创建），则直接使用
-            if not self.session_dir or not hasattr(self, 'session_timestamp'):
-                self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                base_dir = 'recordings'
-                user_dir = self.current_user or 'anonymous'
-                self.session_dir = _build_session_dir(base_dir, user_dir, self.session_timestamp)
-                logger.info(f"创建新的会话目录: {self.session_dir}")
-            else:
-                logger.debug(f"使用已有会话目录: {self.session_dir}")
-        except Exception as e:
-            logger.error(f"处理会话目录失败: {e}")
-            self.session_dir = 'recordings'
-            os.makedirs(self.session_dir, exist_ok=True)
+
 
         self._audio_paths = []
         self._video_paths = []
@@ -3324,9 +3216,10 @@ class TestPage(QWidget):
                 
                 # 尝试启动AV采集（即使后端未连接也尝试，可能使用本地摄像头）
                 try:
-                    logger.info(f"🎥 准备启动 AV 采集，session_dir={self.session_dir}")
+                    session_dir = self.session_manager.get_session_dir()
+                    logger.info(f"🎥 准备启动 AV 采集，session_dir={session_dir}")
                     av_start_collection(
-                        save_dir=self.session_dir,
+                        save_dir=session_dir,
                         camera_index=config.ACTIVE_CAMERA_INDEX,
                         video_fps=30.0,
                         input_device_index=config.ACTIVE_AUDIO_DEVICE_INDEX,
@@ -3386,11 +3279,13 @@ class TestPage(QWidget):
         def start_eeg_async():
             try:
                 from ...services.backend_proxy import eeg_start
-                result = eeg_start(username=self.current_user, save_dir=self.session_dir, part=1)
+                session_dir = self.session_manager.get_session_dir()
+                result = eeg_start(username=self.current_user, save_dir=session_dir, part=1)
                 if result.get('status') == 'already-running':
                     logger.debug(f"✅ EEG采集已在运行中，继续使用现有连接: {result.get('save_dir')}")
                 else:
-                    logger.info(f"✅ EEG采集已启动，保存目录: {self.session_dir}\\eeg")
+                    eeg_dir = self.session_manager.get_eeg_dir()
+                    logger.info(f"✅ EEG采集已启动，保存目录: {eeg_dir}")
             except Exception as e:
                 logger.error(f"启动EEG采集失败: {e}")
                 logger.info("UI将继续运行，但EEG功能不可用")
@@ -4059,12 +3954,11 @@ class TestPage(QWidget):
     def set_current_user(self, username: str):
         self.current_user = username or 'anonymous'
         
-        # ✅ 用户登录后立即创建数据库记录，确保后续测试数据能正常保存
-        # 这样无论用户从哪个阶段开始测试，都能正常保存数据
+        # ✅ 更新数据库服务的用户名并创建记录
         try:
-            if not self._db_disabled and not self.row_id:
+            if not self.db_service.is_disabled() and not self.db_service.get_row_id():
                 logger.info(f"📝 用户 '{self.current_user}' 登录，创建新的数据库记录...")
-                self._ensure_db_row()
+                self.db_service.create_test_record(self.current_user)
         except Exception as e:
             logger.error(f"❌ 创建数据库记录失败: {e}", exc_info=True)
         
@@ -4085,8 +3979,7 @@ class TestPage(QWidget):
 
             logger.info(f"舒特结果: 用时={self.schulte_elapsed:.2f}s, 准确率={self.schulte_accuracy:.1f}%, 计算得分={self.score}")
 
-            ptime = os.path.abspath(self.session_dir)
-            ptime = os.path.join(ptime, 'eeg', 'part_timestamps.txt')
+            ptime = os.path.join(self.session_manager.get_eeg_dir(), 'part_timestamps.txt')
 
             update_payload = {
                 "accuracy": self.schulte_accuracy,

@@ -24,6 +24,7 @@ from ..qt import (
 from ..utils.helpers import init_camera
 from ..utils.responsive import scale, scale_font, scale_size
 from ...widgets.camera_preview import CameraPreviewWidget
+from ...services.session_manager import SessionManager
 
 try:
     from ui.services.backend_proxy import eeg_get_diagnostics
@@ -39,7 +40,8 @@ class CalibrationPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.camera_preview: CameraPreviewWidget | None = None
-        self.eeg_preconnect_started = False  # 标记EEG预连接是否已启动
+        self.eeg_preconnect_started = False
+        self.session_manager = SessionManager.get_instance()
 
         self.stacked_layout = QStackedLayout()
         self.setLayout(self.stacked_layout)
@@ -292,18 +294,9 @@ class CalibrationPage(QWidget):
         self.progress_bar.setValue(0)
         self.loading_timer.start(30)
         
-        # 异步初始化摄像头（非阻塞）
         try:
-            # ✅ 获取test_page的session_dir并传递给init_camera
-            main_window = self.window()
-            test_page = getattr(main_window, 'test_page', None)
-            session_dir = getattr(test_page, 'session_dir', None) if test_page else None
-            
-            if session_dir:
-                config.logger.info(f"🎥 校准页面使用session_dir初始化摄像头: {session_dir}")
-            else:
-                config.logger.warning("⚠️ 校准页面未获取到session_dir，使用默认目录")
-            
+            session_dir = self.session_manager.get_session_dir()
+            config.logger.info(f"🎥 校准页面初始化摄像头: {session_dir}")
             init_camera(self._on_camera_init_finished, session_dir=session_dir)
         except Exception as e:
             config.logger.error(f"启动摄像头初始化失败: {e}")
@@ -447,34 +440,11 @@ class CalibrationPage(QWidget):
             
             def preconnect_eeg():
                 try:
-                    # 获取主窗口的用户信息和会话目录
                     main_window = self.window()
                     current_user = getattr(main_window, 'current_user', 'anonymous')
+                    session_dir = self.session_manager.get_session_dir()
+                    config.logger.debug(f"🔗 EEG预连接使用会话目录: {session_dir}")
                     
-                    # ✅ 关键修改：从 test_page 获取共享的 session_dir
-                    # session_dir应该已经在application.show_calibration_page()中创建了
-                    test_page = getattr(main_window, 'test_page', None)
-                    
-                    if test_page and hasattr(test_page, 'session_dir') and test_page.session_dir:
-                        # 使用已有的 session_dir（正常情况）
-                        session_dir = test_page.session_dir
-                        config.logger.debug(f"🔗 使用已创建的session目录进行EEG预连接: {session_dir}")
-                    else:
-                        # 防御性代码：如果session_dir不存在，创建新的（这不应该发生）
-                        config.logger.warning("⚠️ session_dir不存在，创建临时目录（这不应该发生）")
-                        session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        project_root = Path(__file__).parent.parent.parent.parent
-                        session_dir = os.path.join(project_root, "recordings", current_user, session_timestamp)
-                        
-                        # 尝试保存到 test_page
-                        if test_page:
-                            test_page.session_timestamp = session_timestamp
-                            test_page.session_dir = session_dir
-                            config.logger.warning(f"⚠️ 补救：创建session目录: {session_dir}")
-                        else:
-                            config.logger.error(f"❌ 无法访问test_page，使用临时目录: {session_dir}")
-                    
-                    # ✅ 第一步：启动EEG数据采集
                     result = eeg_start_collection(
                         username=current_user,
                         save_dir=session_dir,
