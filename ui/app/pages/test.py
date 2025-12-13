@@ -169,7 +169,6 @@ class TestPage(QWidget):
         # 朗读状态标志
         self.reading_completed = False
         
-        # ❌ 不再需要 TTS 功能（用户自己朗读，不需要机器播放）
         self.thread_manager = get_thread_manager()
         
         self.current_question = 0  # 保留变量名兼容性，实际已无多个问题
@@ -228,26 +227,15 @@ class TestPage(QWidget):
         self.sart_mode = "short"  # 默认短时模式
         self.sart_duration = 60  # 默认1分钟
 
-        # 多模态数据采集相关（不再使用独立预览窗口）
-        self.multimodal_collector = None
-        self._multimodal_poll_timer = QTimer(self)
-        self._multimodal_poll_timer.setInterval(1200)
-        self._multimodal_poll_timer.timeout.connect(self._poll_multimodal_snapshot)
-        self._multimodal_poll_active = False
-        self._multimodal_last_status: Optional[str] = None
-        self._last_multimodal_snapshot_monotonic: Optional[float] = None
-        self._last_fatigue_score: Optional[float] = None
-        self._last_brain_load_score: Optional[float] = None  # 保存最后的脑负荷分数
-        self._last_fatigue_log_time: Optional[float] = None
-        self._multimodal_gap_warned: bool = False
-        
-        # 实时分数累积列表（用于计算平均值）
-        self._fatigue_scores_list: list[float] = []  # 疲劳度实时分数列表
-        self._brain_load_scores_list: list[float] = []  # 脑负荷实时分数列表
-        
         # 情绪分数（测试结束时分析一次）
         self._emotion_score: Optional[float] = None
-        self._emotion_analysis_triggered: bool = False  # 防止重复触发情绪分析
+        self._emotion_analysis_triggered: bool = False
+
+        # 疲劳度评估结果（离线评估完成后接收一次）
+        self._fatigue_assessment_result: Optional[float] = None
+        
+        # 脑负荷分数列表（实时推理，累积多次结果）
+        self._brain_load_scores_list: list[float] = []
 
         # ✅ 数据库服务（替代原有的数据库交互状态变量）
         self._db_disabled = SKIP_DATABASE
@@ -350,70 +338,7 @@ class TestPage(QWidget):
         except Exception as e:
             logger.error(f"实时保存时间戳失败: {e}", exc_info=True)
 
-    def _start_multimodal_monitoring(self, *, force: bool = False) -> None:
-        """启动或重新启动多模态数据监控（仅内嵌显示，非阻塞）。"""
-        try:
-            if not HAS_MULTIMODAL:
-                return
-            
-            # ✅ 确保数据库记录已创建（防御性检查）
-            # 如果用户直接跳转到基线/SART阶段而没有先登录，这里会触发创建
-            try:
-                if not self.db_service.is_disabled() and not self.db_service.get_row_id():
-                    logger.info("📝 开始多模态监控前确保数据库记录已创建...")
-                    self.db_service.create_test_record(self.current_user)
-            except Exception as e:
-                logger.warning(f"⚠️ 创建数据库记录失败（将在后续尝试）: {e}")
 
-            timer_active = False
-            try:
-                timer_active = self._multimodal_poll_timer.isActive()
-            except Exception:
-                timer_active = False
-
-            if not force and self._multimodal_poll_active and timer_active:
-                # 正常情况下已经在轮询，无需重复启动
-                return
-
-            if self._multimodal_poll_active and not timer_active:
-                logger.warning("检测到多模态监控标记为活动但定时器未运行，自动重新启动")
-
-            if force and timer_active:
-                # 防御性地重置定时器，避免潜在的 stuck 状态
-                self._multimodal_poll_timer.stop()
-                timer_active = False
-
-            logger.debug("启动多模态数据监控（内嵌显示模式）")
-            self._multimodal_poll_active = True
-            self._multimodal_last_status = None
-            # 重置一次性日志标志，避免复用旧状态导致不更新
-            for attr in ("_multimodal_first_data", "_fatigue_score_cast_failed",
-                        "_no_scores_warned"):
-                if hasattr(self, attr):
-                    delattr(self, attr)
-            self._last_multimodal_snapshot_monotonic = None
-            self._last_fatigue_score = None
-            self._last_fatigue_log_time = None
-            self._multimodal_gap_warned = False
-
-            if not timer_active:
-                self._multimodal_poll_timer.start()
-
-            self._poll_multimodal_snapshot()
-        except Exception as e:
-            logger.error(f"启动多模态监控失败: {e}")
-            self._multimodal_poll_active = False
-
-    def _stop_multimodal_monitoring(self) -> None:
-        """停止多模态数据监控（安全，不抛出异常）"""
-        try:
-            if self._multimodal_poll_timer.isActive():
-                self._multimodal_poll_timer.stop()
-            self._multimodal_poll_active = False
-            self._multimodal_last_status = None
-            logger.debug("多模态数据监控已停止")
-        except Exception as e:
-            logger.debug(f"停止多模态监控时出错: {e}")
 
     def _save_speech_recognition_results(self) -> None:
         """保存语音识别结果到数据库和文件（在情绪分析前调用）"""
@@ -526,171 +451,6 @@ class TestPage(QWidget):
         except Exception as exc:
             logger.error(f"触发情绪分析失败: {exc}", exc_info=True)
 
-    def _poll_multimodal_snapshot(self) -> None:
-        """轮询多模态数据快照，仅更新内嵌显示（安全，失败不影响UI）"""
-        if not HAS_MULTIMODAL:
-            self._multimodal_poll_timer.stop()
-            self._multimodal_poll_active = False
-            return
-
-        try:
-            snapshot = multidata_get_snapshot()
-        except Exception as exc:
-            logger.debug(f"获取多模态采集状态失败: {exc}")
-            return
-
-        if not snapshot:
-            logger.debug("多模态快照为空")
-            return
-
-        try:
-            status = (snapshot.get("status") or "idle").lower()
-
-            # 首次收到数据时记录日志
-            if not hasattr(self, '_multimodal_first_data'):
-                logger.debug(f"多模态数据轮询已启动，当前状态: {status}")
-                self._multimodal_first_data = True
-
-            # ⚠️ 注意：多模态快照中的分数数据已废弃
-            # 现在疲劳度和脑负荷通过 DETECTION_RESULT 事件独立推送
-            # 保留此代码仅用于兼容性检查
-            
-            # 废弃：不再从快照中读取分数，因为：
-            # 1. 疲劳度通过 model_fatigue 的 DETECTION_RESULT 事件推送
-            # 2. 脑负荷通过 model_eeg 的 DETECTION_RESULT 事件推送
-            # 3. 两者完全独立，互不依赖
-            
-            # fatigue = snapshot.get("fatigue_score")  # 已废弃
-            # brain = snapshot.get("brain_load_score")  # 已废弃
-            
-            # 检查快照数据（仅用于调试）
-            if not hasattr(self, '_snapshot_check_warned'):
-                if "fatigue_score" in snapshot or "brain_load_score" in snapshot:
-                    logger.debug("检测到快照中仍包含分数数据（已不使用）")
-                self._snapshot_check_warned = True
-            # 检查采集状态
-            if status != "running" and self._multimodal_poll_active:
-                self._multimodal_poll_timer.stop()
-                self._multimodal_poll_active = False
-                logger.debug("多模态采集已停止，停止轮询")
-
-        except Exception as exc:
-            logger.error(f"处理多模态快照数据时出错: {exc}")
-
-    def _on_detection_result(self, payload: Dict) -> None:
-        """处理模型推理结果 (DETECTION_RESULT事件)
-        
-        Args:
-            payload: 推理结果数据,格式:
-                {
-                    "detector": "model_fatigue",
-                    "status": "detected", 
-                    "predictions": {
-                        "fatigue_score": 51.38,
-                        "prediction_class": 1
-                    },
-                    "timestamp": ...,
-                    "frame_count": 30
-                }
-        """
-        try:
-            detector = payload.get("detector", "")
-            status = payload.get("status", "")
-            predictions = payload.get("predictions", {})
-            
-            # 处理疲劳度推理结果（独立更新，不依赖脑负荷）
-            if detector == "model_fatigue" and status == "detected":
-                fatigue_score = predictions.get("fatigue_score")
-                prediction_class = predictions.get("prediction_class")
-                
-                if fatigue_score is not None:
-                    # logger.info(f"📊 收到疲劳度推理结果: score={fatigue_score:.2f}, class={prediction_class}")
-                    
-                    # 保存疲劳度分数（最后一次）
-                    self._last_fatigue_score = fatigue_score
-                    
-                    # 累积到列表中用于计算平均值
-                    self._fatigue_scores_list.append(fatigue_score)
-                    
-                    # 只更新疲劳度显示，不影响脑负荷
-                    self._update_fatigue_only(fatigue_score)
-                else:
-                    logger.warning("⚠️ 疲劳度推理结果中没有 fatigue_score 字段")
-            
-            # 处理EEG脑负荷推理结果（独立更新，不依赖疲劳度）
-            elif detector == "model_eeg" and status == "detected":
-                brain_load_score = predictions.get("brain_load_score")
-                state = predictions.get("state")
-                
-                if brain_load_score is not None:
-                    # logger.info(f"🧠 收到EEG脑负荷推理结果: score={brain_load_score:.2f}, state={state}")
-                    
-                    # 保存脑负荷分数（最后一次）
-                    self._last_brain_load_score = brain_load_score
-                    
-                    # 累积到列表中用于计算平均值
-                    self._brain_load_scores_list.append(brain_load_score)
-                    
-                    # 只更新脑负荷显示，不影响疲劳度
-                    self._update_brain_load_only(brain_load_score)
-                else:
-                    logger.warning("⚠️ EEG推理结果中没有 brain_load_score 字段")
-            
-        except Exception as exc:
-            logger.error(f"处理推理结果时出错: {exc}", exc_info=True)
-
-    def _update_fatigue_only(self, score_f) -> None:
-        """只更新疲劳度显示（安全，失败不影响UI）"""
-        try:
-            score_value_f = float(score_f)
-            logger.debug(f"更新疲劳度显示: {score_value_f}")
-
-            # 根据疲劳度设置不同颜色
-            if score_value_f < 30:
-                color_f = "#27ae60"  # 绿色 - 正常
-                bg_color_f = "#d5f4e6"
-            elif score_value_f < 60:
-                color_f = "#f39c12"  # 橙色 - 警告
-                bg_color_f = "#fef5e7"
-            else:
-                color_f = "#e74c3c"  # 红色 - 疲劳
-                bg_color_f = "#fadbd8"
-
-            # 更新语音答题页面的疲劳度显示
-            if hasattr(self, 'fatigue_info_label') and self.fatigue_info_label:
-                try:
-                    self.fatigue_info_label.setText(f"疲劳度: {score_value_f:.1f}")
-                    self.fatigue_info_label.setStyleSheet(f"""
-                        QLabel {{
-                            color: {color_f};
-                            padding: 8px;
-                            background-color: {bg_color_f};
-                            border-radius: 8px;
-                            font-weight: bold;
-                        }}
-                    """)
-                except Exception as e:
-                    logger.error(f"更新语音答题页疲劳度标签失败: {e}")
-
-            # 更新舒尔特页面的疲劳度显示
-            if hasattr(self, 'schulte_fatigue_label') and self.schulte_fatigue_label:
-                try:
-                    self.schulte_fatigue_label.setText(f"疲劳度: {score_value_f:.1f}")
-                    self.schulte_fatigue_label.setStyleSheet(f"""
-                        QLabel {{
-                            color: {color_f};
-                            padding: 8px;
-                            background-color: {bg_color_f};
-                            border-radius: 8px;
-                            font-weight: bold;
-                        }}
-                    """)
-                except Exception as e:
-                    logger.error(f"更新舒尔特页疲劳度标签失败: {e}")
-
-        except Exception as exc:
-            logger.error(f"更新疲劳度显示失败: {exc}")
-
     def _update_brain_load_only(self, score_b) -> None:
         """只更新脑负荷显示（安全，失败不影响UI）"""
         try:
@@ -743,123 +503,6 @@ class TestPage(QWidget):
         except Exception as exc:
             logger.error(f"更新脑负荷显示失败: {exc}")
 
-    def _update_fatigue_display(self, score_f, score_b) -> None:
-        """更新疲劳度和脑负荷显示（已废弃，保留用于兼容性）
-        
-        注意：此方法已废弃，建议使用 _update_fatigue_only 和 _update_brain_load_only
-        """
-        try:
-            # 转换为浮动数值
-            score_value_f = float(score_f)
-            score_value_b = float(score_b)
-
-            logger.debug(f"收到疲劳度数据: {score_value_f}")
-            logger.debug(f"收到脑负荷数据: {score_value_b}")
-
-            # 调试：检查当前步骤
-            logger.debug(f"当前步骤: {self.current_step}")
-            logger.debug(f"是否有 fatigue_info_label: {hasattr(self, 'fatigue_info_label')}")
-            logger.debug(f"是否有 schulte_fatigue_label: {hasattr(self, 'schulte_fatigue_label')}")
-            logger.debug(f"是否有 brain_load_info_label: {hasattr(self, 'brain_load_info_label')}")
-            logger.debug(f"是否有 schulte_brain_load_label: {hasattr(self, 'schulte_brain_load_label')}")
-
-            # 根据疲劳度设置不同颜色
-            if score_value_f < 30:
-                color_f = "#27ae60"  # 绿色 - 正常
-                bg_color_f = "#d5f4e6"
-            elif score_value_f < 60:
-                color_f = "#f39c12"  # 橙色 - 警告
-                bg_color_f = "#fef5e7"
-            else:
-                color_f = "#e74c3c"  # 红色 - 疲劳
-                bg_color_f = "#fadbd8"
-
-            # 根据脑负荷设置不同颜色
-            if score_value_b < 30:
-                color_b = "#27ae60"  # 绿色 - 正常
-                bg_color_b = "#d5f4e6"
-            elif score_value_b < 60:
-                color_b = "#f39c12"  # 橙色 - 警告
-                bg_color_b = "#fef5e7"
-            else:
-                color_b = "#e74c3c"  # 红色 - 疲劳
-                bg_color_b = "#fadbd8"
-
-            # 设置样式
-            style_f = f"""
-                     QLabel {{
-                         color: {color_f};
-                         background-color: {bg_color_f};
-                         padding: 8px;
-                         border-radius: 8px;
-                         font-weight: bold;
-                     }}
-                 """
-
-            style_b = f"""
-                     QLabel {{
-                         color: {color_b};
-                         background-color: {bg_color_b};
-                         padding: 8px;
-                         border-radius: 8px;
-                         font-weight: bold;
-                     }}
-                 """
-
-            # 更新内嵌的疲劳度显示（第一页答题界面）
-            if hasattr(self, 'fatigue_info_label'):
-                self.fatigue_info_label.setText(f"疲劳度: {int(score_value_f)}%")
-                self.fatigue_info_label.setStyleSheet(style_f)
-
-                if not hasattr(self, '_fatigue_updated'):
-                    logger.info(f"✅ 第一页疲劳度显示已更新: {int(score_value_f)}%")
-                    self._fatigue_updated = True
-                else:
-                    logger.debug(f"第一页疲劳度更新: {int(score_value_f)}%")
-            else:
-                logger.warning("⚠️ 第一页 fatigue_info_label 不存在！")
-
-            # 更新舒尔特页面的疲劳度显示
-            if hasattr(self, 'schulte_fatigue_label'):
-                self.schulte_fatigue_label.setText(f"疲劳度: {int(score_value_f)}%")
-                self.schulte_fatigue_label.setStyleSheet(style_f)
-
-                if not hasattr(self, '_schulte_fatigue_updated'):
-                    logger.info(f"✅ 舒尔特页疲劳度显示已更新: {int(score_value_f)}%")
-                    self._schulte_fatigue_updated = True
-                else:
-                    logger.debug(f"舒尔特页疲劳度更新: {int(score_value_f)}%")
-            else:
-                logger.debug("舒尔特页 schulte_fatigue_label 尚未创建")
-
-            # 更新脑负荷显示
-            if hasattr(self, 'brain_load_info_label'):
-                self.brain_load_info_label.setText(f"脑负荷: {int(score_value_b)}%")
-                self.brain_load_info_label.setStyleSheet(style_b)
-
-                if not hasattr(self, '_brain_load_updated'):
-                    logger.info(f"✅ 第一页脑负荷显示已更新: {int(score_value_b)}%")
-                    self._brain_load_updated = True
-                else:
-                    logger.debug(f"第一页脑负荷更新: {int(score_value_b)}%")
-            else:
-                logger.warning("⚠️ 第一页 brain_load_info_label 不存在！")
-
-            # 更新舒尔特页面的脑负荷显示
-            if hasattr(self, 'schulte_brain_load_label'):
-                self.schulte_brain_load_label.setText(f"脑负荷: {int(score_value_b)}%")
-                self.schulte_brain_load_label.setStyleSheet(style_b)
-
-                if not hasattr(self, '_schulte_brain_load_updated'):
-                    logger.info(f"✅ 舒尔特页脑负荷显示已更新: {int(score_value_b)}%")
-                    self._schulte_brain_load_updated = True
-                else:
-                    logger.debug(f"舒尔特页脑负荷更新: {int(score_value_b)}%")
-            else:
-                logger.debug("舒尔特页 schulte_brain_load_label 尚未创建")
-
-        except Exception as exc:
-            logger.error(f"更新疲劳度和脑负荷显示失败: {exc}")
 
     def _init_ui(self):
         """初始化用户界面。"""
@@ -892,9 +535,61 @@ class TestPage(QWidget):
         self.btn_finish.clicked.connect(self._finish_test)
         self.btn_mic.clicked.connect(self._toggle_recording)
         
-        # 连接后端推理结果信号 (用于获取真实的疲劳度分数)
+        # 连接疲劳度评估结果信号（只接收离线评估的最终结果）
+        from ...services.backend_client import get_backend_client
         backend_client = get_backend_client()
-        backend_client.detection_result.connect(self._on_detection_result)
+        backend_client.detection_result.connect(self._on_fatigue_assessment_result)
+    
+    def _on_fatigue_assessment_result(self, payload: Dict) -> None:
+        """
+        接收检测结果（包括离线疲劳度评估和实时脑负荷推理）
+        
+        支持两种类型的结果:
+        1. 疲劳度评估 (detector="model_fatigue"): 离线评估,只接收一次
+        2. 脑负荷推理 (detector="model_eeg"): 实时推理,持续接收并累积
+        
+        Args:
+            payload: 包含检测结果的字典
+                疲劳度: {
+                    "detector": "model_fatigue",
+                    "predictions": {
+                        "fatigue_score": 53.77,
+                        "prediction_class": "正常 😊"
+                    }
+                }
+                脑负荷: {
+                    "detector": "model_eeg",
+                    "predictions": {
+                        "brain_load_score": 45.2,
+                        "state": "calibrated",
+                        "num_windows": 3
+                    }
+                }
+        """
+        try:
+            detector = payload.get("detector")
+            predictions = payload.get("predictions", {})
+            
+            # 处理疲劳度评估结果（离线,一次性）
+            if detector == "model_fatigue":
+                fatigue_score = predictions.get("fatigue_score")
+                if fatigue_score is not None:
+                    self._fatigue_assessment_result = float(fatigue_score)
+                    logger.info(f"✅ 接收到疲劳度评估结果: {self._fatigue_assessment_result:.2f}/90")
+            
+            # 处理脑负荷推理结果（实时,累积）
+            elif detector == "model_eeg":
+                brain_load_score = predictions.get("brain_load_score")
+                if brain_load_score is not None and brain_load_score > 0:
+                    score_value = float(brain_load_score)
+                    self._brain_load_scores_list.append(score_value)
+                    logger.debug(f"接收到脑负荷分数: {score_value:.2f}, 累积数量: {len(self._brain_load_scores_list)}")
+                    
+                    # 更新UI显示
+                    self._update_brain_load_only(score_value)
+            
+        except Exception as e:
+            logger.error(f"处理检测结果失败: {e}", exc_info=True)
 
     def _setup_mic_button_animation(self):
         """为麦克风按钮创建光晕（阴影模糊）动画，以避免布局抖动。"""
@@ -3046,10 +2741,6 @@ class TestPage(QWidget):
             if hasattr(self, 'btn_next_bottom'):
                 self.btn_next_bottom.setVisible(False)  # 隐藏底部按钮
             self.btn_finish.setVisible(False)
-            
-            # ❌ 不再需要 TTS 朗读
-            # if self.test_started:
-            #     self._speak_current_question()
 
         elif self.current_step == 1:
             self.answer_stack.setCurrentIndex(3)  # 血压页面现在是索引3（0基线提示，1SART提示，2朗读）
@@ -3118,16 +2809,6 @@ class TestPage(QWidget):
             # 使用 QTimer 异步更新分数页，不阻塞UI切换
             self._invoke_later(update_scores_async, 50)
 
-        # 多模态监控生命周期管理：独立于测试流程
-        # 只在真正结束时停止，其他时候让定时器自然运行
-        if HAS_MULTIMODAL:
-            if self.current_step == 3:
-                # 测试完全结束，停止监控
-                self._stop_multimodal_monitoring()
-                logger.debug("update_step_ui → 第3步完成，多模态监控已停止")
-            # 移除所有其他干预：让监控独立运行，不受步骤切换影响
-            # 这样可以避免在血压测试、答题等操作时意外停止数据更新
-
         self._update_camera_previews_for_step()
         
         # 🔄 最后更新阶段导航状态（确保answer_stack已切换完成）
@@ -3145,20 +2826,15 @@ class TestPage(QWidget):
 
         self.mark_stage_completed('多模态疲劳检测')
         
-        # 重置分数累积列表
-        self._fatigue_scores_list = []
+        # 重置疲劳度评估、脑负荷和情绪分析状态
+        self._fatigue_assessment_result = None
+        self._brain_load_scores_list = []
         self._emotion_score = None
-        self._emotion_analysis_triggered = False  # 重置情绪分析触发标志
-        logger.debug("已重置分数累积列表和情绪分析标志")
-
-        # ❌ 不再需要语音识别功能（用户自己朗读，不需要识别）
-        # if HAS_SPEECH_RECOGNITION:
-        #     stop_recognition()
+        self._emotion_analysis_triggered = False
+        logger.debug("已重置疲劳度评估、脑负荷和情绪分析标志")
 
         # 📍 记录朗读录音开始时间戳
         self._text_qa_start_timestamp_recorded = False
-
-
 
         self._audio_paths = []
         self._video_paths = []
@@ -3168,20 +2844,6 @@ class TestPage(QWidget):
         self.test_started = True
         self.update_step_ui()
 
-        # ✅ 疲劳度监控已在基线校准阶段启动，这里只需确保轮询继续运行
-        if HAS_MULTIMODAL:
-            # 检查监控是否已在运行，如果没有则启动
-            timer_active = False
-            try:
-                timer_active = self._multimodal_poll_timer.isActive()
-            except Exception:
-                timer_active = False
-            
-            if not self._multimodal_poll_active or not timer_active:
-                config.logger.debug("疲劳度监控未运行，启动监控轮询")
-                self._start_multimodal_monitoring()
-            else:
-                config.logger.debug("✅ 疲劳度监控已在运行（从基线阶段继续）")
 
         # 使用线程异步启动AV采集，完成后启动摄像头更新（非阻塞）
         def start_av_async():
@@ -3241,35 +2903,6 @@ class TestPage(QWidget):
             start_av_async,
             task_name="启动AV采集"
         )
-
-        # if HAS_MULTIMODAL:
-        #     # 使用线程异步启动多模态采集，避免阻塞UI
-        #     def start_multimodal_async():
-        #         try:
-        #             result = multidata_start_collection(
-        #                 self.current_user,
-        #                 part=1,
-        #                 save_dir=self.session_dir,
-        #             )
-        #             self.multimodal_collector = result
-        #             if result and result.get("status") in {"running", "already-running"}:
-        #                 logger.info("多模态数据采集已启动，用户: %s", self.current_user)
-        #                 logger.info("多模态数据保存目录: %s\\fatigue", self.session_dir)
-        #                 # 【重要修改】立即在主线程中启动监控，从测试开始就获取脑负荷和疲劳度数据
-        #                 # 延迟800ms确保采集器完全启动并开始产生数据
-        #                 self._invoke_later(self._start_multimodal_monitoring, 800)
-        #                 logger.debug("✅ 多模态监控将在800ms后启动，从语音答题开始就可以看到脑负荷和疲劳度数据")
-        #             else:
-        #                 logger.warning("多模态数据采集启动失败: %s", result)
-        #         except Exception as e:
-        #             logger.error(f"启动多模态数据采集时出错: {e}")
-        #             logger.info("UI将继续运行，但疲劳度监测功能不可用")
-            
-        #     # 提交到后台线程执行（非阻塞）
-        #     self.thread_manager.submit_data_task(
-        #         start_multimodal_async,
-        #         task_name="启动多模态采集"
-        #     )
         
 
     def start_eeg_collection(self) -> None:
@@ -3503,10 +3136,6 @@ class TestPage(QWidget):
             logger.warning(f"获取音频电平时发生错误: {e}")
             self.audio_level.set_level(0)
 
-    # ❌ 不再需要 _speak_current_question（用户自己朗读）
-    # def _speak_current_question(self):
-    #     已删除 TTS 朗读相关代码
-
     def _next_step_or_question(self):
         logger.debug(f"🔍 _next_step_or_question 被调用: current_step={self.current_step}")
 
@@ -3559,11 +3188,6 @@ class TestPage(QWidget):
 
             # ✅ 停止疲劳度推理与多模态数据采集（EEG 保持运行）
             if HAS_MULTIMODAL:
-                try:
-                    self._stop_multimodal_monitoring()
-                    logger.debug("✅ 朗读阶段结束，已停止疲劳度监控定时器")
-                except Exception as e:
-                    logger.warning(f"停止疲劳度监控失败: {e}")
 
                 try:
                     stop_result = multidata_stop_collection()
@@ -3607,9 +3231,6 @@ class TestPage(QWidget):
             except Exception as e:
                 logger.error(f"发送血压结果到分数页面失败: {e}", exc_info=True)
 
-            # ❌ 舒尔特阶段不再需要疲劳度监控（已在朗读阶段结束时停止）
-            # 💡 EEG采集仍在后台运行，只是不进行疲劳度分数推理
-
             # 📍 记录舒尔特测试开始时间戳
             call_timestamp = time.time()
             self._save_timestamp_immediately(call_timestamp)
@@ -3642,7 +3263,6 @@ class TestPage(QWidget):
         
         # ✅ 舒尔特阶段结束，确保疲劳度监控已停止（防御性代码，实际在朗读阶段已停止）
         try:
-            self._stop_multimodal_monitoring()
             multidata_stop_collection()
             logger.debug("舒尔特测试完成，已确认疲劳度监控与多模态采集已停止")
         except Exception as e:
@@ -3680,20 +3300,8 @@ class TestPage(QWidget):
                 cleanup_collector()
             except Exception as e:
                 logger.error(f"停止多模态数据采集时出错: {e}")
-            finally:
-                self._stop_multimodal_monitoring()
         
-        # # 停止EEG采集并保存文件路径
-        # try:
-        #     eeg_stop_collection()
-        #     logger.info("EEG采集已完全停止")
-        #     # 获取EEG文件路径并保存到数据库
-        #     eeg_paths = eeg_get_file_paths()
-        #     if eeg_paths:
-        #         logger.info(f"获取到EEG文件路径: {eeg_paths}")
-        #         self._persist_eeg_paths_to_db(eeg_paths)
-        # except Exception as e:
-        #     logger.error(f"停止EEG采集或保存路径时出错: {e}")
+        # ℹ️ EEG采集已在舒尔特测试完成时停止，无需重复停止
         
         # 📍 最后的完成时间戳（已通过实时保存自动写入）
         call_timestamp = time.time()
@@ -3742,8 +3350,6 @@ class TestPage(QWidget):
                 cleanup_collector()
             except Exception as e:
                 logger.error(f"页面隐藏时停止多模态数据采集失败: {e}")
-            finally:
-                self._stop_multimodal_monitoring()
 
         try:
             from ...services.backend_proxy import eeg_stop, eeg_paths
@@ -3995,19 +3601,25 @@ class TestPage(QWidget):
         """
         计算疲劳度和脑负荷的平均分数
         
-        ✅ 注意：疲劳度数据收集范围
-        - 开始：基线校准开始时
-        - 结束：文本朗读完成时
-        - 包含阶段：基线校准 + SART实验 + 文本朗读
+        ✅ 疲劳度数据来源（离线评估）：
+        - 使用后端离线评估的融合结果（RGB + EEG）
+        - 评估时机：朗读阶段结束后触发一次性评估
+        - 评估范围：基线校准 + SART实验 + 文本朗读
         - 不包含：舒尔特方格阶段
+        
+        ✅ 脑负荷数据来源（实时推理）：
+        - 使用EEG实时推理结果
+        - 推理时机：EEG采集期间持续推理
+        - 累积方式：接收多次推理结果并计算平均值
+        - 覆盖范围：整个测试流程（基线校准 + SART + 朗读 + 舒尔特）
         
         Returns:
             包含平均分数的字典:
             {
-                "fatigue_avg": 平均疲劳度分数 (0-100),
-                "brain_load_avg": 平均脑负荷分数 (0-100),
-                "fatigue_count": 疲劳度样本数量,
-                "brain_load_count": 脑负荷样本数量
+                "fatigue_avg": 疲劳度分数 (0-90, 离线评估一次),
+                "brain_load_avg": 脑负荷分数 (0-100, 实时推理平均值),
+                "fatigue_count": 1 (离线评估只返回一次),
+                "brain_load_count": N (实时推理累积次数)
             }
         """
         result = {
@@ -4017,16 +3629,15 @@ class TestPage(QWidget):
             "brain_load_count": 0
         }
         
-        # 计算疲劳度平均值
-        if self._fatigue_scores_list:
-            result["fatigue_avg"] = sum(self._fatigue_scores_list) / len(self._fatigue_scores_list)
-            result["fatigue_count"] = len(self._fatigue_scores_list)
+        # 使用离线疲劳度评估结果
+        if self._fatigue_assessment_result is not None:
+            result["fatigue_avg"] = self._fatigue_assessment_result
+            result["fatigue_count"] = 1
             logger.debug(
-                f"疲劳度平均分数: {result['fatigue_avg']:.2f} "
-                f"(基于 {result['fatigue_count']} 个样本)"
+                f"疲劳度评估结果: {result['fatigue_avg']:.2f}/90 (离线评估)"
             )
         else:
-            logger.warning("没有收集到疲劳度分数数据")
+            logger.warning("未接收到疲劳度评估结果")
         
         # 计算脑负荷平均值
         if self._brain_load_scores_list:
