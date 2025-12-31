@@ -1,14 +1,10 @@
-"""统一推理服务 - 集成模式
-
-直接调用集成模型进行推理
+"""统一推理服务
 
 注意事项：
 1. RGB疲劳度和EEG疲劳度已从实时推理中移除
 2. 所有疲劳度评估现在由FatigueAssessmentService在SART测试结束后统一处理
 3. 使用保存的视频和EEG数据文件进行离线推理
 4. 仅保留EEG脑负荷和情绪识别的实时推理
-
-优化：使用统一线程池管理，避免创建独立线程池
 """
 
 import importlib
@@ -22,10 +18,7 @@ from ..models.base_inference_model import BaseInferenceModel
 
 
 class UnifiedInferenceService:
-    """统一推理服务 - 集成模式
-    
-    模型直接在后端进程中运行
-    """
+    """统一推理服务"""
     
     def __init__(
         self,
@@ -45,8 +38,8 @@ class UnifiedInferenceService:
         self.model_configs = model_configs
         self.logger = logger or logging.getLogger("service.inference")
         
-        # 集成模式的模型实例
-        self.integrated_models: Dict[str, BaseInferenceModel] = {}
+        # 模型实例
+        self.models: Dict[str, BaseInferenceModel] = {}
         
         # 使用统一线程池（CPU密集型任务）
         self._thread_pool = get_thread_pool()
@@ -72,14 +65,8 @@ class UnifiedInferenceService:
             
             model_name = config["name"]
             model_type = config["type"]
-            mode = config.get("mode", "integrated")
             
-            if mode != "integrated":
-                self.logger.warning(f"模型 {model_name} 配置为 {mode} 模式,但仅支持集成模式,跳过")
-                continue
-            
-            # 集成模式:直接加载模型
-            enabled_count += self._start_integrated_model(model_name, model_type, config)
+            enabled_count += self._load_model(model_name, model_type, config)
         
         if enabled_count == 0:
             self.logger.warning("没有启用的模型")
@@ -94,13 +81,13 @@ class UnifiedInferenceService:
         self._running = True
         self.logger.info(f"✅ 统一推理服务已启动 (共 {enabled_count} 个模型)")
     
-    def _start_integrated_model(
+    def _load_model(
         self,
         model_name: str,
         model_type: str,
         config: Dict[str, Any]
     ) -> int:
-        """启动集成模式的模型
+        """加载模型
         
         Returns:
             1 if success, 0 if failed
@@ -110,7 +97,7 @@ class UnifiedInferenceService:
         options = integrated_config.get("options", {})
         
         if not class_path:
-            self.logger.error(f"集成模型缺少 class 配置: {model_name}")
+            self.logger.error(f"模型缺少 class 配置: {model_name}")
             return 0
         
         try:
@@ -126,12 +113,12 @@ class UnifiedInferenceService:
             model = model_class(model_name, logger=self.logger, **options)
             model.load()
             
-            self.integrated_models[model_type] = model
-            self.logger.debug(f"✅ 集成模型已加载: {model_name} ({model_type})")
+            self.models[model_type] = model
+            self.logger.debug(f"✅ 模型已加载: {model_name} ({model_type})")
             return 1
             
         except Exception as e:
-            self.logger.error(f"加载集成模型失败 ({model_name}): {e}", exc_info=True)
+            self.logger.error(f"加载模型失败 ({model_name}): {e}", exc_info=True)
             return 0
     
     def stop(self) -> None:
@@ -149,17 +136,16 @@ class UnifiedInferenceService:
         except Exception as e:
             self.logger.error(f"取消订阅失败: {e}")
         
-        # 注意：不需要关闭线程池，由统一线程池管理器负责
         self.logger.info("推理任务已停止提交到线程池")
         
-        # 卸载集成模型
-        for model_type, model in self.integrated_models.items():
+        # 卸载模型
+        for model_type, model in self.models.items():
             try:
                 model.unload()
-                self.logger.debug(f"已卸载集成模型: {model_type}")
+                self.logger.debug(f"已卸载模型: {model_type}")
             except Exception as e:
-                self.logger.error(f"卸载集成模型失败 ({model_type}): {e}")
-        self.integrated_models.clear()
+                self.logger.error(f"卸载模型失败 ({model_type}): {e}")
+        self.models.clear()
         
         self._running = False
         self.logger.info("✅ 统一推理服务已停止")
@@ -261,7 +247,7 @@ class UnifiedInferenceService:
         # 如果需要实时推理，可以在 payload 中添加 "trigger_emotion": True 标志
         
         # 情绪识别: 仅在录制停止后触发（避免录制期间频繁推理）
-        if "emotion" in self.integrated_models and status != "running":
+        if "emotion" in self.models and status != "running":
             self.logger.debug(f"📊 准备触发情绪推理 (status={status}, 采集已停止)")
             
             inference_data = {
@@ -291,7 +277,7 @@ class UnifiedInferenceService:
                 })
             
             self._submit_inference("emotion", inference_data, metadata)
-        elif "emotion" in self.integrated_models and status == "running":
+        elif "emotion" in self.models and status == "running":
             # 录制期间跳过情绪推理，避免频繁触发
             self.logger.debug("⏭️  跳过情绪推理 (status=running, 等待录制完成)")
     
@@ -308,7 +294,7 @@ class UnifiedInferenceService:
             return
         
         # 分发到情绪模型（V2 架构：不再依赖文本模态）
-        if "emotion" in self.integrated_models:
+        if "emotion" in self.models:
             # # 提取文本数据（字段名是 recognized_text）
             # text_list = []
             # for item in text_data:
@@ -409,8 +395,8 @@ class UnifiedInferenceService:
                         # 诊断信息获取失败时，保持默认值
                         self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
                     
-                    # 执行推理 - EEG脑负荷模型
-                    if "eeg" in self.integrated_models:
+                        # 执行推理 - EEG脑负荷模型
+                    if "eeg" in self.models:
                         self.logger.debug(f"🧠 开始EEG脑负荷推理 ({len(ch1_data)}样本)")
                         # 创建数据副本以避免共享引用
                         inference_data = {
@@ -425,7 +411,7 @@ class UnifiedInferenceService:
                             "timestamp": payload.get("timestamp")
                         }
                         # 直接调用推理（已经在线程池中）
-                        result = self._infer_integrated("eeg", inference_data)
+                        result = self._infer("eeg", inference_data)
                         if result:
                             self._publish_result("eeg", result, metadata)
                         # 清理推理数据
@@ -436,8 +422,8 @@ class UnifiedInferenceService:
                     # SART测试结束后，使用保存的EEG数据文件进行离线推理
                     # 不再进行实时推理，避免重复计算和资源浪费
                     
-                    if "eeg" not in self.integrated_models:
-                        self.logger.warning("EEG脑负荷模型未加载到integrated_models中")
+                    if "eeg" not in self.models:
+                        self.logger.warning("EEG脑负荷模型未加载")
                     
                 except Exception as exc:
                     self.logger.error(f"EEG推理失败: {exc}", exc_info=True)
@@ -465,7 +451,7 @@ class UnifiedInferenceService:
             eeg_signal = np.array(eeg_signal)
         
         # EEG脑负荷模型
-        if "eeg" in self.integrated_models:
+        if "eeg" in self.models:
             simulation_mode = payload.get("simulation_mode")
 
             if simulation_mode is None and self._eeg_service is None:
@@ -496,7 +482,7 @@ class UnifiedInferenceService:
             self._submit_inference("eeg", inference_data, metadata)
         
         # EEG疲劳度模型
-        if "eeg_fatigue" in self.integrated_models:
+        if "eeg_fatigue" in self.models:
             # 创建数据副本，避免多个模型共享同一数据引用
             inference_data_fatigue = {
                 "memory_mode": memory_mode,
@@ -529,11 +515,11 @@ class UnifiedInferenceService:
             - 推理完成后自动清理数据引用
             - 支持numpy数组和普通数据的混合清理
         """
-        def _infer():
+        def _do_infer():
             try:
-                # 集成模式推理
-                if model_type in self.integrated_models:
-                    result = self._infer_integrated(model_type, data)
+                # 推理
+                if model_type in self.models:
+                    result = self._infer(model_type, data)
                 else:
                     self.logger.warning(f"模型未加载: {model_type}")
                     return
@@ -555,18 +541,18 @@ class UnifiedInferenceService:
                 gc.collect()
         
         # 提交到CPU线程池异步执行
-        self._thread_pool.submit_cpu_task(_infer)
+        self._thread_pool.submit_cpu_task(_do_infer)
     
-    def _infer_integrated(
+    def _infer(
         self,
         model_type: str,
         data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """使用集成模型推理"""
-        model = self.integrated_models[model_type]
+        """执行模型推理"""
+        model = self.models[model_type]
         
         try:
-            self.logger.debug(f"🔄 开始集成模型推理: {model_type}")
+            self.logger.debug(f"🔄 开始模型推理: {model_type}")
             result = model.infer(data)
             
             # 输出推理结果关键信息
@@ -695,8 +681,8 @@ class UnifiedInferenceService:
         """获取服务状态"""
         return {
             "running": self._running,
-            "integrated_models": list(self.integrated_models.keys()),
-            "total": len(self.integrated_models)
+            "models": list(self.models.keys()),
+            "total": len(self.models)
         }
 
 
