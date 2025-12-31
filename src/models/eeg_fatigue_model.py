@@ -109,24 +109,17 @@ class EEGFatigueModel(BaseInferenceModel):
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """执行EEG疲劳度推理
         
-        支持三种输入模式：
-        1. 内存模式（推荐）：
+        支持两种输入模式：
+        1. 会话目录模式（推荐，支持基线更新）：
+           - session_dir: str - 会话目录路径
+           - subject_base: str - 被试标识（如"shh"）
+           - qc_is_lowload: bool = True - 是否低负荷状态
+           
+        2. 内存模式（实时推理）：
            - memory_mode: bool = True
            - eeg_signal: np.ndarray - EEG信号数组 [N, 2]
            - sampling_rate: float = 500.0
            - subject_id: str = "unknown"
-           - trigger_times: List[datetime] - 可选，触发时间点
-           
-        2. 文件路径模式：
-           - file_mode: bool = True
-           - eeg_file_path: str - EEG数据文件路径
-           - sampling_rate: float = 500.0
-           - subject_id: str = "unknown"
-           
-        3. 会话目录模式（完整评估）：
-           - session_dir: str - 会话目录路径
-           - subject_base: str - 被试标识（如"shh"）
-           - qc_is_lowload: bool = True - 是否低负荷状态
         
         Args:
             data: 输入数据字典
@@ -140,21 +133,14 @@ class EEGFatigueModel(BaseInferenceModel):
         """
         # 优先使用会话目录模式（完整评估）
         if "session_dir" in data:
-            # print("会话目录模式------------------------------------")
             return self._infer_from_session(data)
         # 内存模式
         elif data.get("memory_mode") == True:
-            # print("内存模式------------------------------------")
             return self._infer_from_memory(data)
-        # 文件路径模式
-        elif data.get("file_mode") == True:
-            # print("文件路径模式------------------------------------")
-            return self._infer_from_file(data)
         else:
-            # print("未指定有效的输入模式------------------------------------")
             return {
                 "status": "error",
-                "error": "未指定有效的输入模式",
+                "error": "未指定有效的输入模式（需要 session_dir 或 memory_mode）",
                 "eeg_fatigue_score": 0.0
             }
     
@@ -383,109 +369,6 @@ class EEGFatigueModel(BaseInferenceModel):
         finally:
             eeg_signal = None
             gc.collect()
-    
-    def _infer_from_file(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从文件路径读取数据并推理
-        
-        支持时间戳过滤：自动从CSV文件的ADS_Event列读取时间戳标记
-        """
-        eeg_file_path = data.get("eeg_file_path")
-        sampling_rate = data.get("sampling_rate", self.FS)
-        subject_id = data.get("subject_id", "unknown")
-        
-        if not eeg_file_path:
-            return {
-                "status": "error",
-                "error": "缺少必需的EEG文件路径",
-                "eeg_fatigue_score": 0.0
-            }
-        
-        # 验证文件存在
-        if not Path(eeg_file_path).exists():
-            return {
-                "status": "error",
-                "error": f"EEG文件不存在: {eeg_file_path}",
-                "eeg_fatigue_score": 0.0
-            }
-        
-        try:
-            self.logger.info(f"\n{'='*60}")
-            self.logger.info(f"🧠💤 EEG疲劳度分析 - 文件模式")
-            self.logger.info(f"{'='*60}")
-            self.logger.info(f"📂 文件路径: {Path(eeg_file_path).name}")
-            
-            # 读取信号（CSV格式可能包含: Sample, Timestamp, Channel1, Channel2, ADS_Event, Sequence）
-            import pandas as pd
-            df = pd.read_csv(eeg_file_path)
-            ch1 = df["Channel1"].values.astype(float)
-            ch2 = df["Channel2"].values.astype(float)
-            eeg_signal = np.column_stack([ch1, ch2])
-            
-            # 尝试从同目录的 part_timestamps.json 读取时间范围并过滤
-            timestamps_file = Path(eeg_file_path).parent / "part_timestamps.json"
-            if timestamps_file.exists():
-                import json
-                with open(timestamps_file, 'r', encoding='utf-8') as f:
-                    timestamps = json.load(f)
-                
-                # part_timestamps.json 格式: [{"datetime": "ISO格式", "call_index": 0}, ...]
-                # call_index 1=SART任务开始, 3=SART任务结束
-                # 根据时间范围过滤数据
-                if isinstance(timestamps, list) and len(timestamps) > 0:
-                    # 读取CSV中的时间戳列
-                    if "Timestamp" in df.columns:
-                        # 将 CSV 的时间戳字符串转换为 datetime64
-                        csv_datetimes = pd.to_datetime(df["Timestamp"])
-                        
-                        # 查找 call_index=1 和 call_index=3 的时间点
-                        ts_map = {t.get("call_index"): t.get("datetime") for t in timestamps if t.get("datetime")}
-                        
-                        if 1 in ts_map and 3 in ts_map:
-                            # 转换为 datetime64
-                            t1 = np.datetime64(ts_map[1])
-                            t3 = np.datetime64(ts_map[3])
-                            
-                            # 根据时间范围过滤信号（只保留时间戳1到时间戳3之间的数据）
-                            mask = (csv_datetimes >= t1) & (csv_datetimes <= t3)
-                            num_samples = mask.sum()
-                            
-                            if num_samples > 500:  # 至少1秒数据
-                                eeg_signal = eeg_signal[mask]
-                                duration = num_samples / sampling_rate
-                                self.logger.info(
-                                    f"  ✓ 时间戳过滤: call_index 1→3"
-                                )
-                                self.logger.info(
-                                    f"  ⏱️ 过滤后保留 {num_samples} 个样本 ({duration:.1f}秒)"
-                                )
-                            else:
-                                self.logger.warning(
-                                    f"  ⚠️ 时间范围内样本太少({num_samples})，使用全部数据"
-                                )
-                        else:
-                            self.logger.warning(
-                                f"  ⚠️ part_timestamps.json 中缺少 call_index 1或3"
-                            )
-                    else:
-                        self.logger.warning(f"  ⚠️ CSV中缺少Timestamp列，无法应用时间过滤")
-            
-            self.logger.info(f"  ✓ 信号读取完成: shape={eeg_signal.shape}")
-            
-            # 使用内存模式处理
-            return self._infer_from_memory({
-                "memory_mode": True,
-                "eeg_signal": eeg_signal,
-                "sampling_rate": sampling_rate,
-                "subject_id": subject_id
-            })
-            
-        except Exception as e:
-            self.logger.error(f"从文件推理失败: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "error": str(e),
-                "eeg_fatigue_score": 0.0
-            }
     
     def _infer_from_session(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """从会话目录读取完整数据并评估（支持基线更新）

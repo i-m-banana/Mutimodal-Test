@@ -73,10 +73,9 @@ class UnifiedInferenceService:
             return
         
         # 订阅需要推理的事件
-        self.bus.subscribe(EventTopic.MULTIMODAL_SNAPSHOT, self._on_multimodal_data)
         self.bus.subscribe(EventTopic.EMOTION_REQUEST, self._on_emotion_request)
         self.bus.subscribe(EventTopic.EEG_REQUEST, self._on_eeg_request)
-        self.logger.debug(f"已订阅事件: {EventTopic.MULTIMODAL_SNAPSHOT.value}, {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
+        self.logger.debug(f"已订阅事件: {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
         
         self._running = True
         self.logger.info(f"✅ 统一推理服务已启动 (共 {enabled_count} 个模型)")
@@ -130,7 +129,6 @@ class UnifiedInferenceService:
         
         # 取消订阅
         try:
-            self.bus.unsubscribe(EventTopic.MULTIMODAL_SNAPSHOT, self._on_multimodal_data)
             self.bus.unsubscribe(EventTopic.EMOTION_REQUEST, self._on_emotion_request)
             self.bus.unsubscribe(EventTopic.EEG_REQUEST, self._on_eeg_request)
         except Exception as e:
@@ -149,137 +147,6 @@ class UnifiedInferenceService:
         
         self._running = False
         self.logger.info("✅ 统一推理服务已停止")
-    
-    def _on_multimodal_data(self, event: Event) -> None:
-        """处理多模态数据,分发到情绪识别模型
-        
-        注意：RGB疲劳度推理已移至 FatigueAssessmentService，
-        在录制完成后使用文件路径进行离线推理，不在此处实时处理
-        """
-        payload = event.payload or {}
-        
-        # 提取数据
-        status = payload.get("status", "idle")
-        timestamp = payload.get("timestamp")
-        frame_count = payload.get("frame_count", 0)
-        elapsed_time = payload.get("elapsed_time", 0.0)
-        
-        # 检查采集状态
-        if status != "running":
-            return
-        
-        # 优先使用内存模式(避免重复I/O)
-        memory_mode = payload.get("memory_mode", False)
-        file_mode = payload.get("file_mode", False)
-        
-        # 验证数据有效性
-        if memory_mode:
-            # 内存模式: 直接使用numpy数组
-            rgb_frames_memory = payload.get("rgb_frames_memory", [])
-            depth_frames_memory = payload.get("depth_frames_memory", [])
-            eyetrack_memory = payload.get("eyetrack_memory", [])
-            
-            if not rgb_frames_memory:
-                # 没有RGB帧数据时,静默跳过
-                return
-            
-            # 只取最后30帧用于推理(避免内存累积)
-            max_frames_for_inference = 30
-            rgb_frames_memory = rgb_frames_memory[-max_frames_for_inference:]
-            depth_frames_memory = depth_frames_memory[-max_frames_for_inference:]
-            eyetrack_memory = eyetrack_memory[-max_frames_for_inference:]
-            
-            # 内存模式不需要文件路径
-            rgb_video_path = None
-            depth_video_path = None
-            eyetrack_json_path = None
-            rgb_frames_b64 = []
-            depth_frames_b64 = []
-            eyetrack_samples = []
-            
-        elif file_mode:
-            # 文件模式:检查文件路径是否存在
-            rgb_video_path = payload.get("rgb_video_path")
-            depth_video_path = payload.get("depth_video_path")
-            eyetrack_json_path = payload.get("eyetrack_json_path")
-            
-            if not rgb_video_path:
-                # 没有RGB视频文件时,静默跳过
-                return
-                
-            # 使用文件路径进行推理
-            rgb_frames_memory = []
-            depth_frames_memory = []
-            eyetrack_memory = []
-            rgb_frames_b64 = []
-            depth_frames_b64 = []
-            eyetrack_samples = []
-        else:
-            # Base64模式:提取多帧序列数据
-            rgb_frames_b64 = payload.get("rgb_frames_b64", [])
-            depth_frames_b64 = payload.get("depth_frames_b64", [])
-            eyetrack_samples = payload.get("eyetrack_samples", [])
-            rgb_video_path = None
-            depth_video_path = None
-            eyetrack_json_path = None
-            rgb_frames_memory = []
-            depth_frames_memory = []
-            eyetrack_memory = []
-            
-            if not rgb_frames_b64:
-                # 没有RGB帧序列数据时,静默跳过
-                return
-        
-        metadata = {
-            "timestamp": timestamp,
-            "frame_count": frame_count
-        }
-        
-        # ===== 注意:RGB疲劳度推理已从此处移除 =====
-        # RGB疲劳度现在在 FatigueAssessmentService 中处理
-        # 前端录制完成后,发送 FATIGUE_ASSESSMENT_REQUEST 事件
-        # 使用保存的视频文件进行离线推理
-        
-        # ===== 情绪识别推理策略调整 =====
-        # 为避免在录制期间每次 snapshot 都触发情绪推理（导致频繁的文件打开错误），
-        # 现在仅在采集停止后（status != "running"）触发情绪推理
-        # 这样可以确保视频文件已完全写入并关闭，避免 OpenCV 报错
-        # 如果需要实时推理，可以在 payload 中添加 "trigger_emotion": True 标志
-        
-        # 情绪识别: 仅在录制停止后触发（避免录制期间频繁推理）
-        if "emotion" in self.models and status != "running":
-            self.logger.debug(f"📊 准备触发情绪推理 (status={status}, 采集已停止)")
-            
-            inference_data = {
-                "elapsed_time": elapsed_time
-            }
-            
-            # 根据模式选择数据格式(优先使用内存模式)
-            if memory_mode:
-                inference_data.update({
-                    "memory_mode": True,
-                    "rgb_frames_memory": rgb_frames_memory,
-                    "depth_frames_memory": depth_frames_memory,
-                    "eyetrack_memory": eyetrack_memory,
-                })
-            elif file_mode:
-                inference_data.update({
-                    "file_mode": True,
-                    "rgb_video_path": rgb_video_path,
-                    "depth_video_path": depth_video_path,
-                    "eyetrack_json_path": eyetrack_json_path,
-                })
-            else:
-                inference_data.update({
-                    "rgb_frames": rgb_frames_b64,
-                    "depth_frames": depth_frames_b64,
-                    "eyetrack_samples": eyetrack_samples,
-                })
-            
-            self._submit_inference("emotion", inference_data, metadata)
-        elif "emotion" in self.models and status == "running":
-            # 录制期间跳过情绪推理，避免频繁触发
-            self.logger.debug("⏭️  跳过情绪推理 (status=running, 等待录制完成)")
     
     def _on_emotion_request(self, event: Event) -> None:
         """处理情绪分析请求"""

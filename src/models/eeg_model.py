@@ -3,11 +3,8 @@
 集成 eeg_algorithms/ 中的算法库进行在线推理
 """
 
-import base64
 import gc
 import logging
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -22,8 +19,7 @@ try:
         FS,
         preprocess_eeg,
         segment_windows,
-        extract_features_batch,
-        read_eeg_txt_two_channels
+        extract_features_batch
     )
     HAS_DEPS = True
 except ImportError as e:
@@ -81,44 +77,24 @@ class EEGModel(BaseInferenceModel):
         self.logger.debug("✅ EEG脑负荷模型初始化完成")
     
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """执行EEG脑负荷推理
-        
-        支持三种输入模式：
-        1. 内存模式（推荐）：
-           - memory_mode: bool = True
-           - eeg_signal: np.ndarray - EEG信号数组 [N, 2]
-           - sampling_rate: int = 250
-           - subject_id: str = "unknown"
-           
-        2. 文件路径模式：
-           - file_mode: bool = True
-           - eeg_file_path: str - EEG数据文件路径
-           - sampling_rate: int = 250
-           - subject_id: str = "unknown"
-           
-        3. base64数据模式（兼容）：
-           - eeg_signal: str - base64编码的文件
-           - sampling_rate: int = 250
-           - subject_id: str = "unknown"
+        """执行EEG脑负荷推理（仅支持内存模式）
         
         Args:
             data: 输入数据字典
+                - memory_mode: bool = True
+                - eeg_signal: np.ndarray - EEG信号数组 [N, 2]
+                - sampling_rate: int = 250
+                - subject_id: str = "unknown"
         
-                Returns:
-                        推理结果:
-                                - status: "success" | "no-data" | "error"
-                                    - no-data: 输入有效但当前时间窗内没有可用窗口（太短或全部判为伪迹），建议上层跳过发布
-                                - brain_load_score: 脑负荷分数 (0-100)
-                                - state: 状态 ("low"/"high")
-                                - window_results: 各窗口详细结果
+        Returns:
+            推理结果:
+                - status: "success" | "no-data" | "error"
+                    - no-data: 输入有效但当前时间窗内没有可用窗口（太短或全部判为伪迹），建议上层跳过发布
+                - brain_load_score: 脑负荷分数 (0-100)
+                - state: 状态 ("low"/"high")
+                - window_results: 各窗口详细结果
         """
-        # 优先使用内存模式
-        if data.get("memory_mode") == True:
-            return self._infer_from_memory(data)
-        elif data.get("file_mode") == True:
-            return self._infer_from_file(data)
-        else:
-            return self._infer_from_base64(data)
+        return self._infer_from_memory(data)
     
     def _infer_from_memory(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """从内存中的numpy数组直接推理（零I/O开销）"""
@@ -259,121 +235,6 @@ class EEGModel(BaseInferenceModel):
             
         except Exception as e:
             self.logger.error(f"内存推理失败: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "error": str(e),
-                "brain_load_score": 0.0,
-                "state": self.state
-            }
-    
-    def _infer_from_file(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从文件路径读取数据并推理"""
-        from pathlib import Path
-        
-        start_time = time.time()
-        
-        eeg_file_path = data.get("eeg_file_path")
-        sampling_rate = data.get("sampling_rate", FS)
-        subject_id = data.get("subject_id", "unknown")
-        
-        if not eeg_file_path:
-            return {
-                "status": "error",
-                "error": "缺少必需的EEG文件路径",
-                "brain_load_score": 0.0,
-                "state": self.state
-            }
-        
-        # 验证文件存在
-        if not Path(eeg_file_path).exists():
-            return {
-                "status": "error",
-                "error": f"EEG文件不存在: {eeg_file_path}",
-                "brain_load_score": 0.0,
-                "state": self.state
-            }
-        
-        try:
-            self.logger.info(f"\n{'='*60}")
-            self.logger.info(f"🧠 EEG脑负荷分析 - 文件模式")
-            self.logger.info(f"{'='*60}")
-            self.logger.info(f"📂 文件路径: {Path(eeg_file_path).name}")
-            self.logger.info(f"   被试ID: {subject_id}")
-            self.logger.info(f"   采样率: {sampling_rate}Hz")
-            
-            # 读取信号
-            raw = read_eeg_txt_two_channels(str(eeg_file_path))
-            self.logger.info(f"  ✓ 信号读取完成: shape={raw.shape}")
-            
-            # 使用内存模式处理（避免重复代码）
-            return self._infer_from_memory({
-                "memory_mode": True,
-                "eeg_signal": raw,
-                "sampling_rate": sampling_rate,
-                "subject_id": subject_id
-            })
-            
-        except Exception as e:
-            self.logger.error(f"从文件推理失败: {e}", exc_info=True)
-            return {
-                "status": "error",
-                "error": str(e),
-                "brain_load_score": 0.0,
-                "state": self.state
-            }
-    
-    def _infer_from_base64(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """从base64数据推理（原有逻辑，用于远程通信）"""
-        start_time = time.time()
-        
-        eeg_signal = data.get("eeg_signal", None)
-        sampling_rate = data.get("sampling_rate", FS)
-        subject_id = data.get("subject_id", "unknown")
-        
-        if eeg_signal is None:
-            return {
-                "status": "error",
-                "error": "未提供EEG信号",
-                "brain_load_score": 0.0,
-                "state": self.state
-            }
-        
-        try:
-            # 解析EEG信号
-            if isinstance(eeg_signal, str):
-                # Base64编码的CSV/TXT文件
-                self.logger.info(f"解码EEG信号文件...")
-                signal_bytes = base64.b64decode(eeg_signal)
-                
-                # 保存到临时文件
-                with tempfile.NamedTemporaryFile(mode='wb', suffix='.txt', delete=False) as tmp:
-                    tmp.write(signal_bytes)
-                    tmp_path = tmp.name
-                
-                try:
-                    # 读取信号
-                    raw = read_eeg_txt_two_channels(tmp_path)
-                finally:
-                    # 清理临时文件
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                        
-            elif isinstance(eeg_signal, list):
-                # 直接提供的数组
-                raw = np.array(eeg_signal, dtype=np.float64)
-            else:
-                raise ValueError(f"不支持的EEG信号格式: {type(eeg_signal)}")
-            
-            # 使用内存模式处理
-            return self._infer_from_memory({
-                "memory_mode": True,
-                "eeg_signal": raw,
-                "sampling_rate": sampling_rate,
-                "subject_id": subject_id
-            })
-            
-        except Exception as e:
-            self.logger.error(f"base64推理失败: {e}", exc_info=True)
             return {
                 "status": "error",
                 "error": str(e),
