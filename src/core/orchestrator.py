@@ -10,12 +10,11 @@ from typing import Any, Dict, Iterable, Optional
 
 import yaml
 
-from ..constants import DEFAULT_COMPONENT_TIMEOUT, EventTopic, ModuleState
+from ..constants import EventTopic, ModuleState
 from ..utils.logger import setup_logging
 from ..interfaces.base import BaseInterface
 from ..services.ui_command_router import UICommandRouter
 from .event_bus import EventBus
-from .system_monitor import SystemMonitor
 
 
 @dataclass
@@ -57,8 +56,6 @@ class Orchestrator:
         self.logger = logging.getLogger("orchestrator")
         self.bus = EventBus()
         self.system_config = system
-        interval = float(system.get("heartbeat_interval", 5.0))
-        self.monitor = SystemMonitor(self.bus, interval=interval)
         self.interface_configs = _parse_components(interfaces or [])
         self.interfaces: Dict[str, BaseInterface] = {}
         self.command_router = UICommandRouter(self.bus, logger=logging.getLogger("ui.command"))
@@ -133,9 +130,6 @@ class Orchestrator:
         except Exception as e:
             self.logger.error(f"启动疲劳度评估服务失败: {e}", exc_info=True)
         self.command_router.start()
-        # 移除采集器和检测器启动
-        if self.system_config.get("enable_monitor", True):
-            self.monitor.start()
         for interface in self.interfaces.values():
             try:
                 interface.start()
@@ -148,8 +142,6 @@ class Orchestrator:
         if not self._running:
             return
         self.logger.info("协调器关闭")
-        # 移除采集器和检测器停止
-        self.monitor.stop()
         
         # 停止推理服务
         if self.inference_service:

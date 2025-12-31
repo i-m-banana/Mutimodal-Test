@@ -1,1 +1,1 @@
-"""Core orchestration utilities (event bus, orchestrator, system monitor)."""
+"""Core orchestration utilities (event bus, orchestrator)."""

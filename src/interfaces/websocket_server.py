@@ -41,7 +41,6 @@ class WebsocketPushInterface(BaseInterface):
             "topics",
             [
                 EventTopic.DETECTION_RESULT.value,
-                EventTopic.SYSTEM_HEARTBEAT.value,
                 EventTopic.MULTIMODAL_SNAPSHOT.value,
             ],
         )

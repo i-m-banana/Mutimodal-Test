@@ -33,7 +33,6 @@ class BackendEvent:
 
 class BackendClient(QObject):
     detection_result = pyqtSignal(dict)
-    system_heartbeat = pyqtSignal(dict)
     camera_frame = pyqtSignal(dict)
     multimodal_frame = pyqtSignal(dict)
     audio_level = pyqtSignal(dict)
@@ -168,8 +167,6 @@ class BackendClient(QObject):
             self.raw_event.emit(data)
             if topic == "detector.result":
                 self.detection_result.emit(payload)
-            elif topic == "system.heartbeat":
-                self.system_heartbeat.emit(payload)
             elif topic == "camera.frame":
                 self.camera_frame.emit(payload)
             elif topic == "audio.level":

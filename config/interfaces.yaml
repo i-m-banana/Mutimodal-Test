@@ -7,7 +7,6 @@ interfaces:
       port: 8765
       topics:
         - detector.result
-        - system.heartbeat
         - camera.frame
         - audio.level
         - multimodal.frame
