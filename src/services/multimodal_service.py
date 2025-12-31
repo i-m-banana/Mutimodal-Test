@@ -78,6 +78,8 @@ class MultiModalDataCollector:
         # Background threads (created at start if hardware available)
         self._eyereader_thread: Optional[threading.Thread] = None
         self._writer_thread: Optional[threading.Thread] = None
+        self._writer_thread_name = f"{self._thread_name}-writer"
+        self._eyereader_thread_name = f"{self._thread_name}-eyereader"
 
         # Runtime state
         self._rgb_frame_count = 0  # Track actual frames written to RGB video
@@ -152,18 +154,18 @@ class MultiModalDataCollector:
         )
         # Start background writer thread (if using real CV writer)
         if cv2 is not None and self.rgb_writer is not None:
-            self._writer_thread = threading.Thread(
-                target=self._video_writer_run,
-                name=f"{self._thread_name}-writer",
+            self._writer_thread = self._thread_pool.register_managed_thread(
+                self._writer_thread_name,
+                self._video_writer_run,
                 daemon=True,
             )
             self._writer_thread.start()
 
         # Start eyetrack reader thread if running on real hardware
         if HAS_TOBII:
-            self._eyereader_thread = threading.Thread(
-                target=self._eyetrack_reader_run,
-                name=f"{self._thread_name}-eyereader",
+            self._eyereader_thread = self._thread_pool.register_managed_thread(
+                self._eyereader_thread_name,
+                self._eyetrack_reader_run,
                 daemon=True,
             )
             self._eyereader_thread.start()
@@ -180,12 +182,14 @@ class MultiModalDataCollector:
         try:
             if self._eyereader_thread and self._eyereader_thread.is_alive():
                 self._eyereader_thread.join(timeout=1.0)
+            self._thread_pool.unregister_managed_thread(self._eyereader_thread_name, timeout=1.0)
         except Exception:
             pass
         try:
             if self._writer_thread and self._writer_thread.is_alive():
                 # writer loop drains queues then exits
                 self._writer_thread.join(timeout=2.0)
+            self._thread_pool.unregister_managed_thread(self._writer_thread_name, timeout=2.0)
         except Exception:
             pass
         self._thread_pool.unregister_managed_thread(self._thread_name, timeout=join_timeout)

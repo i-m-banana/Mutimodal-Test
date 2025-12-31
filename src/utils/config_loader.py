@@ -11,6 +11,8 @@ from typing import Any, Callable, Dict, Optional
 
 import yaml
 
+from ..core.thread_pool import get_thread_pool
+
 
 @dataclass(frozen=True)
 class ConfigSnapshot:
@@ -35,6 +37,8 @@ class ConfigLoader:
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._thread_pool = get_thread_pool()
+        self._thread_name = f"ConfigWatcher:{self._path.name}"
         self._snapshot = self._load()
         if auto_reload:
             self._start_watcher()
@@ -63,7 +67,11 @@ class ConfigLoader:
                 pass
 
     def _start_watcher(self) -> None:
-        self._thread = threading.Thread(target=self._watch_loop, name=f"ConfigWatcher:{self._path.name}", daemon=True)
+        self._thread = self._thread_pool.register_managed_thread(
+            self._thread_name,
+            self._watch_loop,
+            daemon=True
+        )
         self._thread.start()
 
     def _watch_loop(self) -> None:
@@ -89,6 +97,7 @@ class ConfigLoader:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=self._poll_interval * 2)
+        self._thread_pool.unregister_managed_thread(self._thread_name, timeout=self._poll_interval * 2)
 
 
 __all__ = ["ConfigLoader", "ConfigSnapshot"]
