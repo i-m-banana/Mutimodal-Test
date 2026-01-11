@@ -61,6 +61,8 @@ from ..utils.responsive import scale, scale_size, scale_font
 from ...widgets.camera_preview import CameraPreviewWidget
 from ...widgets.schulte_grid import SchulteGridWidget
 from...widgets.score_page import ScorePage
+from .baseline_prompt import BaselinePromptPage
+from .sart_prompt import SARTPromptPage
 from ...services.backend_client import get_backend_client
 from ...services.database_service import DatabaseService
 from ...services.session_manager import SessionManager
@@ -951,8 +953,7 @@ class TestPage(QWidget):
             2: '情绪检测',          # 朗读录音
             3: '血压脉搏检测',      # 血压测试
             4: '舒尔特专注度检测',  # 舒尔特测试
-            5: None,                # 信息确认页
-            6: '分数展示'           # 分数页面
+            5: '分数展示'           # 分数页面
         }
 
         current_stage = index_to_stage.get(current_index, None)
@@ -1285,214 +1286,21 @@ class TestPage(QWidget):
 
         return outer_widget
 
-    def _create_baseline_prompt_page(self):
-        """创建基线校准提示页面（带白色圆角外框）"""
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
-        page_layout.setSpacing(scale(12))
-
-        # 创建白色圆角矩形容器（外框 - 增加圆角和阴影）
-        content_frame = QFrame()
-        content_frame.setObjectName("baselinePromptFrame")
-        content_frame.setStyleSheet("""
-            QFrame#sartPromptFrame {
-                background-image: url("ui/assets/sart");
-                background-repeat: no-repeat;
-                background-position: center;
-                background-origin: content;
-                background-size: contain;
-                border-radius: 60px;
-            }
-        """)
-
-        content_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        # 添加底部阴影效果
-        baseline_shadow = QGraphicsDropShadowEffect()
-        baseline_shadow.setBlurRadius(20)
-        baseline_shadow.setXOffset(0)
-        baseline_shadow.setYOffset(8)
-        baseline_shadow.setColor(QColor(0, 0, 0, 80))
-        content_frame.setGraphicsEffect(baseline_shadow)
-
-        # 容器内部布局
-        layout = QVBoxLayout(content_frame)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(scale(30))
-        layout.setContentsMargins(scale(40), scale(32), scale(40), scale(32))
-
-        # 添加顶部弹性空间
-        layout.addStretch(1)
-
-        # 标题（更大字号，确保单行显示）✅
-        title_label = QLabel("请注视屏幕中央的十字，进行30s静息基线采集。")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setWordWrap(False)  # ✅ 禁止换行
-        title_label.setStyleSheet("""
-            color: #2c3e50;
-            font-size: 50px;
-            font-weight: bold;
-            padding: 20px;
-        """)  # ✅ 从32px增加到40px
-        layout.addWidget(title_label)
-
-        # 添加中间弹性空间
-        layout.addStretch(2)
-
-        # 十字符号（超大号）
-        cross_label = QLabel("+")
-        cross_label.setAlignment(Qt.AlignCenter)
-        cross_label.setStyleSheet("""
-            color: #000000;
-            font-size: 300px;
-            font-weight: bold;
-        """)
-        layout.addWidget(cross_label)
-
-        # 添加底部弹性空间
-        layout.addStretch(2)
-
-        # 开始按钮（尺寸加大，与校准页面统一）✅
-        self.btn_start_baseline = QPushButton("点击开始")
-        self.btn_start_baseline.setObjectName("primaryButton")
-        self.btn_start_baseline.setFixedSize(scale(280), scale(80))  # ✅ 从240×60增加到280×80
-        self.btn_start_baseline.setCursor(Qt.PointingHandCursor)
-        self.btn_start_baseline.setStyleSheet("""
-            QPushButton#primaryButton {
-                background-color: #5DADE2;
-                color: white;
-                border: none;
-                border-radius: 20px;
-                font-size: 32px;
-                font-weight: bold;
-            }
-            QPushButton#primaryButton:hover {
-                background-color: #3498DB;
-            }
-            QPushButton#primaryButton:pressed {
-                background-color: #2E86C1;
-            }
-        """)  # ✅ 字体从24px增加到32px，圆角从15px增加到20px
-        self.btn_start_baseline.clicked.connect(self._on_start_baseline_clicked)
-        layout.addWidget(self.btn_start_baseline, 0, Qt.AlignCenter)
-
-        # 添加底部一点空间
-        layout.addStretch(1)
-
-        page_layout.addWidget(content_frame, 1)
-        return page
-
-    def _create_sart_prompt_page(self):
-        """创建SART实验提示页面（用整张图片替代中间内容）"""
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(scale(16), scale(16), scale(16), scale(16))
-        page_layout.setSpacing(scale(12))
-
-        # 创建白色圆角矩形容器
-        content_frame = QFrame()
-        content_frame.setObjectName("sartPromptFrame")
-        content_frame.setStyleSheet("""
-            QFrame#sartPromptFrame {
-                background-color: white;
-                border: 2px solid #e0e0e0;
-                border-radius: 60px;
-            }
-        """)
-
-        # 添加阴影
-        sart_shadow = QGraphicsDropShadowEffect()
-        sart_shadow.setBlurRadius(20)
-        sart_shadow.setXOffset(0)
-        sart_shadow.setYOffset(8)
-        sart_shadow.setColor(QColor(0, 0, 0, 80))
-        content_frame.setGraphicsEffect(sart_shadow)
-
-        # 主布局
-        layout = QVBoxLayout(content_frame)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(scale(30))
-        layout.setContentsMargins(scale(60), scale(40), scale(60), scale(40))
-
-        # 顶部标题（字体更大、单行显示）✅
-        title_label = QLabel("基线校准结束，点击按钮开始多模态疲劳检测。")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setWordWrap(False)  # 禁止换行
-        title_label.setStyleSheet("""
-            color: #2c3e50;
-            font-size: 42px;
-            font-weight: bold;
-            padding: 20px;
-        """)
-        layout.addStretch(1)
-        layout.addWidget(title_label)
-        layout.addStretch(1)
-
-        # ✅ 中间图片部分
-        image_label = QLabel()
-        image_label.setAlignment(Qt.AlignCenter)
-        image_label.setStyleSheet("border: none; background-color: transparent;")
-
-        image_path = str(config.BASE_DIR / "assets" / "sart.png")
-        if os.path.exists(image_path):
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                # 按比例缩放，尽量填满中间区域（保留边距）
-                scaled_pixmap = pixmap.scaled(
-                    scale(1000), scale(600),  # 根据你的窗口大小调整这两个值
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                image_label.setPixmap(scaled_pixmap)
-            else:
-                image_label.setText("⚠️ 图片加载失败")
-                image_label.setStyleSheet("font-size: 24px; color: #e74c3c;")
-        else:
-            image_label.setText("⚠️ 未找到图片: ui/assets/sart")
-            image_label.setStyleSheet("font-size: 24px; color: #e74c3c;")
-
-        # 添加大图并让它扩展空间
-        layout.addStretch(1)
-        layout.addWidget(image_label, 1, Qt.AlignCenter)
-        layout.addStretch(1)
-
-        # ✅ 大按钮部分（与其他页面统一）
-        self.btn_start_sart = QPushButton("我已了解规则，开始测试")
-        self.btn_start_sart.setObjectName("sartPrimaryButton")
-        self.btn_start_sart.setFixedSize(scale(500), scale(330))  # 大按钮
-        self.btn_start_sart.setCursor(Qt.PointingHandCursor)
-        self.btn_start_sart.setStyleSheet("""
-            QPushButton#sartPrimaryButton {
-                background-color: #5DADE2;
-                color: white;
-                border: none;
-                border-radius: 25px;
-                font-size: 32px;
-                font-weight: bold;
-            }
-            QPushButton#sartPrimaryButton:hover {
-                background-color: #3498DB;
-            }
-            QPushButton#sartPrimaryButton:pressed {
-                background-color: #2E86C1;
-            }
-        """)
-        self.btn_start_sart.clicked.connect(self._on_start_sart_clicked)
-        layout.addWidget(self.btn_start_sart, 0, Qt.AlignCenter)
-        layout.addStretch(1)
-
-        page_layout.addWidget(content_frame)
-        return page
-
     def _create_answer_area_widgets(self):
-        # 🆕 基线校准提示页面
-        page_baseline_prompt = self._create_baseline_prompt_page()
+        """创建并添加所有答题区域页面到 answer_stack"""
+        # 🆕 基线校准提示页面（使用独立模块）
+        page_baseline_prompt = BaselinePromptPage(self)
+        page_baseline_prompt.start_clicked.connect(self._on_start_baseline_clicked)
         self.answer_stack.addWidget(page_baseline_prompt)
+        # 保存按钮引用（用于后门快捷键）
+        self.btn_start_baseline = page_baseline_prompt.btn_start
         
-        # 🆕 SART实验提示页面
-        page_sart_prompt = self._create_sart_prompt_page()
+        # 🆕 SART实验提示页面（使用独立模块）
+        page_sart_prompt = SARTPromptPage(self)
+        page_sart_prompt.start_clicked.connect(self._on_start_sart_clicked)
         self.answer_stack.addWidget(page_sart_prompt)
+        # 保存按钮引用（用于后门快捷键）
+        self.btn_start_sart = page_sart_prompt.btn_start
         
         # 🔄 朗读录音页面 - 使用卡片容器(模仿舒尔特右边框)
         page_qna = QWidget()
@@ -1661,31 +1469,9 @@ class TestPage(QWidget):
         self.page_schulte = self._create_schulte_page()
         self.answer_stack.addWidget(self.page_schulte)
 
-        # 信息确认页面
-        page_confirm = self._create_info_page()
-        self.answer_stack.addWidget(page_confirm)
-
         # 分数展示页面（使用ScorePage组件）
         self.score_page = ScorePage(username=self.current_user)
         self.answer_stack.addWidget(self.score_page)
-
-    def _create_info_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(20)
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.check-circle', color='#4CAF50').pixmap(80, 80))
-        title_label = QLabel("信息已记录")
-        title_label.setObjectName("h1")
-        subtitle_label = QLabel("系统已保存您的回答，请进入下一步。")
-        subtitle_label.setObjectName("subtitle")
-        layout.addStretch()
-        layout.addWidget(icon_label, 0, Qt.AlignCenter)
-        layout.addWidget(title_label, 0, Qt.AlignCenter)
-        layout.addWidget(subtitle_label, 0, Qt.AlignCenter)
-        layout.addStretch()
-        return page
 
     def _create_blood_pressure_page(self):
         """创建血压脉搏测试页面(卡片布局 - 左图右文在一个卡片中)"""
