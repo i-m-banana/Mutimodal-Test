@@ -40,12 +40,7 @@ from .pages.sart import SARTPage
 from .pages.test import TestPage
 from ..widgets.brain_load_bar import BrainLoadBar
 from ..widgets.schulte_grid import SchulteGridWidget
-from ..utils_common.thread_process_manager import (
-    get_lifecycle_manager,
-    get_thread_manager,
-    shutdown_all_managers,
-)
-from ..services.backend_launcher import get_backend_launcher
+from ..utils_common.ui_thread_pool import get_ui_thread_pool
 from ..services.session_manager import SessionManager
 
 STYLE_PATH = config.BASE_DIR / "style.qss"
@@ -296,8 +291,7 @@ class MainWindow(QMainWindow):
         后端会返回 'already-running' 状态，这是正常的。重要的是确保
         使用的是当前的 session_dir。
         """
-        from ..utils_common.thread_process_manager import get_thread_manager
-        thread_manager = get_thread_manager()
+        thread_pool = get_ui_thread_pool()
         
         def start_eeg():
             try:
@@ -329,9 +323,8 @@ class MainWindow(QMainWindow):
                 logger.error(f"❌ 启动测试会话EEG采集失败: {e}")
                 logger.info("测试将继续运行，但不会记录EEG数据")
         
-        thread_manager.submit_data_task(
-            start_eeg,
-            task_name="测试会话EEG采集启动"
+        thread_pool.submit_task(
+            start_eeg
         )
     
     def show_baseline_prompt_in_test(self) -> None:
@@ -466,9 +459,9 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, 'test_page') and hasattr(self.test_page, 'tts_task_id'):
             try:
-                thread_manager = get_thread_manager()
+                thread_pool = get_ui_thread_pool()
                 if self.test_page.tts_task_id:
-                    thread_manager.cancel_task(self.test_page.tts_task_id)
+                    # UIThreadPool 不支持 cancel_task,直接清空队列
                     self.test_page.tts_queue.put(None)
                     logger.info("应用程序关闭时已停止TTS任务")
             except Exception as exc:  # noqa: BLE001
@@ -485,10 +478,10 @@ class MainWindow(QMainWindow):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("关闭应用时重置舒尔特widget失败: %s", exc)
         try:
-            shutdown_all_managers()
-            logger.info("所有线程进程管理器已关闭")
+            get_ui_thread_pool().shutdown(wait=True, timeout=5.0)
+            logger.info("UI线程池已关闭")
         except Exception as exc:  # noqa: BLE001
-            logger.error("关闭管理器失败: %s", exc)
+            logger.error("关闭线程池失败: %s", exc)
 
         SchulteGridWidget.cleanup_temp_files()
         super().closeEvent(event)
@@ -508,12 +501,9 @@ def create_application(argv: Sequence[str] | None = None) -> tuple[QApplication,
     args = list(argv) if argv is not None else sys.argv
     app = QApplication(args)
 
-    lifecycle_manager = get_lifecycle_manager()
-    status = lifecycle_manager.get_all_status()
-    if not status.get('is_initialized'):
-        lifecycle_manager.start_all()
-    app.aboutToQuit.connect(lambda: lifecycle_manager.shutdown_all())
-    app.setProperty("lifecycle_manager", lifecycle_manager)
+    # 初始化UI线程池（单例模式会自动注册atexit）
+    thread_pool = get_ui_thread_pool()
+    app.aboutToQuit.connect(lambda: thread_pool.shutdown(wait=True, timeout=5.0))
 
     _apply_style(app)
 

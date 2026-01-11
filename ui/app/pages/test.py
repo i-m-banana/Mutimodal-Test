@@ -64,7 +64,7 @@ from...widgets.score_page import ScorePage
 from ...services.backend_client import get_backend_client
 from ...services.database_service import DatabaseService
 from ...services.session_manager import SessionManager
-from ...utils_common.thread_process_manager import get_thread_manager
+from ...utils_common.ui_thread_pool import get_ui_thread_pool
 
 # ---------------------------------------------------------------------------
 # 自定义圆形标签类
@@ -173,7 +173,7 @@ class TestPage(QWidget):
         # 朗读状态标志
         self.reading_completed = False
         
-        self.thread_manager = get_thread_manager()
+        self.thread_pool = get_ui_thread_pool()
         
         self.current_question = 0  # 保留变量名兼容性，实际已无多个问题
         self.current_step = 0
@@ -2903,10 +2903,7 @@ class TestPage(QWidget):
                 # 即使出错也启动摄像头预览（显示占位符）
                 self._invoke_later(self._start_camera_preview, 500)
         
-        self.thread_manager.submit_data_task(
-            start_av_async,
-            task_name="启动AV采集"
-        )
+        self.thread_pool.submit_task(start_av_async)
         
 
     def start_eeg_collection(self) -> None:
@@ -2927,10 +2924,7 @@ class TestPage(QWidget):
                 logger.error(f"启动EEG采集失败: {e}")
                 logger.info("UI将继续运行，但EEG功能不可用")
         
-        self.thread_manager.submit_data_task(
-            start_eeg_async,
-            task_name="启动EEG采集"
-        )
+        self.thread_pool.submit_task(start_eeg_async)
 
     def _start_camera_preview(self) -> None:
         """启动当前步骤所需的摄像头预览（异步，非阻塞）。"""

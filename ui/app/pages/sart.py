@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QKeyEvent
 from ..utils.responsive import scale, scale_font
-from ...utils_common.thread_process_manager import get_thread_manager
+from ...utils_common.ui_thread_pool import get_ui_thread_pool
 from ...services.session_manager import SessionManager
 
 
@@ -48,7 +48,7 @@ class SARTPage(QWidget):
         self.current_user = None
         
         self.session_manager = SessionManager.get_instance()
-        self.thread_manager = get_thread_manager()
+        self.thread_pool = get_ui_thread_pool()
         
         self._init_ui()
         self._setup_timers()

@@ -427,13 +427,13 @@ class CalibrationPage(QWidget):
     def _start_eeg_preconnect(self) -> None:
         """启动EEG预连接（在校准页面就开始连接设备）"""
         try:
-            from ...utils_common.thread_process_manager import get_thread_manager
+            from ...utils_common.ui_thread_pool import get_ui_thread_pool
             from ...services.backend_proxy import eeg_start_collection
             from datetime import datetime
             from pathlib import Path
             import os
             
-            thread_manager = get_thread_manager()
+            thread_pool = get_ui_thread_pool()
             
             def preconnect_eeg():
                 try:
@@ -475,10 +475,7 @@ class CalibrationPage(QWidget):
                 except Exception as e:
                     config.logger.error(f"❌ EEG预连接失败: {e}", exc_info=True)
             
-            thread_manager.submit_data_task(
-                preconnect_eeg,
-                task_name="EEG设备预连接"
-            )
+            thread_pool.submit_task(preconnect_eeg)
         except Exception as e:
             config.logger.error(f"❌ 启动EEG预连接失败: {e}")
 
