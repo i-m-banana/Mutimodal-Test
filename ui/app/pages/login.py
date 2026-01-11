@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from .. import config
-from ..qt import (
+from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QSpacerItem, QSizePolicy, QFrame, QDialog,
-    Qt, QFont, qta, QPainter, QLinearGradient, QColor, QMessageBox,QPixmap,QApplication
+    QMessageBox, QApplication
 )
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont, QPainter, QLinearGradient, QColor, QPixmap
+import qtawesome as qta
 from ..utils.widgets import create_shadow_effect
 from ..utils.responsive import scale
 import csv

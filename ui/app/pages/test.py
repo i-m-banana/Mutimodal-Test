@@ -17,26 +17,32 @@ import yaml
 from yaml import FullLoader
 
 from .. import config
-from ..qt import (
-    QEasingCurve,
+from PyQt5.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QMetaObject,
     QPushButton,
-    QSize,
     QSizePolicy,
     QShortcut,
     QSpacerItem,
     QStackedWidget,
     QTextEdit,
-    QTimer,
     QVBoxLayout,
     QWidget,
+)
+from PyQt5.QtCore import (
+    QEasingCurve,
+    QMetaObject,
+    QSize,
+    QTimer,
     Qt,
+    QPropertyAnimation,
+    pyqtSignal,
+)
+from PyQt5.QtGui import (
     QBrush,
     QColor,
     QFont,
@@ -44,13 +50,11 @@ from ..qt import (
     QLinearGradient,
     QPainter,
     QPainterPath,
-    QPropertyAnimation,
-    pyqtSignal,
-    qta,
     QRegion,
     QBitmap,
     QPixmap,
 )
+import qtawesome as qta
 
 from ..utils.widgets import AudioLevelMeter, ScoreChartWidget
 from ..utils.responsive import scale, scale_size, scale_font

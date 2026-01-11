@@ -5,10 +5,11 @@ from __future__ import annotations
 import time
 
 from .. import config
-from ..qt import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QTimer,
-    Qt, QFont, QFrame, pyqtSignal, QKeyEvent
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
 )
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QKeyEvent
 from ..utils.responsive import scale, scale_font
 from ...utils_common.thread_process_manager import get_thread_manager
 from ...services.session_manager import SessionManager

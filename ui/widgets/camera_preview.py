@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 from ui.app import config
-from ui.app.qt import (
-    QColor,
-    QImage,
+from PyQt5.QtWidgets import (
     QLabel,
-    QPixmap,
-    QTimer,
-    Qt,
     QVBoxLayout,
     QWidget,
-    QPainter,
-    QFont,
-    cv2,
-    np,
 )
+from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtGui import QColor, QImage, QPixmap, QPainter, QFont
+import cv2
+import numpy as np
 
 
 class CameraPreviewWidget(QWidget):

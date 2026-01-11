@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from typing import Tuple
-from ..qt import QApplication, QScreen
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QScreen
 
 
 class ResponsiveScaler:

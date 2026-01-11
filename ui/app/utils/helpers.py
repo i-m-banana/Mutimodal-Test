@@ -17,8 +17,7 @@ def _get_callback_helper():
     """获取或创建回调辅助对象（必须在主线程中调用）"""
     global _callback_helper
     if _callback_helper is None:
-        from ..qt import QTimer
-        from PyQt5.QtCore import QObject, pyqtSignal
+        from PyQt5.QtCore import QTimer, QObject, pyqtSignal
         
         class CallbackHelper(QObject):
             """辅助类，用于从后台线程发送信号到主线程"""

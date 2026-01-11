@@ -20,18 +20,17 @@ from .config import (
     multidata_stop_collection,
     stop_recognition,
 )
-from .qt import (
+from PyQt5.QtWidgets import (
     QApplication,
     QLabel,
-    QKeySequence,
     QMainWindow,
     QShortcut,
-    QTimer,
-    Qt,
     QVBoxLayout,
     QWidget,
-    qta,
 )
+from PyQt5.QtCore import QTimer, Qt
+import qtawesome as qta
+from PyQt5.QtGui import QKeySequence
 from .utils.widgets import FadingStackedWidget
 from .utils.responsive import get_scaler, scale, scale_size
 from .pages.calibration import CalibrationPage
@@ -71,7 +70,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._setup_debug_shortcuts()
         
-        from .qt import QTimer
+        from PyQt5.QtCore import QTimer
         QTimer.singleShot(800, self._preload_camera)
 
         logger.info("应用程序主窗口初始化完成。")

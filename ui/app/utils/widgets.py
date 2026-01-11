@@ -6,27 +6,31 @@ import os
 from pathlib import Path
 
 from .. import config
-from ..qt import (
-    QBrush,
-    QColor,
+from PyQt5.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+    QStackedWidget,
+)
+from PyQt5.QtCore import (
     QEasingCurve,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    Qt,
+)
+from PyQt5.QtGui import (
+    QBrush,
+    QColor,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPixmap,
-    QPropertyAnimation,
-    QRect,
-    QRectF,
-    QSizePolicy,
-    Qt,
-    QVBoxLayout,
-    QWidget,
-    QStackedWidget,
 )
 
 

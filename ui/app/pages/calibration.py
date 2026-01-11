@@ -3,24 +3,21 @@
 from __future__ import annotations
 
 from .. import config
-from ..qt import (
-    QFont,
+from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QStackedLayout,
-    QTimer,
-    Qt,
     QVBoxLayout,
     QWidget,
-    pyqtSignal,
-    qta,
     QFrame,
     QGraphicsDropShadowEffect,
-    QColor,
 )
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QColor
+import qtawesome as qta
 from ..utils.helpers import init_camera
 from ..utils.responsive import scale, scale_font, scale_size
 from ...widgets.camera_preview import CameraPreviewWidget
