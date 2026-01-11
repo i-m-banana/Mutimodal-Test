@@ -61,6 +61,7 @@ from ..utils.responsive import scale, scale_size, scale_font
 from ...widgets.camera_preview import CameraPreviewWidget
 from ...widgets.schulte_grid import SchulteGridWidget
 from...widgets.score_page import ScorePage
+from ...widgets.navigation_bar import StageNavigationBar
 from .baseline_prompt import BaselinePromptPage
 from .sart_prompt import SARTPromptPage
 from ...services.backend_client import get_backend_client
@@ -69,7 +70,7 @@ from ...services.session_manager import SessionManager
 from ...utils_common.ui_thread_pool import get_ui_thread_pool
 
 # ---------------------------------------------------------------------------
-# 自定义圆形标签类
+# 自定义圆形标签类（已迁移到 navigation_bar.py，此处保留用于其他用途）
 # ---------------------------------------------------------------------------
 class CircleLabel(QLabel):
     """完美圆形的数字标签"""
@@ -633,122 +634,16 @@ class TestPage(QWidget):
 
     # --- UI 创建辅助方法 ---
     def _create_step_navigator(self):
-        """创建完整的阶段导航栏(包括基线、SART、文本、血压、舒尔特)"""
-        container = QWidget()
-        container.setObjectName("stepNavigator")  # 改用独特的名称避免与全局card样式冲突
-        # 设置圆角属性
-        container.setAttribute(Qt.WA_StyledBackground, True)
-        layout = QHBoxLayout(container)
-        # 增加上下内边距，让导航栏更高，圆角效果更明显
-        layout.setContentsMargins(scale(12), scale(8), scale(12), scale(8))
-        layout.setSpacing(scale(6))
+        """创建完整的阶段导航栏(使用独立组件)"""
+        # 创建导航栏组件
+        navigator = StageNavigationBar(self.all_stages, self)
+        navigator.stage_clicked.connect(self._on_stage_nav_clicked)
         
-        self.stage_buttons = {}  # 保存每个阶段的按钮引用
-        self.step_labels = []
-        self.step_opacity_effects = []
+        # 保存引用以便后续更新状态
+        self.stage_navigator = navigator
+        self.stage_buttons = navigator.stage_buttons  # 保持兼容性
         
-        # 设置渐变背景和圆角（独立样式，不受全局card影响）
-        # 导航栏高度 = scale(8)*2 + scale(45) ≈ 61px
-        # 圆角设置为30px，形成左右半圆效果
-        container.setStyleSheet("""
-            QWidget#stepNavigator {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #7FDBFF,
-                    stop:0.5 #A0E7FF,
-                    stop:1 #C0F0FF
-                );
-                border-radius: 30px;
-                border: none;
-            }
-        """)
-        
-        # 添加右下黑色阴影效果（悬浮效果）- 调整参数避免遮挡圆角
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)  # 减小模糊半径
-        shadow.setXOffset(3)      # 减小偏移
-        shadow.setYOffset(3)
-        shadow.setColor(QColor(0, 0, 0, 80))  # 降低透明度
-        container.setGraphicsEffect(shadow)
-        
-        # 创建所有阶段的导航按钮(包括"分数展示")
-        display_stages = self.all_stages  # 显示所有5个阶段
-        
-        for i, stage_name in enumerate(display_stages):
-            # 创建横向布局容器：数字在左，文字在右
-            stage_widget = QWidget()
-            stage_widget.setStyleSheet("background: transparent;")
-            stage_layout = QHBoxLayout(stage_widget)
-            stage_layout.setContentsMargins(scale(10), scale(4), scale(10), scale(4))
-            stage_layout.setSpacing(scale(8))
-            stage_layout.setAlignment(Qt.AlignCenter)
-            
-            # 数字标签（使用自定义圆形标签）- 老年模式字体更大
-            size = scale(45)
-            number_label = CircleLabel(str(i + 1))
-            number_label.setObjectName("stageNumber")
-            number_label.setFixedSize(size, size)
-            number_label.setStyleSheet("""
-                QLabel#stageNumber {
-                    background-color: rgb(227, 247, 253);
-                    border: none;
-                    font-size: 30px;
-                    font-weight: bold;
-                    color: rgb(77, 171, 201);
-                }
-            """)
-            
-            # 阶段名称标签（老年模式 - 超大字号）
-            name_label = QLabel(stage_name)
-            name_label.setObjectName("stageName")
-            name_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            name_label.setStyleSheet("""
-                QLabel#stageName {
-                    background: transparent;
-                    font-size: 32px;
-                    font-weight: bold;
-                    color: rgb(77, 171, 201);
-                }
-            """)
-            
-            stage_layout.addWidget(number_label, 0, Qt.AlignCenter)
-            stage_layout.addWidget(name_label, 0, Qt.AlignLeft | Qt.AlignVCenter)
-            
-            # 创建可点击按钮（透明覆盖层）
-            stage_btn = QPushButton(stage_widget)
-            stage_btn.setObjectName("stageNavButton")
-            stage_btn.setCursor(Qt.PointingHandCursor)
-            stage_btn.setStyleSheet("""
-                QPushButton#stageNavButton {
-                    background: transparent;
-                    border: none;
-                }
-            """)
-            stage_btn.setGeometry(0, 0, stage_widget.width(), stage_widget.height())
-            
-            # 绑定点击事件
-            stage_btn.clicked.connect(lambda checked, s=stage_name: self._on_stage_nav_clicked(s))
-            
-            # 保存引用（用于后续更新状态）
-            self.stage_buttons[stage_name] = {
-                'widget': stage_widget,
-                'number': number_label,
-                'name': name_label,
-                'button': stage_btn
-            }
-            
-            layout.addWidget(stage_widget, 1)
-            
-            # 添加分隔线(最后一个不加)
-            if i < len(display_stages) - 1:
-                line = QFrame()
-                line.setFrameShape(QFrame.VLine)
-                line.setFixedWidth(2)
-                line.setFixedHeight(scale(45))
-                line.setStyleSheet("background-color: rgba(255, 255, 255, 0.5); border: none;")
-                layout.addWidget(line, 0, Qt.AlignCenter)
-        
-        return container
+        return navigator
 
     def _on_stage_nav_clicked(self, stage_name: str):
         """处理阶段导航点击事件 - 支持自由跳转"""
@@ -942,7 +837,7 @@ class TestPage(QWidget):
             self.btn_finish.setVisible(False)
 
     def _update_stage_nav_status(self):
-        """更新导航栏的视觉状态"""
+        """更新导航栏的视觉状态（使用组件方法）"""
         # 根据answer_stack的当前索引判断当前阶段
         current_index = self.answer_stack.currentIndex()
 
@@ -957,66 +852,10 @@ class TestPage(QWidget):
         }
 
         current_stage = index_to_stage.get(current_index, None)
-
-        for stage_name, components in self.stage_buttons.items():
-            number_label = components['number']
-            name_label = components['name']
-
-            is_current = (stage_name == current_stage)
-            is_completed = self.stage_completed.get(stage_name, False)
-
-            # 根据状态设置样式（圆形无边框设计）
-            if is_current:
-                # 当前阶段：水绿色填充圆圈，白色数字
-                number_label.setStyleSheet("""
-                    QLabel#stageNumber {
-                        background-color: rgb(77, 171, 201);
-                        border: none;
-                        font-size: 24px;
-                        font-weight: bold;
-                        color: white;
-                    }
-                """)
-                name_label.setStyleSheet("""
-                    QLabel#stageName {
-                        background: transparent;
-                        font-size: 24px;
-                        font-weight: bold;
-                        color: rgb(77, 171, 201);
-                    }
-                """)
-            else:
-                # 其他阶段（无论是否完成）：浅青绿色圆圈，水绿色数字
-                # 完成后只有文字变绿，数字底色保持浅青绿色
-                number_label.setStyleSheet("""
-                    QLabel#stageNumber {
-                        background-color: rgb(227, 247, 253);
-                        border: none;
-                        font-size: 24px;
-                        font-weight: bold;
-                        color: rgb(77, 171, 201);
-                    }
-                """)
-
-                # 文字颜色：已完成的变绿色，未开始的保持水绿色
-                if is_completed:
-                    name_label.setStyleSheet("""
-                        QLabel#stageName {
-                            background: transparent;
-                            font-size: 24px;
-                            font-weight: bold;
-                            color: #4CAF50;
-                        }
-                    """)
-                else:
-                    name_label.setStyleSheet("""
-                        QLabel#stageName {
-                            background: transparent;
-                            font-size: 24px;
-                            font-weight: bold;
-                            color: rgb(77, 171, 201);
-                        }
-                    """)
+        
+        # 使用导航栏组件的更新方法
+        if hasattr(self, 'stage_navigator'):
+            self.stage_navigator.update_stage_status(current_stage)
 
     def mark_stage_completed(self, stage_name: str):
         """标记阶段为已完成
@@ -1037,6 +876,11 @@ class TestPage(QWidget):
         mapped_stage = name_mapping.get(stage_name, stage_name)
 
         self.stage_completed[mapped_stage] = True
+        
+        # 同时更新导航栏组件的完成状态
+        if hasattr(self, 'stage_navigator'):
+            self.stage_navigator.mark_stage_completed(mapped_stage)
+        
         logger.debug(f"✅ 阶段已完成: {stage_name} → {mapped_stage}")
         self._update_stage_nav_status()
 
