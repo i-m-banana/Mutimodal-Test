@@ -86,7 +86,7 @@ class CircleLabel(QLabel):
         self.setMask(region)
 
 # ---------------------------------------------------------------------------
-# Configuration exports (preserve legacy names for migrated code)
+# Configuration exports
 # ---------------------------------------------------------------------------
 logger = config.logger
 DEBUG_MODE = config.DEBUG_MODE
@@ -95,7 +95,6 @@ HAS_MULTIMODAL = config.HAS_MULTIMODAL
 HAS_SPEECH_RECOGNITION = config.HAS_SPEECH_RECOGNITION
 HAS_BP_BACKEND = config.HAS_BP_BACKEND
 BP_SIMULATION = config.BP_SIMULATION
-HAS_MAIBOBO_BACKEND = config.HAS_MAIBOBO_BACKEND  # 保留旧常量名供兼容
 SCORES_CSV_FILE = config.SCORES_CSV_FILE
 add_audio_for_recognition = config.add_audio_for_recognition
 clear_recognition_results = config.clear_recognition_results
@@ -167,15 +166,11 @@ class TestPage(QWidget):
 发现可疑人员或物品，应及时报告机组成员。不得传播虚假信息、制造恐慌。
 
 请勿携带或在机上使用禁止类电子设备，遵守所有安全广播和公告要求。"""
-        # 兼容旧语音识别接口：保留 questions 列表结构
-        self.questions = [self.reading_text_content]
         
         # 朗读状态标志
         self.reading_completed = False
         
         self.thread_pool = get_ui_thread_pool()
-        
-        self.current_question = 0  # 保留变量名兼容性，实际已无多个问题
         self.current_step = 0
 
         self.setAutoFillBackground(True)
@@ -211,11 +206,9 @@ class TestPage(QWidget):
         }
 
         self.current_step = 0
-        self.current_question = 0  # 保留兼容性，但不再有多个问题
         self.is_recording = False
         self.score = None  # 将在舒尔特测试完成后计算
         self.history_scores = []
-        # 音频录制已转移到AVCollector，这里只保留定时器用于更新UI
         self.audio_timer = QTimer(self)
         self.camera_preview: Optional[CameraPreviewWidget] = None
         self.schulte_camera_preview: Optional[CameraPreviewWidget] = None
@@ -522,10 +515,6 @@ class TestPage(QWidget):
         self.step_container = self._create_step_navigator()
         self.main_layout.addWidget(self.step_container)
 
-        # 问题进度条
-        self.question_container = self._create_question_progress_bar()
-        self.main_layout.addWidget(self.question_container)
-
         # 主内容区
         content_container = self._create_main_content_area()
         self.main_layout.addWidget(content_container, 1)
@@ -627,36 +616,18 @@ class TestPage(QWidget):
         except Exception as e:
             logger.warning(f"注册调试快捷键失败: {e}")
 
-    # =========================================================================
-    # ⚠️ 已废弃的数据库方法 - 已迁移到 DatabaseService
-    # =========================================================================
-    # 以下方法已迁移到 ui/services/database_service.py，请使用：
-    # - self.db_service.create_test_record(username) 替代 _ensure_db_row()
-    # - self.db_service.update_test_record(payload, context) 替代 _queue_db_update()
-    # - self.db_service.update_test_record_with_callback() 替代 _queue_db_update_with_callback()
-    # 保留这些方法仅为了向后兼容，避免一次修改太多调用点
-    # =========================================================================
-    
-    def _disable_db_writes(self, reason: str):
-        """[已废弃] 使用 self.db_service.disable_writes(reason)"""
-        self.db_service.disable_writes(reason)
-        if hasattr(self, 'score_page') and self.score_page:
-            try:
-                self.score_page.set_force_mock(True)
-            except Exception as exc:
-                logger.debug("切换分数页数据模式失败: %s", exc)
-
-    def _ensure_db_row(self):
-        """[已废弃] 使用 self.db_service.create_test_record(username)"""
-        self.db_service.create_test_record(self.current_user)
-
+    # --- 数据库操作包装方法 ---
     def _queue_db_update(self, update_payload: dict, context: str) -> None:
-        """[已废弃] 使用 self.db_service.update_test_record()"""
+        """数据库更新包装器"""
         self.db_service.update_test_record(update_payload, context)
     
     def _queue_db_update_with_callback(self, update_payload: dict, context: str, on_success=None) -> None:
-        """[已废弃] 使用 self.db_service.update_test_record_with_callback()"""
+        """带回调的数据库更新包装器"""
         self.db_service.update_test_record_with_callback(update_payload, on_success, context)
+    
+    def _handle_db_failure(self, error: Exception, context: str) -> None:
+        """数据库错误处理"""
+        logger.error(f"{context}: {error}", exc_info=True)
 
     # --- UI 创建辅助方法 ---
     def _create_step_navigator(self):
@@ -671,8 +642,8 @@ class TestPage(QWidget):
         layout.setSpacing(scale(6))
         
         self.stage_buttons = {}  # 保存每个阶段的按钮引用
-        self.step_labels = []  # 兼容旧代码
-        self.step_opacity_effects = []  # 兼容旧代码
+        self.step_labels = []
+        self.step_opacity_effects = []
         
         # 设置渐变背景和圆角（独立样式，不受全局card影响）
         # 导航栏高度 = scale(8)*2 + scale(45) ≈ 61px
@@ -776,36 +747,6 @@ class TestPage(QWidget):
                 layout.addWidget(line, 0, Qt.AlignCenter)
         
         return container
-
-    def _create_question_progress_bar(self):
-        """创建问题进度条（朗读模式下不显示，返回空容器）"""
-        container = QWidget()
-        # 不设置 card 样式，避免显示白条
-        container.setStyleSheet("background: transparent;")
-        container.setVisible(False)  # 🔄 朗读模式下隐藏进度条
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)  # 移除边距
-
-        self.question_dots = []  # 保留空列表以避免其他代码报错
-        return container
-
-    def mark_question_done(self, index: int):
-        """将指定题目标记为绿色对号"""
-        if 0 <= index < len(self.question_dots):
-            dot = self.question_dots[index]
-            # 设置绿色对号 pixmap
-            pixmap = qta.icon('fa5s.check', color='#4CAF50').pixmap(20, 20)
-            dot.setPixmap(pixmap)
-
-            # 淡入动画
-            effect = QGraphicsOpacityEffect(dot)
-            dot.setGraphicsEffect(effect)
-            anim = QPropertyAnimation(effect, b"opacity", self)
-            anim.setDuration(400)
-            anim.setStartValue(0)
-            anim.setEndValue(1)
-            anim.start()
-            self._dot_animations.append(anim)  # 保留引用
 
     def _on_stage_nav_clicked(self, stage_name: str):
         """处理阶段导航点击事件 - 支持自由跳转"""
@@ -2696,20 +2637,6 @@ class TestPage(QWidget):
                         """)
                     text_label.setStyleSheet("color: #757575; font-weight: normal;")
 
-        self.question_container.setVisible(self.current_step == 0)
-        if self.current_step == 0:
-            for i, dot in enumerate(self.question_dots):
-                if i < self.current_question:
-                    self.mark_question_done(i)
-                elif i == self.current_question:
-                    icon = qta.icon('fa5s.circle', color='#212121')
-                    dot.setPixmap(icon.pixmap(24, 24))
-                    dot.setAlignment(Qt.AlignCenter)
-                else:
-                    icon = qta.icon('fa5s.circle', color='#212121')
-                    dot.setPixmap(icon.pixmap(24, 24))
-                    dot.setAlignment(Qt.AlignCenter)
-
         main_window = self.window()
         brain_load_bar = getattr(main_window, "brain_load_bar", None)
         if brain_load_bar:
@@ -2822,7 +2749,6 @@ class TestPage(QWidget):
         # 摄像头预览在 AV 采集准备好后启动
         self.audio_timer.start(50)
         self.current_step = 0
-        self.current_question = 0
         self.btn_finish.setVisible(False)
 
         # 🔄 重置朗读录音状态
@@ -3002,16 +2928,10 @@ class TestPage(QWidget):
 
                     if os.path.exists(latest_audio):
                         try:
-                            question_idx = self.current_question + 1
-                            question_text = (
-                                self.questions[self.current_question]
-                                if 0 <= self.current_question < len(self.questions)
-                                else ""
-                            )
                             add_audio_for_recognition(
                                 latest_audio,
-                                question_idx,
-                                question_text,
+                                1,  # 只有一段朗读文本
+                                self.reading_text_content,
                             )
                         except Exception as e:
                             logger.error("加入语音识别队列失败: %s", e)
