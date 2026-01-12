@@ -64,6 +64,8 @@ from...widgets.score_page import ScorePage
 from ...widgets.navigation_bar import StageNavigationBar
 from .baseline_prompt import BaselinePromptPage
 from .sart_prompt import SARTPromptPage
+from .emotion import EmotionDetectionPage
+from .schulte import SchultePage
 from ...services.backend_client import get_backend_client
 from ...services.database_service import DatabaseService
 from ...services.session_manager import SessionManager
@@ -527,9 +529,7 @@ class TestPage(QWidget):
     def _connect_signals(self):
         """连接所有控件的信号到槽函数。"""
         self.audio_timer.timeout.connect(self._process_audio)
-        self.btn_next.clicked.connect(self._next_step_or_question)
         self.btn_finish.clicked.connect(self._finish_test)
-        self.btn_mic.clicked.connect(self._toggle_recording)
         
         # 连接疲劳度评估结果信号（只接收离线评估的最终结果）
         from ...services.backend_client import get_backend_client
@@ -1143,169 +1143,18 @@ class TestPage(QWidget):
         page_sart_prompt = SARTPromptPage(self)
         page_sart_prompt.start_clicked.connect(self._on_start_sart_clicked)
         self.answer_stack.addWidget(page_sart_prompt)
-        # 保存按钮引用（用于后门快捷键）
         self.btn_start_sart = page_sart_prompt.btn_start
         
-        # 🔄 朗读录音页面 - 使用卡片容器(模仿舒尔特右边框)
-        page_qna = QWidget()
-        # ✅ 设置透明背景，与舒尔特页面保持一致
-        page_qna.setStyleSheet("QWidget { background-color: transparent; }")
-        layout_qna = QVBoxLayout(page_qna)
-        layout_qna.setAlignment(Qt.AlignCenter)
-        layout_qna.setSpacing(scale(20))
-        layout_qna.setContentsMargins(scale(20), scale(20), scale(20), scale(20))
+        page_emotion = EmotionDetectionPage(self.reading_text_content, self)
+        page_emotion.recording_requested.connect(self._toggle_recording)
+        page_emotion.next_clicked.connect(self._next_step_or_question)
+        self.answer_stack.addWidget(page_emotion)
+        self.lbl_reading_text = page_emotion.lbl_reading_text
+        self.btn_mic = page_emotion.btn_mic
+        self.lbl_recording_status = page_emotion.lbl_recording_status
+        self.audio_level = page_emotion.audio_level
+        self.btn_next = page_emotion.btn_next
 
-        # 创建白色卡片容器(模仿舒尔特右边框样式)
-        card_container = QFrame()
-        card_container.setObjectName("emotionCardContainer")
-        # 🔧 修复：设置最大宽度限制，防止被内容撑得过宽
-        card_container.setMaximumWidth(scale(1200))  # 限制最大宽度
-        card_container.setStyleSheet("""
-            QFrame#emotionCardContainer {
-                background-color: #ffffff;
-                border: 2px solid #e0e0e0;
-                border-radius: 25px;
-                padding: 20px;
-            }
-        """)
-        
-        # 添加底部阴影效果(模仿舒尔特框)
-        card_shadow = QGraphicsDropShadowEffect()
-        card_shadow.setBlurRadius(15)
-        card_shadow.setXOffset(0)
-        card_shadow.setYOffset(5)
-        card_shadow.setColor(QColor(0, 0, 0, 60))
-        card_container.setGraphicsEffect(card_shadow)
-        
-        card_layout = QVBoxLayout(card_container)
-        card_layout.setSpacing(scale(20))
-        card_layout.setContentsMargins(scale(15), scale(15), scale(15), scale(15))
-
-        # 标题：朗读文本(老年模式 - 超大字体)
-        title_label = QLabel("📖 请朗读以下文本")
-        title_label.setObjectName("h1")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_font = QFont()
-        title_font.setPointSize(80)  # ✅ 从32增大到80，更适合老年人
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        card_layout.addWidget(title_label)
-
-        # 文本显示区域（可滚动的文本框）
-        self.lbl_reading_text = QTextEdit()
-        self.lbl_reading_text.setReadOnly(True)
-        self.lbl_reading_text.setObjectName("readingTextDisplay")
-        self.lbl_reading_text.setMinimumWidth(scale(900))
-        self.lbl_reading_text.setMinimumHeight(scale(500))  # ✅ 从300增加到350，给更大字体更多空间
-        self.lbl_reading_text.setMaximumHeight(scale(500))  # ✅ 从400增加到500
-        
-        # 设置文本样式(老年模式 - 更大字体)
-        text_font = QFont()
-        text_font.setPointSize(28)  # ✅ 从20增大到28，显著提升可读性
-        self.lbl_reading_text.setFont(text_font)
-        self.lbl_reading_text.setStyleSheet("""
-            QTextEdit#readingTextDisplay {
-                background-color: #f8f9fa;
-                border: 2px solid #dee2e6;
-                border-radius: 10px;
-                padding: 38px;  
-                line-height: 1.4;  
-                color: #212529;
-                font-size: 27px;
-            }
-        """)
-        
-        # 设置文本内容
-        self.lbl_reading_text.setPlainText(self.reading_text_content)
-        self.lbl_reading_text.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        
-        card_layout.addWidget(self.lbl_reading_text, 0, Qt.AlignCenter)
-
-        # 控制区域 - 横向布局(左:麦克风+音量条, 右:完成录音按钮)
-        control_container = QWidget()
-        control_layout = QHBoxLayout(control_container)
-        control_layout.setSpacing(scale(40))
-        control_layout.setAlignment(Qt.AlignCenter)
-        
-        # 左侧:麦克风按钮、状态和音量条(垂直排列)
-        left_control = QWidget()
-        left_layout = QVBoxLayout(left_control)
-        left_layout.setSpacing(scale(15))
-        left_layout.setAlignment(Qt.AlignCenter)
-
-        # 麦克风按钮
-        self.btn_mic = QPushButton()
-        self.btn_mic.setObjectName("micButtonCallToAction")
-        self.btn_mic.setFixedSize(130, 130)
-        self.btn_mic.setIconSize(QSize(60, 60))
-        self.btn_mic.setCursor(Qt.PointingHandCursor)
-        self.btn_mic.setIcon(qta.icon('fa5s.microphone-alt', color='white'))
-
-        # 录音状态标签(老年模式 - 更大字体)
-        self.lbl_recording_status = QLabel("点击录音按钮开始朗读并录音")
-        self.lbl_recording_status.setObjectName("statusLabel")
-        self.lbl_recording_status.setAlignment(Qt.AlignCenter)
-        status_font = QFont()
-        status_font.setPointSize(16)
-        self.lbl_recording_status.setFont(status_font)
-        
-        # 音量显示(放在麦克风下面)
-        self.audio_level = AudioLevelMeter()
-        self.audio_level.setFixedWidth(350)
-
-        left_layout.addWidget(self.btn_mic, 0, Qt.AlignCenter)
-        left_layout.addWidget(self.lbl_recording_status, 0, Qt.AlignCenter)
-        left_layout.addWidget(self.audio_level, 0, Qt.AlignCenter)
-        
-        # 右侧:完成录音按钮(变大,与左侧对齐)
-        right_control = QWidget()
-        right_layout = QVBoxLayout(right_control)
-        right_layout.setSpacing(scale(10))
-        right_layout.setAlignment(Qt.AlignCenter)
-        
-        # 完成录音按钮(增大尺寸)
-        self.btn_next = QPushButton("完成录音")
-        self.btn_next.setObjectName("successButton")
-        self.btn_next.setIcon(qta.icon('fa5s.arrow-right'))
-        self.btn_next.setFixedSize(scale(280), scale(90))  # 从200x70增加到280x90,更大更醒目
-        self.btn_next.setStyleSheet("""
-            QPushButton#successButton {
-                background-color: #5DADE2;
-                color: white;
-                border: none;
-                border-radius: 10px;
-                font-size: 28px;
-                font-weight: bold;
-            }
-            QPushButton#successButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton#successButton:pressed {
-                background-color: #3d8b40;
-            }
-            QPushButton#successButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
-        # ❌ 不要在这里连接信号！已在 _connect_signals() 中连接
-        # self.btn_next.clicked.connect(self._next_step_or_question)
-        self.btn_next.setEnabled(False)
-        right_layout.addWidget(self.btn_next, 0, Qt.AlignCenter)
-
-        control_layout.addWidget(left_control)
-        control_layout.addWidget(right_control)
-        
-        card_layout.addWidget(control_container)
-        
-        # 将卡片添加到主页面
-        layout_qna.addStretch(1)
-        layout_qna.addWidget(card_container, 0, Qt.AlignCenter)
-        layout_qna.addStretch(1)
-
-        self.answer_stack.addWidget(page_qna)
-
-        # 血压测试页面
         page_blood_pressure = self._create_blood_pressure_page()
         self.answer_stack.addWidget(page_blood_pressure)
 
@@ -1890,8 +1739,6 @@ class TestPage(QWidget):
                         font-weight: bold;
                     }
                 """)
-                self.btn_next.setText("进入舒特格测试")
-                self.btn_next.setEnabled(True)
 
                 logger.info(f"血压测试完成: 收缩压={systolic}, 舒张压={diastolic}, 脉搏={self.bp_results['pulse']}")
 
@@ -2114,67 +1961,21 @@ class TestPage(QWidget):
         super().keyPressEvent(event)
 
     def _create_schulte_page(self):
-        page = QWidget()
-        main_layout = QHBoxLayout(page)
-        main_layout.setContentsMargins(scale(8), 0, scale(8), 0)
-        main_layout.setSpacing(scale(20))
-
-        # ✅ 左侧弹簧
-        main_layout.addStretch(1)
-
-        # 左列：摄像头
         self.schulte_camera_widget = self._create_camera_view_for_schulte()
-        cam_width = scale_size(560, 420)[0]
-        self.schulte_camera_widget.setMaximumWidth(cam_width)
-        self.schulte_camera_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-        main_layout.addWidget(self.schulte_camera_widget, 0, Qt.AlignRight)
-
-        # 右列：舒尔特方格
-        self.schulte_container = QWidget()
-        schulte_layout = QVBoxLayout(self.schulte_container)
-        schulte_layout.setContentsMargins(0, 0, 0, 0)
-        schulte_layout.setSpacing(scale(10))
-
-        self.schulte_widget = SchulteGridWidget(self.current_user)
-        self.schulte_widget.test_completed.connect(self._on_schulte_completed)
-        self.schulte_widget.test_result_ready.connect(self._on_schulte_result)
-        schulte_layout.addWidget(self.schulte_widget, 0, Qt.AlignCenter)
-
-        main_layout.addWidget(self.schulte_container, 0, Qt.AlignLeft)
-
-        # ✅ 右侧弹簧
-        main_layout.addStretch(1)
-
+        page = SchultePage(self.current_user, self.schulte_camera_widget, self)
+        page.test_completed.connect(self._on_schulte_completed)
+        page.test_result_ready.connect(self._on_schulte_result)
+        self.schulte_widget = page.schulte_widget
         return page
 
     def _reinit_schulte_widget(self):
         """重新初始化舒尔特widget（每次进入页面时调用，避免状态卡住）"""
-        if not hasattr(self, 'schulte_container') or not hasattr(self, 'schulte_widget'):
-            logger.warning("舒尔特容器或widget不存在，跳过重新初始化")
-            return
-        
-        try:
-            # 获取布局
-            layout = self.schulte_container.layout()
-            if layout is None:
-                logger.warning("舒尔特容器没有布局")
-                return
-            
-            # 移除旧的widget
-            layout.removeWidget(self.schulte_widget)
-            self.schulte_widget.deleteLater()
-            
-            # 创建新的widget
-            self.schulte_widget = SchulteGridWidget(self.current_user)
-            self.schulte_widget.test_completed.connect(self._on_schulte_completed)
-            self.schulte_widget.test_result_ready.connect(self._on_schulte_result)
-            
-            # 添加到布局
-            layout.addWidget(self.schulte_widget)
-            
-            logger.info("✅ 舒尔特widget已重新初始化")
-        except Exception as e:
-            logger.error(f"❌ 重新初始化舒尔特widget失败: {e}", exc_info=True)
+        if hasattr(self, 'page_schulte') and hasattr(self.page_schulte, 'reinit_widget'):
+            self.page_schulte.reinit_widget()
+            self.schulte_widget = self.page_schulte.schulte_widget
+            logger.info("✅ 舒尔特widget已通过SchultePage重新初始化")
+        else:
+            logger.warning("SchultePage不存在或没有reinit_widget方法")
 
     def _create_score_page(self):
         page_score = QWidget()
