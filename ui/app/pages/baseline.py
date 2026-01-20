@@ -12,7 +12,7 @@ from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QKeyEvent
 from ..utils.responsive import scale, scale_font
 from ...utils_common.ui_thread_pool import get_ui_thread_pool
-from ...services.session_manager import SessionManager
+from ...managers.session_manager import SessionManager
 
 HAS_MULTIMODAL = config.HAS_MULTIMODAL
 multidata_start_collection = config.multidata_start_collection

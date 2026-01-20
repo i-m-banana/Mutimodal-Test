@@ -21,7 +21,7 @@ import qtawesome as qta
 from ..utils.helpers import init_camera
 from ..utils.responsive import scale, scale_font, scale_size
 from ...widgets.camera_preview import CameraPreviewWidget
-from ...services.session_manager import SessionManager
+from ...managers.session_manager import SessionManager
 
 try:
     from ui.services.backend_proxy import eeg_get_diagnostics

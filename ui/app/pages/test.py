@@ -68,7 +68,8 @@ from .schulte import SchultePage
 from .blood_pressure import BloodPressurePage
 from ...services.backend_client import get_backend_client
 from ...services.database_service import DatabaseService
-from ...services.session_manager import SessionManager
+from ...managers.session_manager import SessionManager
+from ...managers.test_db_manager import TestDBManager
 from ...utils_common.ui_thread_pool import get_ui_thread_pool
 
 # ---------------------------------------------------------------------------
@@ -225,6 +226,9 @@ class TestPage(QWidget):
         self.db_service = DatabaseService(parent=self, username=self.current_user)
         if SKIP_DATABASE:
             self.db_service.disable_writes("用户设置了 SKIP_DATABASE，数据库写入已禁用")
+        
+        # ✅ 数据库管理器（封装所有数据库操作逻辑）
+        self.db_manager = TestDBManager(self.db_service, db_disabled=self._db_disabled)
 
         # 血压后端采集状态
         self.bp_simulation_enabled = BP_SIMULATION
@@ -599,17 +603,18 @@ class TestPage(QWidget):
             logger.warning(f"注册调试快捷键失败: {e}")
 
     # --- 数据库操作包装方法 ---
+
     def _queue_db_update(self, update_payload: dict, context: str) -> None:
-        """数据库更新包装器"""
-        self.db_service.update_test_record(update_payload, context)
+        """数据库更新包装器（向后兼容）"""
+        self.db_manager.queue_update(update_payload, context)
     
     def _queue_db_update_with_callback(self, update_payload: dict, context: str, on_success=None) -> None:
-        """带回调的数据库更新包装器"""
-        self.db_service.update_test_record_with_callback(update_payload, on_success, context)
+        """带回调的数据库更新包装器（向后兼容）"""
+        self.db_manager.queue_update_with_callback(update_payload, context, on_success)
     
     def _handle_db_failure(self, error: Exception, context: str) -> None:
-        """数据库错误处理"""
-        logger.error(f"{context}: {error}", exc_info=True)
+        """数据库错误处理（向后兼容）"""
+        self.db_manager.handle_failure(error, context)
 
     # --- UI 创建辅助方法 ---
     def _create_step_navigator(self):
@@ -2061,133 +2066,16 @@ class TestPage(QWidget):
             logger.warning(f"关闭摄像头时出现问题: {e}")
 
     def _persist_av_paths_to_db(self):
-        """保存音视频路径到数据库（使用更新而不是插入，避免重复创建记录）"""
-        if self._db_disabled:
-            return
-
-        try:
-            update_payload = {
-                "video": list(self._video_paths),
-                "audio": list(self._audio_paths),
-            }
-            
-            logger.debug(f"准备保存音视频路径: {len(self._video_paths)} 视频, {len(self._audio_paths)} 音频")
-            
-            # 使用排队更新机制，如果记录不存在会自动创建
-            self._queue_db_update(update_payload, "保存音视频路径失败")
-            
-            logger.info("✅ 音视频路径已加入数据库更新队列")
-            
-        except Exception as e:
-            logger.exception(f"❌ 保存音视频路径时发生异常: {e}")
+        """保存音视频路径到数据库"""
+        self.db_manager.persist_av_paths(self._video_paths, self._audio_paths)
 
     def _persist_multimodal_paths_to_db(self, *, clear_recognition_cache: bool = True):
-        """保存多模态数据文件路径到数据库（RGB/Depth/Eyetrack）
-        
-        Args:
-            clear_recognition_cache: 是否在写入后清理语音识别缓存。
-                朗读阶段结束时需要保留语音识别结果用于后续情绪分析，因此允许调用方禁用缓存清理。
-        """
-        try:
-            if not HAS_MULTIMODAL:
-                logger.warning("多模态数据采集模块不可用，跳过数据库写入。")
-                return
-
-            from ...services.backend_proxy import get_multimodal_file_paths
-            file_paths_result = get_multimodal_file_paths()
-            file_paths = file_paths_result.get("paths", {}) if isinstance(file_paths_result, dict) else {}
-
-            if not file_paths:
-                logger.warning("未获取到多模态数据文件路径")
-                return
-
-            # 根据需要清理语音识别结果缓存
-            if clear_recognition_cache:
-                try:
-                    clear_recognition_results()
-                    logger.debug("已清理语音识别结果缓存")
-                except Exception as e:
-                    logger.debug(f"清理语音识别结果失败: {e}")
-
-            update_payload = {}
-            if file_paths.get('rgb'):
-                update_payload['rgb'] = file_paths.get('rgb')
-            if file_paths.get('depth'):
-                update_payload['depth'] = file_paths.get('depth')
-            if file_paths.get('eyetrack'):
-                update_payload['tobii'] = file_paths.get('eyetrack')
-
-            if not update_payload:
-                logger.debug("多模态文件路径为空，跳过数据库更新。")
-                return
-
-            self._queue_db_update(update_payload, "更新多模态数据路径到数据库失败")
-
-        except Exception as e:
-            logger.error(f"写入多模态数据路径到数据库失败: {e}")
+        """保存多模态数据文件路径到数据库（RGB/Depth/Eyetrack）"""
+        self.db_manager.persist_multimodal_paths(clear_recognition_cache)
 
     def _persist_eeg_paths_to_db(self, eeg_paths: dict):
-        """保存 EEG 数据文件路径到数据库（增强版，带同步等待）"""
-        if self._db_disabled:
-            logger.debug("数据库已禁用，跳过 EEG 路径保存")
-            return
-        
-        try:
-            # 提取路径（兼容多种格式）
-            update_payload = {}
-            
-            # 格式 1: {'ch1_txt': 'path1', 'ch2_txt': 'path2'}
-            if 'ch1_txt' in eeg_paths or 'ch2_txt' in eeg_paths:
-                if eeg_paths.get('ch1_txt'):
-                    update_payload['eeg1'] = eeg_paths['ch1_txt']
-                if eeg_paths.get('ch2_txt'):
-                    update_payload['eeg2'] = eeg_paths['ch2_txt']
-            
-            # 格式 2: {'eeg_json_path': 'path1', 'eeg_csv_path': 'path2'}
-            elif 'eeg_json_path' in eeg_paths or 'eeg_csv_path' in eeg_paths:
-                if eeg_paths.get('eeg_json_path'):
-                    update_payload['eeg1'] = eeg_paths['eeg_json_path']
-                if eeg_paths.get('eeg_csv_path'):
-                    update_payload['eeg2'] = eeg_paths['eeg_csv_path']
-            
-            # 格式 3: 列表形式 ['path1', 'path2']
-            elif isinstance(eeg_paths, list):
-                if len(eeg_paths) > 0 and eeg_paths[0]:
-                    update_payload['eeg1'] = eeg_paths[0]
-                if len(eeg_paths) > 1 and eeg_paths[1]:
-                    update_payload['eeg2'] = eeg_paths[1]
-            
-            if not update_payload:
-                logger.warning(f"⚠️ EEG 路径为空或格式不支持: {eeg_paths}")
-                return
-            
-            # logger.info(f"准备保存 EEG 路径: {update_payload}")
-            
-            # 如果数据库行还未创建，同步等待最多 3 秒
-            if not self.row_id:
-                logger.info("⏳ 等待数据库行创建...")
-                import time
-                max_wait = 30  # 最多等待 3 秒 (30 * 0.1s)
-                wait_count = 0
-                while not self.row_id and wait_count < max_wait:
-                    time.sleep(0.1)
-                    wait_count += 1
-                
-                if not self.row_id:
-                    logger.error("❌ 等待数据库行创建超时，EEG 路径将被加入待处理队列")
-                    # 仍然尝试排队
-                    self._queue_db_update(update_payload, "保存 EEG 路径失败（等待超时）")
-                    return
-                else:
-                    logger.info(f"✅ 数据库行已创建 (row_id={self.row_id})")
-            
-            # 使用排队机制
-            self._queue_db_update(update_payload, "写入EEG路径到数据库失败")
-            logger.info(f"✅ EEG 路径已加入数据库更新队列 (row_id={self.row_id}): {update_payload}")
-            
-        except Exception as e:
-            logger.exception(f"❌ 保存 EEG 路径时发生异常: {e}")
-            self._handle_db_failure(e, "写入EEG路径到数据库失败")
+        """保存EEG数据文件路径到数据库"""
+        self.db_manager.persist_eeg_paths(eeg_paths, wait_for_row=True)
 
     def save_score(self):
         try:
@@ -2388,51 +2276,20 @@ class TestPage(QWidget):
             logger.error(f"发送分数到分数页面失败: {e}", exc_info=True)
     
     def _save_inference_scores_to_db(self, score_data: dict):
-        """
-        将疲劳检测、脑负荷、情绪推理结果保存到数据库
+        """将疲劳检测、脑负荷、情绪推理结果保存到数据库"""
+        # 定义成功回调，在数据库更新完成后刷新ScorePage
+        def _on_saved(result: dict):
+            logger.info(f"📊 推理结果已保存到数据库")
+            # 数据库更新完成后，通知ScorePage刷新历史数据
+            if hasattr(self, 'score_page') and hasattr(self.score_page, '_refresh_data'):
+                try:
+                    self.score_page._refresh_data()
+                    logger.debug("✅ 已通知ScorePage刷新历史数据")
+                except Exception as e:
+                    logger.warning(f"刷新ScorePage历史数据失败: {e}")
         
-        Args:
-            score_data: 包含所有分数的字典
-        """
-        try:
-            if self._db_disabled:
-                logger.debug("数据库已禁用,跳过保存推理结果")
-                return
-            
-            # 提取推理结果
-            update_payload = {
-                "fatigue_score": score_data.get("疲劳检测", 0),
-                "brain_load_score": score_data.get("脑负荷", 0),
-                "emotion_score": score_data.get("情绪", 0),
-            }
-            
-            # 过滤掉0值(表示没有数据)
-            update_payload = {k: v for k, v in update_payload.items() if v > 0}
-            
-            if not update_payload:
-                logger.debug("没有有效的推理结果需要保存到数据库")
-                return
-            
-            # 定义成功回调，在数据库更新完成后刷新ScorePage
-            def _on_saved(result: dict):
-                logger.info(f"📊 推理结果已保存到数据库: {update_payload}")
-                # 数据库更新完成后，通知ScorePage刷新历史数据
-                if hasattr(self, 'score_page') and hasattr(self.score_page, '_refresh_data'):
-                    try:
-                        self.score_page._refresh_data()
-                        logger.debug("✅ 已通知ScorePage刷新历史数据")
-                    except Exception as e:
-                        logger.warning(f"刷新ScorePage历史数据失败: {e}")
-            
-            # 更新数据库记录，并在成功后执行回调
-            self._queue_db_update_with_callback(
-                update_payload,
-                "保存推理结果到数据库失败",
-                on_success=_on_saved
-            )
-            
-        except Exception as e:
-            logger.error(f"保存推理结果到数据库失败: {e}", exc_info=True)
+        # 使用数据库管理器保存
+        self.db_manager.persist_inference_scores(score_data, on_success=_on_saved)
 
 
 __all__ = ["TestPage"]

@@ -41,7 +41,7 @@ from .pages.test import TestPage
 from ..widgets.brain_load_bar import BrainLoadBar
 from ..widgets.schulte_grid import SchulteGridWidget
 from ..utils_common.ui_thread_pool import get_ui_thread_pool
-from ..services.session_manager import SessionManager
+from ..managers.session_manager import SessionManager
 
 STYLE_PATH = config.BASE_DIR / "style.qss"
 

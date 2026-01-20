@@ -107,7 +107,7 @@ HAS_MAIBOBO_BACKEND = HAS_BP_BACKEND
 matplotlib.use("Qt5Agg")
 
 try:
-    from ..services.speech_recognition_service import (
+    from ..managers.speech_recognition_manager import (
         add_audio_for_recognition,
         get_recognition_results,
         clear_recognition_results,
