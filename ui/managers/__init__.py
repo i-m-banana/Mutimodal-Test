@@ -8,6 +8,7 @@
 
 from .test_db_manager import TestDBManager
 from .session_manager import SessionManager
+from .score_calculator import ScoreCalculator
 from .speech_recognition_manager import (
     add_audio_for_recognition,
     get_recognition_results,
@@ -18,6 +19,7 @@ from .speech_recognition_manager import (
 __all__ = [
     "TestDBManager",
     "SessionManager",
+    "ScoreCalculator",
     "add_audio_for_recognition",
     "get_recognition_results",
     "clear_recognition_results",

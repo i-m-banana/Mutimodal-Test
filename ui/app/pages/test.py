@@ -70,6 +70,7 @@ from ...services.backend_client import get_backend_client
 from ...services.database_service import DatabaseService
 from ...managers.session_manager import SessionManager
 from ...managers.test_db_manager import TestDBManager
+from ...managers.score_calculator import ScoreCalculator
 from ...utils_common.ui_thread_pool import get_ui_thread_pool
 
 # ---------------------------------------------------------------------------
@@ -195,7 +196,6 @@ class TestPage(QWidget):
         self.current_step = 0
         self.is_recording = False
         self.score = None  # 将在舒尔特测试完成后计算
-        self.history_scores = []
         self.audio_timer = QTimer(self)
         self.camera_preview: Optional[CameraPreviewWidget] = None
         self.schulte_camera_preview: Optional[CameraPreviewWidget] = None
@@ -206,6 +206,9 @@ class TestPage(QWidget):
         self.current_user = 'anonymous'
         
         self.session_manager = SessionManager.get_instance()
+        
+        # ✅ 分数计算管理器（封装所有分数计算和CSV存储逻辑）
+        self.score_calculator = ScoreCalculator(SCORES_CSV_FILE)
         
         # SART模式配置（从命令行参数读取）
         self.sart_mode = "short"  # 默认短时模式
@@ -598,7 +601,7 @@ class TestPage(QWidget):
         try:
             self._skip_shortcut = QShortcut(QKeySequence("Q"), self)
             self._skip_shortcut.setContext(Qt.ApplicationShortcut)
-            self._skip_shortcut.activated.connect(self._handle_debug_shortcut)
+            self._skip_shortcut.activated.connect(self._handle_shortcut)
         except Exception as e:
             logger.warning(f"注册调试快捷键失败: {e}")
 
@@ -1176,7 +1179,7 @@ class TestPage(QWidget):
         # 更新 test_running 标志
         self.bp_test_running = self.bp_page.test_running
 
-    def _handle_debug_shortcut(self) -> bool:
+    def _handle_shortcut(self) -> bool:
         try:
             if self.current_step == 0:
                 logger.info("🔧 测试后门触发：按下 Q，语音问答视为完成")
@@ -1289,8 +1292,9 @@ class TestPage(QWidget):
         
         # 调试后门
         if event.key() == Qt.Key_Q and not event.isAutoRepeat():
-            if self._handle_debug_shortcut():
+            if self._handle_shortcut():
                 return
+        
         super().keyPressEvent(event)
 
     def _create_schulte_page(self):
@@ -2078,28 +2082,17 @@ class TestPage(QWidget):
         self.db_manager.persist_eeg_paths(eeg_paths, wait_for_row=True)
 
     def save_score(self):
-        try:
-            if self.score is not None:
-                with open(SCORES_CSV_FILE, 'a', newline='', encoding='utf-8') as f:
-                    csv.writer(f).writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), self.score])
-                self.history_scores.append(self.score)
-                logger.debug(f"分数已保存到CSV文件: {self.score}")
-            else:
-                logger.warning("分数尚未计算，跳过CSV保存")
-        except Exception as e:
-            logger.error(f"保存分数时出错: {e}")
+        """保存分数到CSV文件（委托给score_calculator）"""
+        self.score_calculator.save_score_to_csv(self.score)
 
     def load_history_scores(self):
-        self.history_scores = []
-        if not os.path.exists(SCORES_CSV_FILE):
-            return
-        try:
-            with open(SCORES_CSV_FILE, 'r', encoding='utf-8') as f:
-                for row in csv.reader(f):
-                    if len(row) >= 2:
-                        self.history_scores.append(int(row[1]))
-        except Exception as e:
-            logger.error(f"读取历史分数时出错: {e}")
+        """从CSV文件加载历史分数（委托给score_calculator）"""
+        self.score_calculator.load_history_scores()
+    
+    @property
+    def history_scores(self):
+        """获取历史分数列表（从score_calculator获取）"""
+        return self.score_calculator.get_history_scores()
 
     def set_current_user(self, username: str):
         self.current_user = username or 'anonymous'
@@ -2142,113 +2135,25 @@ class TestPage(QWidget):
             logger.warning(f"处理舒特结果信号失败: {e}")
     
     def _calculate_average_scores(self) -> Dict[str, Optional[float]]:
-        """
-        计算疲劳度和脑负荷的平均分数
-        
-        ✅ 疲劳度数据来源（离线评估）：
-        - 使用后端离线评估的融合结果（RGB + EEG）
-        - 评估时机：朗读阶段结束后触发一次性评估
-        - 评估范围：基线校准 + SART实验 + 文本朗读
-        - 不包含：舒尔特方格阶段
-        
-        ✅ 脑负荷数据来源（实时推理）：
-        - 使用EEG实时推理结果
-        - 推理时机：EEG采集期间持续推理
-        - 累积方式：接收多次推理结果并计算平均值
-        - 覆盖范围：整个测试流程（基线校准 + SART + 朗读 + 舒尔特）
-        
-        Returns:
-            包含平均分数的字典:
-            {
-                "fatigue_avg": 疲劳度分数 (0-90, 离线评估一次),
-                "brain_load_avg": 脑负荷分数 (0-100, 实时推理平均值),
-                "fatigue_count": 1 (离线评估只返回一次),
-                "brain_load_count": N (实时推理累积次数)
-            }
-        """
-        result = {
-            "fatigue_avg": None,
-            "brain_load_avg": None,
-            "fatigue_count": 0,
-            "brain_load_count": 0
-        }
-        
-        # 使用离线疲劳度评估结果
-        if self._fatigue_assessment_result is not None:
-            result["fatigue_avg"] = self._fatigue_assessment_result
-            result["fatigue_count"] = 1
-            logger.debug(
-                f"疲劳度评估结果: {result['fatigue_avg']:.2f}/90 (离线评估)"
-            )
-        else:
-            logger.warning("未接收到疲劳度评估结果")
-        
-        # 计算脑负荷平均值
-        if self._brain_load_scores_list:
-            result["brain_load_avg"] = sum(self._brain_load_scores_list) / len(self._brain_load_scores_list)
-            result["brain_load_count"] = len(self._brain_load_scores_list)
-            logger.debug(
-                f"脑负荷平均分数: {result['brain_load_avg']:.2f} "
-                f"(基于 {result['brain_load_count']} 个样本)"
-            )
-        else:
-            logger.warning("没有收集到脑负荷分数数据")
-        
-        return result
+        """计算疲劳度和脑负荷的平均分数（委托给score_calculator）"""
+        return self.score_calculator.calculate_average_scores(
+            self._fatigue_assessment_result,
+            self._brain_load_scores_list
+        )
     
     def _prepare_score_data(self) -> Dict[str, any]:
-        """
-        准备传递给分数展示页面的所有数据
+        """准备传递给分数展示页面的所有数据（委托给score_calculator）"""
+        bp_results = self.bp_results if hasattr(self, 'bp_results') else None
         
-        Returns:
-            包含所有测试结果的字典
-        """
-        # 计算平均分数
-        avg_scores = self._calculate_average_scores()
-        
-        # 准备数据
-        score_data = {
-            # 疲劳检测 (平均值) - 仅朗读录音阶段测试
-            "疲劳检测": avg_scores["fatigue_avg"] if avg_scores["fatigue_avg"] is not None else 0,
-            
-            # 情绪分数 - 仅朗读录音阶段测试
-            "情绪": self._emotion_score if self._emotion_score is not None else 0,
-            
-            # 脑负荷 (平均值) - 贯穿整个流程
-            "脑负荷": avg_scores["brain_load_avg"] if avg_scores["brain_load_avg"] is not None else 0,
-            
-            # 舒尔特准确率 - 舒尔特测试阶段
-            "舒尔特准确率": self.schulte_accuracy if self.schulte_accuracy is not None else 0,
-            
-            # 血压数据 - 血压测试阶段
-            "收缩压": self.bp_results.get("systolic", 0) if hasattr(self, 'bp_results') else 0,
-            "舒张压": self.bp_results.get("diastolic", 0) if hasattr(self, 'bp_results') else 0,
-            "脉搏": self.bp_results.get("pulse", 0) if hasattr(self, 'bp_results') else 0,
-            
-            # 舒尔特综合得分
-            "舒尔特综合得分": self.score if self.score is not None else 0,
-            
-            # 🔄 阶段完成状态(用于控制分数页面显示) - 新命名
-            "_stage_completed": {
-                "多模态疲劳检测": self.stage_completed.get('多模态疲劳检测', False),
-                "情绪检测": self.stage_completed.get('情绪检测', False),
-                "血压脉搏检测": self.stage_completed.get('血压脉搏检测', False),
-                "舒尔特专注度检测": self.stage_completed.get('舒尔特专注度检测', False),
-            },
-            
-            # 元数据
-            "_metadata": {
-                "fatigue_sample_count": avg_scores["fatigue_count"],
-                "brain_load_sample_count": avg_scores["brain_load_count"],
-                "has_emotion_score": self._emotion_score is not None,
-                "has_schulte_result": self.schulte_accuracy is not None,
-                "has_bp_result": hasattr(self, 'bp_results') and self.bp_results.get('systolic') is not None,
-            }
-        }
-        
-        logger.debug(f"准备分数数据完成: {score_data}")
-        logger.debug(f"阶段完成状态: {score_data['_stage_completed']}")
-        return score_data
+        return self.score_calculator.prepare_score_data(
+            fatigue_result=self._fatigue_assessment_result,
+            brain_load_scores=self._brain_load_scores_list,
+            emotion_score=self._emotion_score,
+            schulte_accuracy=self.schulte_accuracy,
+            schulte_total_score=self.score,
+            bp_results=bp_results,
+            stage_completed=self.stage_completed
+        )
     
     def _send_scores_to_score_page(self):
         """
