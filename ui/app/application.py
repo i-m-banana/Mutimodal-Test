@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QTimer, Qt
 import qtawesome as qta
 from PyQt5.QtGui import QKeySequence
-from .utils.widgets import FadingStackedWidget
+from ..widgets.basic_widgets import FadingStackedWidget
 from .utils.responsive import get_scaler, scale, scale_size
 from .pages.calibration import CalibrationPage
 from .pages.login import LoginPage

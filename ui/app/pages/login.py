@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPainter, QLinearGradient, QColor, QPixmap
 import qtawesome as qta
-from ..utils.widgets import create_shadow_effect
+from ...widgets.basic_widgets import create_shadow_effect
 from ..utils.responsive import scale
 import csv
 from pathlib import Path

@@ -132,6 +132,3 @@ def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = N
 
 __all__ = ["init_camera"]
 
-
-
-__all__ = ["init_camera"]

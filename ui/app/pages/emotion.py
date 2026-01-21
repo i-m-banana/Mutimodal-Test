@@ -14,7 +14,7 @@ from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 import qtawesome as qta
 
-from ..utils.widgets import AudioLevelMeter
+from ...widgets.basic_widgets import AudioLevelMeter
 from ..utils.responsive import scale
 
 

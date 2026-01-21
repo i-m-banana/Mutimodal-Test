@@ -55,11 +55,11 @@ from PyQt5.QtGui import (
 )
 import qtawesome as qta
 
-from ..utils.widgets import AudioLevelMeter
+from ...widgets.basic_widgets import AudioLevelMeter
 from ..utils.responsive import scale, scale_size, scale_font
 from ...widgets.camera_preview import CameraPreviewWidget
 from ...widgets.schulte_grid import SchulteGridWidget
-from...widgets.score_page import ScorePage
+from .score_page import ScorePage
 from ...widgets.navigation_bar import StageNavigationBar
 from .baseline_prompt import BaselinePromptPage
 from .sart_prompt import SARTPromptPage
