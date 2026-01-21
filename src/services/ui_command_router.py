@@ -13,7 +13,6 @@ from .bp_service import BloodPressureService
 from .db_service import DatabaseService, DatabaseUnavailable
 from .eeg_service import EEGService
 from .multimodal_service import MultimodalService
-from .tts_service import TTSService
 from .emotion_service import EmotionService
 
 
@@ -33,7 +32,6 @@ class UICommandRouter:
             bus=bus,
             logger=self.logger.getChild("multimodal"),
         )
-        self.tts_service = TTSService(logger=self.logger.getChild("tts"))
         self.emotion_service = EmotionService(
             bus=bus,
             logger=self.logger.getChild("emotion")
@@ -58,7 +56,6 @@ class UICommandRouter:
         self.av_service.shutdown()
         self.bp_service.stop()
         self.eeg_service.stop_recording()
-        self.tts_service.shutdown()
 
     # ------------------------------------------------------------------
     def _on_command(self, event: Event) -> None:
@@ -120,17 +117,6 @@ class UICommandRouter:
             )
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.warning("音视频模块状态检测失败: %s", exc)
-
-        # try:
-        #     tts_diag = self.tts_service.diagnostics()
-        #     self.logger.info(
-        #         "语音播报 -> 默认后端=%s PowerShell=%s pyttsx3=%s",
-        #         tts_diag.get("default_backend"),
-        #         tts_diag.get("powershell_available"),
-        #         tts_diag.get("pyttsx3_available"),
-        #     )
-        # except Exception as exc:  # pragma: no cover - defensive
-        #     self.logger.warning("TTS 模块状态检测失败: %s", exc)
 
         try:
             db_diag = self.db_service.diagnostics()
@@ -226,8 +212,6 @@ class UICommandRouter:
             return self.multimodal_service.snapshot()
         if action == "multimodal.paths":
             return self.multimodal_service.file_paths()
-        if action == "tts.speak":
-            return self.tts_service.speak(body)
         if action == "eeg.start":
             # 直接传递所有body参数，避免重复传递save_dir
             return self.eeg_service.start_recording(**body)

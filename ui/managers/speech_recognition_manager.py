@@ -25,7 +25,7 @@ if os.name == "nt" and not os.getenv("KMP_DUPLICATE_LIB_OK"):
 from faster_whisper import WhisperModel
 from opencc import OpenCC
 
-from ui.utils_common.thread_process_manager import get_process_manager
+from ui.utils_common.ui_thread_pool import get_ui_thread_pool
 
 
 def _env_flag(name: str) -> bool:
@@ -139,18 +139,14 @@ class AsyncSpeechRecognizer:
 
     def _start(self) -> None:
         self._running = True
-        self.process_manager = get_process_manager()
-        self.task_id = self.process_manager.submit_inference_task(self._loop, task_name="语音识别")
-        try:
-            info = self.process_manager.get_process_info()
-            print(info)
-        except Exception as e:
-            print("有问题：", e)
-        try:
-            info = self.process_manager.get_process_pool_status()
-            print(info)
-        except Exception as e:
-            print("有问题：", e)
+        self.thread_pool = get_ui_thread_pool()
+        # 使用托管线程运行识别循环
+        thread = self.thread_pool.register_managed_thread(
+            name="speech-recognition-loop",
+            target=self._loop,
+            daemon=True
+        )
+        thread.start()
 
     def _loop(self) -> None:
         while self._running:
@@ -212,9 +208,9 @@ class AsyncSpeechRecognizer:
     def _stop(self) -> None:
         with self._lock:
             self._running = False
-        if self.task_id:
-            self.process_manager.cancel_task(self.task_id)
-            self.task_id = None
+        # 注销托管线程
+        if hasattr(self, 'thread_pool'):
+            self.thread_pool.unregister_managed_thread("speech-recognition-loop", timeout=2.0)
 
     def get_results(self) -> List[Dict]:
         with self._lock:

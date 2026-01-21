@@ -19,20 +19,12 @@ from .base_inference_model import BaseInferenceModel
 class EmotionV2Model(BaseInferenceModel):
     """使用 emotion_infer_v2 的二模态情绪模型。
 
-    约定输入：
-    - 多样本：
-      {
+    约定输入（多样本模式）：
+    {
         "multi_sample_mode": True,
         "video_paths": List[str],
         "audio_paths": List[str]
-      }
-    - 单样本：
-      {
-        "file_mode": True,
-        "video_path": str,
-        "audio_path": str
-      }
-    文本(text)将被忽略。
+    }
     """
 
     def initialize(self) -> None:
@@ -107,12 +99,11 @@ class EmotionV2Model(BaseInferenceModel):
         )
 
     def infer(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """执行情绪推理
+        """执行情绪推理（多样本模式）
         
-        多样本模式：调用 run_directory_inference 完成切分/批量推理/CSV输出/汇总
-        单样本模式：直接调用 infer_sample 进行单文件推理
+        调用 run_directory_inference 完成切分/批量推理/CSV输出/汇总
         """
-        from .emotion_v2.infer_v2 import infer_sample, run_directory_inference  # type: ignore
+        from .emotion_v2.infer_v2 import run_directory_inference  # type: ignore
         import tempfile
         import shutil
 
@@ -261,53 +252,8 @@ class EmotionV2Model(BaseInferenceModel):
                     except Exception:
                         pass
 
-        # 单样本模式：直接推理单个文件
-        if bool(data.get("file_mode")):
-            video_path = Path(str(data.get("video_path", "")))
-            audio_path = Path(str(data.get("audio_path", "")))
-            if not video_path.exists() or not audio_path.exists():
-                return {
-                    "status": "error",
-                    "error": f"文件不存在: video={video_path}, audio={audio_path}",
-                    "emotion_score": 0.0,
-                }
-
-            probs = infer_sample(
-                video_path,
-                audio_path,
-                device=self.device,
-                vision_processor=self.vision_processor,
-                audio_processor=self.audio_processor,
-                vision_model=self.vision_model,
-                audio_model=self.audio_model,
-                classifier=self.classifier,
-                vision_frames=self.vision_frames,
-                audio_sampling_rate=self.audio_sampling_rate,
-                audio_max_length=self.audio_max_length,
-            )
-            if probs is None:
-                return {"status": "error", "error": "样本推理失败", "emotion_score": 0.0}
-
-            probs_np = probs.detach().cpu().numpy()
-            pred = int(np.argmax(probs_np))
-            score = float(np.max(probs_np) * 100.0)  # 简单以最大概率映射 0-100
-
-            elapsed_ms = round((time.time() - start_ts) * 1000.0, 1)
-            self.logger.info(f"✅ 情绪(单样本): {score:.2f} [{label_names[pred]}] {elapsed_ms:.0f}ms")
-            
-            return {
-                "status": "success",
-                "emotion_score": round(score, 2),
-                "prediction": pred,
-                "prediction_label": label_names[pred] if pred < len(label_names) else str(pred),
-                "probabilities": probs_np.tolist(),
-                "inference_time_ms": elapsed_ms,
-                "inference_mode": "file",
-                "labels": label_names,
-            }
-
-        # 其他模式（例如 base64）不支持 —— 可按需扩展
-        return {"status": "error", "error": "不支持的输入模式", "emotion_score": 0.0}
+        # 未使用多样本模式
+        return {"status": "error", "error": "需要使用 multi_sample_mode", "emotion_score": 0.0}
 
     def cleanup(self) -> None:
         # 释放显存

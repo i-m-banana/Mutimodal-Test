@@ -1,24 +1,8 @@
-models:
-  - name: vision
-    class: models.torch_model.TorchModel
-    enabled: false
-    options:
-      jit: true
-  - name: text_ocr
-    class: models.onnx_model.ONNXModel
-    enabled: false
-    path: null
-    options:
-      providers:
-        - CPUExecutionProvider
-
-# === 推理模型配置（集成模式）===
-# 所有模型直接集成在后端进程中运行（高性能，共享资源）
+# === 推理模型配置 ===
 inference_models:
   # RGB疲劳度检测模型（基于视觉信号）
   - name: rgb_fatigue
     type: rgb_fatigue
-    mode: integrated
     enabled: true
     integrated:
       class: models.rgb_fatigue_model.RGBFatigueModel
@@ -30,7 +14,6 @@ inference_models:
   # 在SART测试结束后使用保存的EEG数据文件进行离线推理
   - name: eeg_fatigue
     type: eeg_fatigue
-    mode: integrated
     enabled: false  # 禁用实时推理
     integrated:
       class: models.eeg_fatigue_model.EEGFatigueModel
@@ -40,7 +23,6 @@ inference_models:
   # 情绪识别模型
   - name: emotion
     type: emotion
-    mode: integrated
     enabled: true
     integrated:
       class: models.emotion_v2_model.EmotionV2Model
@@ -50,7 +32,6 @@ inference_models:
   # 脑电分析模型（脑负荷）
   - name: eeg
     type: eeg
-    mode: integrated
     enabled: true
     integrated:
       class: models.eeg_model.EEGModel

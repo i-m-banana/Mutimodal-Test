@@ -10,13 +10,11 @@ from typing import Any, Dict, Iterable, Optional
 
 import yaml
 
-from ..constants import DEFAULT_COMPONENT_TIMEOUT, EventTopic, ModuleState
-from ..models.model_manager import ModelManager
+from ..constants import EventTopic, ModuleState
 from ..utils.logger import setup_logging
 from ..interfaces.base import BaseInterface
 from ..services.ui_command_router import UICommandRouter
 from .event_bus import EventBus
-from .system_monitor import SystemMonitor
 
 
 @dataclass
@@ -50,7 +48,7 @@ def _parse_components(configs: Iterable[Dict[str, Any]]) -> list[ComponentConfig
 
 
 class Orchestrator:
-    def __init__(self, *, system: Dict[str, Any], models: Iterable[Dict[str, Any]],
+    def __init__(self, *, system: Dict[str, Any],
                  interfaces: Iterable[Dict[str, Any]] | None = None,
                  inference_models: Iterable[Dict[str, Any]] | None = None,
                  log_root: Optional[str] = None) -> None:
@@ -58,11 +56,6 @@ class Orchestrator:
         self.logger = logging.getLogger("orchestrator")
         self.bus = EventBus()
         self.system_config = system
-    # 移除采集器和检测器相关配置
-        self.model_manager = ModelManager(models, logger=logging.getLogger("model"))
-        interval = float(system.get("heartbeat_interval", 5.0))
-        self.monitor = SystemMonitor(self.bus, interval=interval)
-    # 移除采集器和检测器相关属性
         self.interface_configs = _parse_components(interfaces or [])
         self.interfaces: Dict[str, BaseInterface] = {}
         self.command_router = UICommandRouter(self.bus, logger=logging.getLogger("ui.command"))
@@ -81,10 +74,9 @@ class Orchestrator:
         directory = Path(directory)
         system = cls._read_yaml(directory / "config" / "system.yaml")
         models_yaml = cls._read_yaml(directory / "config" / "models.yaml")
-        models = models_yaml.get("models", [])
         inference_models = models_yaml.get("inference_models", [])
         interfaces = cls._read_yaml(directory / "config" / "interfaces.yaml").get("interfaces", [])
-        return cls(system=system, models=models,
+        return cls(system=system,
                    interfaces=interfaces, inference_models=inference_models, log_root=directory / "logs")
 
     @staticmethod
@@ -111,7 +103,6 @@ class Orchestrator:
         if self._running:
             return
         self.logger.info(" 协调器启动")
-        self.model_manager.load_enabled()
         self._instantiate_interfaces()
         # 启动统一推理服务
         if self.inference_models_config:
@@ -139,9 +130,6 @@ class Orchestrator:
         except Exception as e:
             self.logger.error(f"启动疲劳度评估服务失败: {e}", exc_info=True)
         self.command_router.start()
-        # 移除采集器和检测器启动
-        if self.system_config.get("enable_monitor", True):
-            self.monitor.start()
         for interface in self.interfaces.values():
             try:
                 interface.start()
@@ -154,8 +142,6 @@ class Orchestrator:
         if not self._running:
             return
         self.logger.info("协调器关闭")
-        # 移除采集器和检测器停止
-        self.monitor.stop()
         
         # 停止推理服务
         if self.inference_service:
@@ -180,7 +166,6 @@ class Orchestrator:
             self.command_router.stop()
         except Exception:
             self.logger.exception("Failed to stop UI command router")
-        self.model_manager.unload_all()
         self._running = False
 
     def run_for(self, seconds: float) -> None:

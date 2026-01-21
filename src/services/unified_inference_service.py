@@ -1,14 +1,10 @@
-"""统一推理服务 - 集成模式
-
-直接调用集成模型进行推理
+"""统一推理服务
 
 注意事项：
 1. RGB疲劳度和EEG疲劳度已从实时推理中移除
 2. 所有疲劳度评估现在由FatigueAssessmentService在SART测试结束后统一处理
 3. 使用保存的视频和EEG数据文件进行离线推理
 4. 仅保留EEG脑负荷和情绪识别的实时推理
-
-优化：使用统一线程池管理，避免创建独立线程池
 """
 
 import importlib
@@ -22,10 +18,7 @@ from ..models.base_inference_model import BaseInferenceModel
 
 
 class UnifiedInferenceService:
-    """统一推理服务 - 集成模式
-    
-    模型直接在后端进程中运行
-    """
+    """统一推理服务"""
     
     def __init__(
         self,
@@ -45,8 +38,8 @@ class UnifiedInferenceService:
         self.model_configs = model_configs
         self.logger = logger or logging.getLogger("service.inference")
         
-        # 集成模式的模型实例
-        self.integrated_models: Dict[str, BaseInferenceModel] = {}
+        # 模型实例
+        self.models: Dict[str, BaseInferenceModel] = {}
         
         # 使用统一线程池（CPU密集型任务）
         self._thread_pool = get_thread_pool()
@@ -72,35 +65,28 @@ class UnifiedInferenceService:
             
             model_name = config["name"]
             model_type = config["type"]
-            mode = config.get("mode", "integrated")
             
-            if mode != "integrated":
-                self.logger.warning(f"模型 {model_name} 配置为 {mode} 模式,但仅支持集成模式,跳过")
-                continue
-            
-            # 集成模式:直接加载模型
-            enabled_count += self._start_integrated_model(model_name, model_type, config)
+            enabled_count += self._load_model(model_name, model_type, config)
         
         if enabled_count == 0:
             self.logger.warning("没有启用的模型")
             return
         
         # 订阅需要推理的事件
-        self.bus.subscribe(EventTopic.MULTIMODAL_SNAPSHOT, self._on_multimodal_data)
         self.bus.subscribe(EventTopic.EMOTION_REQUEST, self._on_emotion_request)
         self.bus.subscribe(EventTopic.EEG_REQUEST, self._on_eeg_request)
-        self.logger.debug(f"已订阅事件: {EventTopic.MULTIMODAL_SNAPSHOT.value}, {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
+        self.logger.debug(f"已订阅事件: {EventTopic.EMOTION_REQUEST.value}, {EventTopic.EEG_REQUEST.value}")
         
         self._running = True
         self.logger.info(f"✅ 统一推理服务已启动 (共 {enabled_count} 个模型)")
     
-    def _start_integrated_model(
+    def _load_model(
         self,
         model_name: str,
         model_type: str,
         config: Dict[str, Any]
     ) -> int:
-        """启动集成模式的模型
+        """加载模型
         
         Returns:
             1 if success, 0 if failed
@@ -110,7 +96,7 @@ class UnifiedInferenceService:
         options = integrated_config.get("options", {})
         
         if not class_path:
-            self.logger.error(f"集成模型缺少 class 配置: {model_name}")
+            self.logger.error(f"模型缺少 class 配置: {model_name}")
             return 0
         
         try:
@@ -126,12 +112,12 @@ class UnifiedInferenceService:
             model = model_class(model_name, logger=self.logger, **options)
             model.load()
             
-            self.integrated_models[model_type] = model
-            self.logger.debug(f"✅ 集成模型已加载: {model_name} ({model_type})")
+            self.models[model_type] = model
+            self.logger.debug(f"✅ 模型已加载: {model_name} ({model_type})")
             return 1
             
         except Exception as e:
-            self.logger.error(f"加载集成模型失败 ({model_name}): {e}", exc_info=True)
+            self.logger.error(f"加载模型失败 ({model_name}): {e}", exc_info=True)
             return 0
     
     def stop(self) -> None:
@@ -143,146 +129,24 @@ class UnifiedInferenceService:
         
         # 取消订阅
         try:
-            self.bus.unsubscribe(EventTopic.MULTIMODAL_SNAPSHOT, self._on_multimodal_data)
             self.bus.unsubscribe(EventTopic.EMOTION_REQUEST, self._on_emotion_request)
             self.bus.unsubscribe(EventTopic.EEG_REQUEST, self._on_eeg_request)
         except Exception as e:
             self.logger.error(f"取消订阅失败: {e}")
         
-        # 注意：不需要关闭线程池，由统一线程池管理器负责
         self.logger.info("推理任务已停止提交到线程池")
         
-        # 卸载集成模型
-        for model_type, model in self.integrated_models.items():
+        # 卸载模型
+        for model_type, model in self.models.items():
             try:
                 model.unload()
-                self.logger.debug(f"已卸载集成模型: {model_type}")
+                self.logger.debug(f"已卸载模型: {model_type}")
             except Exception as e:
-                self.logger.error(f"卸载集成模型失败 ({model_type}): {e}")
-        self.integrated_models.clear()
+                self.logger.error(f"卸载模型失败 ({model_type}): {e}")
+        self.models.clear()
         
         self._running = False
         self.logger.info("✅ 统一推理服务已停止")
-    
-    def _on_multimodal_data(self, event: Event) -> None:
-        """处理多模态数据,分发到情绪识别模型
-        
-        注意：RGB疲劳度推理已移至 FatigueAssessmentService，
-        在录制完成后使用文件路径进行离线推理，不在此处实时处理
-        """
-        payload = event.payload or {}
-        
-        # 提取数据
-        status = payload.get("status", "idle")
-        timestamp = payload.get("timestamp")
-        frame_count = payload.get("frame_count", 0)
-        elapsed_time = payload.get("elapsed_time", 0.0)
-        
-        # 检查采集状态
-        if status != "running":
-            return
-        
-        # 优先使用内存模式(避免重复I/O)
-        memory_mode = payload.get("memory_mode", False)
-        file_mode = payload.get("file_mode", False)
-        
-        # 验证数据有效性
-        if memory_mode:
-            # 内存模式: 直接使用numpy数组
-            rgb_frames_memory = payload.get("rgb_frames_memory", [])
-            depth_frames_memory = payload.get("depth_frames_memory", [])
-            eyetrack_memory = payload.get("eyetrack_memory", [])
-            
-            if not rgb_frames_memory:
-                # 没有RGB帧数据时,静默跳过
-                return
-            
-            # 只取最后30帧用于推理(避免内存累积)
-            max_frames_for_inference = 30
-            rgb_frames_memory = rgb_frames_memory[-max_frames_for_inference:]
-            depth_frames_memory = depth_frames_memory[-max_frames_for_inference:]
-            eyetrack_memory = eyetrack_memory[-max_frames_for_inference:]
-            
-            # 内存模式不需要文件路径
-            rgb_video_path = None
-            depth_video_path = None
-            eyetrack_json_path = None
-            rgb_frames_b64 = []
-            depth_frames_b64 = []
-            eyetrack_samples = []
-            
-        elif file_mode:
-            # 文件模式:检查文件路径是否存在
-            rgb_video_path = payload.get("rgb_video_path")
-            depth_video_path = payload.get("depth_video_path")
-            eyetrack_json_path = payload.get("eyetrack_json_path")
-            
-            if not rgb_video_path:
-                # 没有RGB视频文件时,静默跳过
-                return
-                
-            # 使用文件路径进行推理
-            rgb_frames_memory = []
-            depth_frames_memory = []
-            eyetrack_memory = []
-            rgb_frames_b64 = []
-            depth_frames_b64 = []
-            eyetrack_samples = []
-        else:
-            # Base64模式:提取多帧序列数据
-            rgb_frames_b64 = payload.get("rgb_frames_b64", [])
-            depth_frames_b64 = payload.get("depth_frames_b64", [])
-            eyetrack_samples = payload.get("eyetrack_samples", [])
-            rgb_video_path = None
-            depth_video_path = None
-            eyetrack_json_path = None
-            rgb_frames_memory = []
-            depth_frames_memory = []
-            eyetrack_memory = []
-            
-            if not rgb_frames_b64:
-                # 没有RGB帧序列数据时,静默跳过
-                return
-        
-        metadata = {
-            "timestamp": timestamp,
-            "frame_count": frame_count
-        }
-        
-        # ===== 注意:RGB疲劳度推理已从此处移除 =====
-        # RGB疲劳度现在在 FatigueAssessmentService 中处理
-        # 前端录制完成后,发送 FATIGUE_ASSESSMENT_REQUEST 事件
-        # 使用保存的视频文件进行离线推理
-        
-        # 保留情绪识别的实时推理(如果需要)
-        if "emotion" in self.integrated_models:
-            inference_data = {
-                "elapsed_time": elapsed_time
-            }
-            
-            # 根据模式选择数据格式(优先使用内存模式)
-            if memory_mode:
-                inference_data.update({
-                    "memory_mode": True,
-                    "rgb_frames_memory": rgb_frames_memory,
-                    "depth_frames_memory": depth_frames_memory,
-                    "eyetrack_memory": eyetrack_memory,
-                })
-            elif file_mode:
-                inference_data.update({
-                    "file_mode": True,
-                    "rgb_video_path": rgb_video_path,
-                    "depth_video_path": depth_video_path,
-                    "eyetrack_json_path": eyetrack_json_path,
-                })
-            else:
-                inference_data.update({
-                    "rgb_frames": rgb_frames_b64,
-                    "depth_frames": depth_frames_b64,
-                    "eyetrack_samples": eyetrack_samples,
-                })
-            
-            self._submit_inference("emotion", inference_data, metadata)
     
     def _on_emotion_request(self, event: Event) -> None:
         """处理情绪分析请求"""
@@ -297,7 +161,7 @@ class UnifiedInferenceService:
             return
         
         # 分发到情绪模型（V2 架构：不再依赖文本模态）
-        if "emotion" in self.integrated_models:
+        if "emotion" in self.models:
             # # 提取文本数据（字段名是 recognized_text）
             # text_list = []
             # for item in text_data:
@@ -398,8 +262,8 @@ class UnifiedInferenceService:
                         # 诊断信息获取失败时，保持默认值
                         self.logger.debug(f"无法获取EEG诊断信息: {diag_exc}")
                     
-                    # 执行推理 - EEG脑负荷模型
-                    if "eeg" in self.integrated_models:
+                        # 执行推理 - EEG脑负荷模型
+                    if "eeg" in self.models:
                         self.logger.debug(f"🧠 开始EEG脑负荷推理 ({len(ch1_data)}样本)")
                         # 创建数据副本以避免共享引用
                         inference_data = {
@@ -414,7 +278,7 @@ class UnifiedInferenceService:
                             "timestamp": payload.get("timestamp")
                         }
                         # 直接调用推理（已经在线程池中）
-                        result = self._infer_integrated("eeg", inference_data)
+                        result = self._infer("eeg", inference_data)
                         if result:
                             self._publish_result("eeg", result, metadata)
                         # 清理推理数据
@@ -425,8 +289,8 @@ class UnifiedInferenceService:
                     # SART测试结束后，使用保存的EEG数据文件进行离线推理
                     # 不再进行实时推理，避免重复计算和资源浪费
                     
-                    if "eeg" not in self.integrated_models:
-                        self.logger.warning("EEG脑负荷模型未加载到integrated_models中")
+                    if "eeg" not in self.models:
+                        self.logger.warning("EEG脑负荷模型未加载")
                     
                 except Exception as exc:
                     self.logger.error(f"EEG推理失败: {exc}", exc_info=True)
@@ -454,7 +318,7 @@ class UnifiedInferenceService:
             eeg_signal = np.array(eeg_signal)
         
         # EEG脑负荷模型
-        if "eeg" in self.integrated_models:
+        if "eeg" in self.models:
             simulation_mode = payload.get("simulation_mode")
 
             if simulation_mode is None and self._eeg_service is None:
@@ -485,7 +349,7 @@ class UnifiedInferenceService:
             self._submit_inference("eeg", inference_data, metadata)
         
         # EEG疲劳度模型
-        if "eeg_fatigue" in self.integrated_models:
+        if "eeg_fatigue" in self.models:
             # 创建数据副本，避免多个模型共享同一数据引用
             inference_data_fatigue = {
                 "memory_mode": memory_mode,
@@ -518,11 +382,11 @@ class UnifiedInferenceService:
             - 推理完成后自动清理数据引用
             - 支持numpy数组和普通数据的混合清理
         """
-        def _infer():
+        def _do_infer():
             try:
-                # 集成模式推理
-                if model_type in self.integrated_models:
-                    result = self._infer_integrated(model_type, data)
+                # 推理
+                if model_type in self.models:
+                    result = self._infer(model_type, data)
                 else:
                     self.logger.warning(f"模型未加载: {model_type}")
                     return
@@ -544,18 +408,18 @@ class UnifiedInferenceService:
                 gc.collect()
         
         # 提交到CPU线程池异步执行
-        self._thread_pool.submit_cpu_task(_infer)
+        self._thread_pool.submit_cpu_task(_do_infer)
     
-    def _infer_integrated(
+    def _infer(
         self,
         model_type: str,
         data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """使用集成模型推理"""
-        model = self.integrated_models[model_type]
+        """执行模型推理"""
+        model = self.models[model_type]
         
         try:
-            self.logger.debug(f"🔄 开始集成模型推理: {model_type}")
+            self.logger.debug(f"🔄 开始模型推理: {model_type}")
             result = model.infer(data)
             
             # 输出推理结果关键信息
@@ -684,8 +548,8 @@ class UnifiedInferenceService:
         """获取服务状态"""
         return {
             "running": self._running,
-            "integrated_models": list(self.integrated_models.keys()),
-            "total": len(self.integrated_models)
+            "models": list(self.models.keys()),
+            "total": len(self.models)
         }
 
 

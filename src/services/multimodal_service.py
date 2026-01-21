@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -13,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 try:  # Optional dependencies for real hardware
     import cv2  # type: ignore
@@ -34,12 +33,6 @@ from ..constants import EventTopic
 from ..core.event_bus import Event, EventBus
 from ..core.thread_pool import get_thread_pool
 from ..devices import DeviceException, HAS_TOBII, TobiiDevice
-# from .fatigue_estimator import estimate_fatigue_score  # 文件模式下不再使用模拟评分
-
-
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
 
 @dataclass
 class CollectorSummary:
@@ -50,102 +43,6 @@ class CollectorSummary:
     save_directory: Optional[str]
 
 
-class MultimodalStreamPublisher:
-    """Encodes frames and publishes them to the event bus for UI streaming."""
-
-    def __init__(self, bus: Optional[EventBus], *, logger: Optional[logging.Logger] = None) -> None:
-        self.bus = bus
-        self.logger = (logger or logging.getLogger("service.multimodal.stream")) if bus else logging.getLogger(
-            "service.multimodal.stream.disabled"
-        )
-        self._queue: "queue.Queue[tuple[Any, str]]" = queue.Queue(maxsize=3)
-        self._thread_name = "multimodal-stream"
-        self._stop_event = threading.Event()
-        self._enabled = bus is not None and cv2 is not None and np is not None
-        self._thread_pool = get_thread_pool()
-
-    def start(self) -> None:
-        if not self._enabled:
-            return
-        existing = self._thread_pool.get_managed_thread(self._thread_name)
-        if existing and existing.is_alive():
-            return
-        self._stop_event.clear()
-        thread = self._thread_pool.register_managed_thread(
-            self._thread_name,
-            self._run,
-            daemon=True
-        )
-        thread.start()
-
-    def stop(self) -> None:
-        thread = self._thread_pool.get_managed_thread(self._thread_name)
-        if thread and thread.is_alive():
-            self._stop_event.set()
-            try:
-                self._queue.put_nowait((None, ""))  # type: ignore[arg-type]
-            except queue.Full:
-                pass
-            self._thread_pool.unregister_managed_thread(self._thread_name, timeout=2.0)
-        self._drain_queue()
-
-    def submit_frame(self, frame: Any, timestamp: str) -> None:
-        if not self._enabled or self._stop_event.is_set():
-            return
-        try:
-            while self._queue.full():
-                self._queue.get_nowait()
-            self._queue.put_nowait((frame, timestamp))
-        except queue.Full:  # pragma: no cover - defensive
-            pass
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug("Failed to queue frame: %s", exc)
-
-    def _drain_queue(self) -> None:
-        try:
-            while True:
-                self._queue.get_nowait()
-        except queue.Empty:
-            pass
-
-    def _run(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                frame, timestamp = self._queue.get(timeout=0.25)
-            except queue.Empty:
-                continue
-            if frame is None:
-                continue
-            encoded = self._encode_frame(frame)
-            if not encoded or self.bus is None:
-                continue
-            payload = {
-                "timestamp": timestamp,
-                "jpeg": encoded,
-            }
-            try:
-                self.bus.publish(Event(EventTopic.MULTIMODAL_FRAME, payload))
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.debug("Failed to publish streamed frame: %s", exc)
-
-    def _encode_frame(self, frame: Any) -> Optional[str]:
-        if cv2 is None or np is None:
-            return None
-        try:
-            array = np.ascontiguousarray(frame)
-            height, width = array.shape[:2]
-            if max(height, width) > 640:
-                scale = 640.0 / float(max(height, width))
-                new_size = (int(width * scale), int(height * scale))
-                array = cv2.resize(array, new_size, interpolation=cv2.INTER_AREA)
-            ok, buffer = cv2.imencode(".jpg", array, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-            if not ok:
-                return None
-            return base64.b64encode(buffer).decode("ascii")
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug("JPEG encode failed: %s", exc)
-            return None
-
 
 class MultiModalDataCollector:
     """Hardware-facing data collector running in the backend process."""
@@ -155,35 +52,38 @@ class MultiModalDataCollector:
         username: str = "anonymous",
         *,
         part: int = 1,
-        queue_duration: float = 5.0,
         save_dir: Optional[str] = None,
         logger: Optional[logging.Logger] = None,
-        frame_callback: Optional[Callable[[Any, str], None]] = None,
     ) -> None:
         if np is None:  # pragma: no cover - defensive guard
             raise RuntimeError("numpy is required for multimodal collection")
 
         self.username = username
         self.part = part
-        self.queue_duration = queue_duration
         self.save_dir = save_dir + '/fatigue'
         self.logger = logger or logging.getLogger("service.multimodal.collector")
-        self._frame_callback = frame_callback
         self._thread_pool = get_thread_pool()
         self._thread_name = f"multimodal-collector-{username}-p{part}"
 
         # Sliding window queues
-        self.sample_rate = 30
-        self.rgb_depth_interval = 5
-        self.queue_length = int(self.queue_duration * 15)
-        self._rgb_queue: list[Any] = []
-        self._depth_queue: list[Any] = []
-        self._eyetrack_queue: list[Any] = []
-        self._timestamp_queue: list[str] = []
+        self.target_fps = 15  # Target video frame rate (frames per second)
         self._data_lock = threading.Lock()
 
+        # Async writer / eyetracker thread queues (for real-device mode)
+        self._rgb_write_queue: queue.Queue = queue.Queue(maxsize=180)
+        self._depth_write_queue: queue.Queue = queue.Queue(maxsize=180)
+        # eyetrack samples produced by a dedicated thread (if enabled)
+        self._eyetrack_thread_queue: queue.Queue = queue.Queue(maxsize=256)
+
+        # Background threads (created at start if hardware available)
+        self._eyereader_thread: Optional[threading.Thread] = None
+        self._writer_thread: Optional[threading.Thread] = None
+        self._writer_thread_name = f"{self._thread_name}-writer"
+        self._eyereader_thread_name = f"{self._thread_name}-eyereader"
+
         # Runtime state
-        self._cycle_count = 0
+        self._rgb_frame_count = 0  # Track actual frames written to RGB video
+        self._depth_frame_count = 0  # Track actual frames written to Depth video
         self._stop_event = threading.Event()
         self.running = False
         self._start_time = 0.0  # Track collection start time for fatigue scoring
@@ -195,12 +95,6 @@ class MultiModalDataCollector:
         self.rs_profile = None
         self.depth_scale = None
         self.tobii_device: Optional[TobiiDevice] = None
-
-        # Mode flags
-        force_sim = _env_flag("UI_FORCE_SIMULATION") or _env_flag("UI_MULTIMODAL_SIMULATION")
-        self.simulate_rgb_depth = force_sim or rs is None or cv2 is None
-        self.simulate_eyetrack = force_sim or not HAS_TOBII
-        self._sim_phase = 0.0
 
         # Output writers
         self.rgb_writer = None
@@ -215,30 +109,15 @@ class MultiModalDataCollector:
         self._eyetrack_path: Optional[str] = None
         self._metadata_path: Optional[str] = None
 
-        self.logger.debug(
-            "Collector init: simulate_rgb_depth=%s simulate_eyetrack=%s",
-            self.simulate_rgb_depth,
-            self.simulate_eyetrack,
-        )
         self._init_devices()
 
     # ------------------------------------------------------------------
     def _init_devices(self) -> None:
-        if not self.simulate_rgb_depth and rs is not None and cv2 is not None:
+        if rs is not None and cv2 is not None:
             try:
                 self._init_realsense()
             except Exception as exc:  # pragma: no cover - hardware failures
-                self.logger.warning("RealSense init failed, falling back to simulation: %s", exc)
-                self.simulate_rgb_depth = True
-        if not self.simulate_eyetrack and HAS_TOBII:
-            try:
-                self._init_tobii()
-            except DeviceException as exc:  # pragma: no cover - hardware failures
-                self.logger.warning("Tobii init failed, falling back to simulation: %s", exc)
-                self.simulate_eyetrack = True
-            except Exception as exc:  # pragma: no cover - defensive guard
-                self.logger.warning("Unexpected Tobii error, falling back to simulation: %s", exc)
-                self.simulate_eyetrack = True
+                self.logger.warning("RealSense init failed")
 
     def _init_realsense(self) -> None:  # pragma: no cover - depends on hardware
         assert rs is not None and cv2 is not None
@@ -248,7 +127,7 @@ class MultiModalDataCollector:
         self.rs_pipeline = rs.pipeline()
         self.rs_config = rs.config()
         color_width, color_height = self.rgb_resolution
-        depth_width, depth_height = 1280, 720
+        depth_width, depth_height = self.depth_resolution
         self.rs_config.enable_stream(rs.stream.color, color_width, color_height, rs.format.bgr8, 30)
         self.rs_config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, 30)
         self.rs_profile = self.rs_pipeline.start(self.rs_config)
@@ -256,13 +135,6 @@ class MultiModalDataCollector:
         self.depth_scale = depth_sensor.get_depth_scale()
         self.rs_align = rs.align(rs.stream.color)
         self.logger.info("RealSense device ready")
-
-    def _init_tobii(self) -> None:  # pragma: no cover - depends on hardware
-        assert HAS_TOBII
-        device = TobiiDevice()
-        device.start()
-        self.tobii_device = device
-        self.logger.info("Tobii device ready")
 
     # ------------------------------------------------------------------
     def start(self) -> None:
@@ -277,9 +149,27 @@ class MultiModalDataCollector:
         self._stop_event.clear()
         thread = self._thread_pool.register_managed_thread(
             self._thread_name,
-            self._collection_loop,
+            self._video_reader_run,
             daemon=True
         )
+        # Start background writer thread (if using real CV writer)
+        if cv2 is not None and self.rgb_writer is not None:
+            self._writer_thread = self._thread_pool.register_managed_thread(
+                self._writer_thread_name,
+                self._video_writer_run,
+                daemon=True,
+            )
+            self._writer_thread.start()
+
+        # Start eyetrack reader thread if running on real hardware
+        if HAS_TOBII:
+            self._eyereader_thread = self._thread_pool.register_managed_thread(
+                self._eyereader_thread_name,
+                self._eyetrack_reader_run,
+                daemon=True,
+            )
+            self._eyereader_thread.start()
+
         thread.start()
         self.logger.debug("Multimodal collector started")
 
@@ -288,12 +178,129 @@ class MultiModalDataCollector:
             return
         self.running = False
         self._stop_event.set()
+        # signal background threads to stop and join them
+        try:
+            if self._eyereader_thread and self._eyereader_thread.is_alive():
+                self._eyereader_thread.join(timeout=1.0)
+            self._thread_pool.unregister_managed_thread(self._eyereader_thread_name, timeout=1.0)
+        except Exception:
+            pass
+        try:
+            if self._writer_thread and self._writer_thread.is_alive():
+                # writer loop drains queues then exits
+                self._writer_thread.join(timeout=2.0)
+            self._thread_pool.unregister_managed_thread(self._writer_thread_name, timeout=2.0)
+        except Exception:
+            pass
         self._thread_pool.unregister_managed_thread(self._thread_name, timeout=join_timeout)
         self._save_remaining_data()
         self._cleanup_devices()
         self.logger.debug("Multimodal collector stopped")
 
     # ------------------------------------------------------------------
+    def _eyetrack_reader_run(self) -> None:
+        device = None
+        f = None
+        try:
+            try:
+                device = TobiiDevice()
+                device.start()
+            except Exception as exc:
+                self.logger.warning("Eyetrack background thread failed to start device: %s", exc)
+                return
+
+            # open eyetrack JSON for append
+            if self._eyetrack_path:
+                try:
+                    os.makedirs(os.path.dirname(self._eyetrack_path), exist_ok=True)
+                    f = open(self._eyetrack_path, "a", encoding="utf-8")
+                except Exception as exc:
+                    self.logger.debug("Failed to open eyetrack json for writing: %s", exc)
+
+            while not self._stop_event.is_set():
+                try:
+                    ok, sample = device.read()
+                except Exception as exc:
+                    self.logger.debug("Eyetrack read error: %s", exc)
+                    break
+                if ok and sample is not None:
+                    # enqueue latest (replace oldest on full)
+                    try:
+                        self._eyetrack_thread_queue.put_nowait(sample)
+                    except queue.Full:
+                        try:
+                            _ = self._eyetrack_thread_queue.get_nowait()
+                            self._eyetrack_thread_queue.put_nowait(sample)
+                        except Exception:
+                            pass
+                    # write JSON line immediately (device native rate: 60-90Hz)
+                    if f is not None:
+                        try:
+                            eyetrack_dict = self._extract_eyetrack_features(sample)
+                            f.write(json.dumps(eyetrack_dict, ensure_ascii=False) + "\n")
+                        except Exception as exc:
+                            self.logger.debug("Failed to write eyetrack data: %s", exc)
+        finally:
+            try:
+                if f:
+                    f.close()
+            except Exception:
+                pass
+            try:
+                if device is not None:
+                    device.stop()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    def _video_writer_run(self) -> None:
+        try:
+            while not self._stop_event.is_set() or (not self._rgb_write_queue.empty() or not self._depth_write_queue.empty()):
+                did = False
+                try:
+                    rgb_item = self._rgb_write_queue.get(timeout=0.1)
+                except queue.Empty:
+                    rgb_item = None
+                if rgb_item is not None:
+                    did = True
+                    frame, ts = rgb_item
+                    try:
+                        if self.rgb_writer is not None and cv2 is not None:
+                            self.rgb_writer.write(frame)
+                            self._rgb_frame_count += 1
+                    except Exception as exc:
+                        self.logger.debug("RGB frame write failed: %s", exc)
+
+                try:
+                    depth_item = self._depth_write_queue.get(timeout=0.05)
+                except queue.Empty:
+                    depth_item = None
+                if depth_item is not None:
+                    did = True
+                    depth_frame, ts = depth_item
+                    try:
+                        if self.depth_writer is not None and cv2 is not None:
+                            bgr = self._depth_to_bgr(depth_frame)
+                            self.depth_writer.write(bgr)
+                            self._depth_frame_count += 1
+                    except Exception as exc:
+                        self.logger.debug("Depth frame write failed: %s", exc)
+
+                if not did:
+                    time.sleep(0.005)
+        finally:
+            # Log final frame counts
+            duration = time.time() - self._start_time if self._start_time > 0 else 0
+            self.logger.info(
+                "Video writer stopped: RGB=%d frames, Depth=%d frames, Duration=%.2fs, "
+                "Expected=%.2fs at %d fps",
+                self._rgb_frame_count, self._depth_frame_count, duration,
+                self._rgb_frame_count / self.target_fps if self._rgb_frame_count > 0 else 0,
+                self.target_fps
+            )
+
+    # ------------------------------------------------------------------
+
     def _create_save_directory(self) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_dir = Path("./recordings") / self.username / timestamp / "fatigue"
@@ -333,61 +340,54 @@ class MultiModalDataCollector:
         metadata = {
             "username": self.username,
             "start_time": datetime.now().isoformat(),
-            "sample_rate": self.sample_rate,
-            "queue_duration": self.queue_duration,
-            "queue_length": self.queue_length,
-            "simulate_rgb_depth": self.simulate_rgb_depth,
-            "simulate_eyetrack": self.simulate_eyetrack,
+            "target_fps": self.target_fps,
         }
         metadata_path = base_dir / f"metadata{part_suffix}.json"
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         self._metadata_path = str(metadata_path)
 
     # ------------------------------------------------------------------
-    def _collection_loop(self) -> None:
-        interval = 1.0 / max(1, self.sample_rate * self.rgb_depth_interval * 2)
-        next_tick = time.perf_counter()
+    def _video_reader_run(self) -> None:
+        """Main collection loop with strict 15 FPS timing."""
+        target_interval = 1.0 / self.target_fps  # 1/15 ≈ 0.0667 seconds per frame
+        next_frame_time = time.perf_counter()
+        
         while not self._stop_event.is_set():
             now = time.perf_counter()
-            if now >= next_tick:
+            
+            # Only collect if we've reached the next scheduled frame time
+            if now >= next_frame_time:
                 try:
                     self._collect_sample()
                 except Exception as exc:  # pragma: no cover - defensive
                     self.logger.debug("Collection iteration failed: %s", exc)
-                next_tick = now + interval
-            remaining = max(0.0, next_tick - time.perf_counter())
-            if remaining:
+                
+                # Schedule next frame at exact interval
+                next_frame_time += target_interval
+                
+                # If we've fallen behind, skip ahead to avoid accumulating delay
+                if next_frame_time < now:
+                    self.logger.warning("Frame collection falling behind, resetting timing")
+                    next_frame_time = now + target_interval
+            
+            # Sleep until next frame is due (with small polling interval)
+            remaining = next_frame_time - time.perf_counter()
+            if remaining > 0:
                 self._stop_event.wait(timeout=min(remaining, 0.01))
 
     def _collect_sample(self) -> None:
+        """Collect one frame of RGB/Depth/Eyetrack data."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._cycle_count += 1
-        eyetrack_raw = self._collect_eyetrack()
-        rgb_data: Optional[Any] = None
-        depth_data: Optional[Any] = None
-        if self._cycle_count % self.rgb_depth_interval == 0:
-            rgb_data, depth_data = self._collect_aligned_images()
-        with self._data_lock:
-            if eyetrack_raw is not None:
-                self._eyetrack_queue.append(self._extract_eyetrack_features(eyetrack_raw))
-                self._trim_queue(self._eyetrack_queue, self.queue_length * self.rgb_depth_interval)
-            if rgb_data is not None:
-                self._rgb_queue.append(rgb_data)
-                self._trim_queue(self._rgb_queue, self.queue_length)
-                self._timestamp_queue.append(timestamp)
-                self._trim_queue(self._timestamp_queue, self.queue_length)
-            if depth_data is not None:
-                self._depth_queue.append(depth_data)
-                self._trim_queue(self._depth_queue, self.queue_length)
-        self._persist_sample(rgb_data, depth_data, eyetrack_raw, timestamp)
-        if self._frame_callback and rgb_data is not None:
-            try:
-                self._frame_callback(rgb_data, timestamp)
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.debug("Frame callback failed: %s", exc)
+        
+        # Collect RGB and Depth every frame (15 fps)
+        rgb_data, depth_data = self._collect_aligned_images()
+        
+        # Persist to video files
+        self._persist_sample(rgb_data, depth_data, timestamp)
+
 
     def _collect_aligned_images(self) -> Tuple[Optional[Any], Optional[Any]]:
-        if not self.simulate_rgb_depth and rs is not None and cv2 is not None and self.rs_pipeline is not None:
+        if rs is not None and cv2 is not None and self.rs_pipeline is not None:
             try:  # pragma: no cover - depends on hardware
                 frames = self.rs_pipeline.wait_for_frames(timeout_ms=100)
                 aligned = self.rs_align.process(frames)
@@ -399,78 +399,37 @@ class MultiModalDataCollector:
                     return rgb_image.copy(), depth_image.copy()
             except Exception as exc:
                 self.logger.debug("RealSense frame capture failed: %s", exc)
-        return self._generate_mock_rgb(), self._generate_mock_depth()
+        return None, None
 
-    def _collect_eyetrack(self) -> Optional[Dict[str, Any]]:
-        if not self.simulate_eyetrack and self.tobii_device is not None:
-            try:  # pragma: no cover - depends on hardware
-                ok, data = self.tobii_device.read()
-            except Exception as exc:
-                self.logger.debug("Tobii read failed: %s", exc)
-            else:
-                if ok:
-                    return data
-        return self._generate_mock_eyetrack()
-
-    # ------------------------------------------------------------------
     def _persist_sample(
         self,
         rgb_data: Optional[Any],
         depth_data: Optional[Any],
-        eyetrack_data: Optional[Dict[str, Any]],
         timestamp: str,
     ) -> None:
         try:
+            # Enqueue frames for background writer to avoid blocking capture loop
             if self.rgb_writer is not None and rgb_data is not None and cv2 is not None:
-                self.rgb_writer.write(rgb_data)
+                try:
+                    self._rgb_write_queue.put_nowait((rgb_data, timestamp))
+                except queue.Full:
+                    # drop oldest then enqueue
+                    try:
+                        _ = self._rgb_write_queue.get_nowait()
+                        self._rgb_write_queue.put_nowait((rgb_data, timestamp))
+                    except Exception:
+                        pass
             if self.depth_writer is not None and depth_data is not None and cv2 is not None:
-                self.depth_writer.write(self._depth_to_bgr(depth_data))
-            if eyetrack_data is not None and self._eyetrack_path:
-                serializable = self._prepare_eyetrack_for_json(eyetrack_data)
-                serializable["timestamp"] = timestamp
-                with open(self._eyetrack_path, "a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(serializable, ensure_ascii=False) + "\n")
+                try:
+                    self._depth_write_queue.put_nowait((depth_data, timestamp))
+                except queue.Full:
+                    try:
+                        _ = self._depth_write_queue.get_nowait()
+                        self._depth_write_queue.put_nowait((depth_data, timestamp))
+                    except Exception:
+                        pass
         except Exception as exc:  # pragma: no cover - file IO issues
             self.logger.debug("Persist sample failed: %s", exc)
-
-    # ------------------------------------------------------------------
-    def _generate_mock_rgb(self):  # pragma: no cover - exercised in simulation
-        height = self.rgb_resolution[1]
-        width = self.rgb_resolution[0]
-        self._sim_phase = (self._sim_phase + 0.12) % (2 * np.pi)
-        y = np.linspace(0, 1, height, dtype=np.float32)
-        x = np.linspace(0, 1, width, dtype=np.float32)
-        xv, yv = np.meshgrid(x, y)
-        base = (np.sin(self._sim_phase + xv * np.pi * 2) + 1) * 127
-        frame = np.zeros((height, width, 3), dtype=np.uint8)
-        frame[..., 0] = np.clip(base + yv * 30, 0, 255)
-        frame[..., 1] = np.clip(255 - base * yv, 0, 255)
-        frame[..., 2] = np.clip((xv * 255 + self._sim_phase * 40) % 255, 0, 255)
-        return frame
-
-    def _generate_mock_depth(self):  # pragma: no cover - exercised in simulation
-        height = self.depth_resolution[1]
-        width = self.depth_resolution[0]
-        depth = np.linspace(0, 4000, width, dtype=np.float32)
-        depth = np.tile(depth, (height, 1))
-        noise = np.random.normal(0, 80, size=(height, width))
-        depth = np.clip(depth + noise, 0, 4095)
-        return depth.astype(np.uint16)
-
-    def _generate_mock_eyetrack(self) -> Dict[str, Any]:  # pragma: no cover - simulation path
-        return {
-            "gaze_point": [float(np.random.uniform(0, 640)), float(np.random.uniform(0, 480))],
-            "head_pose": [
-                float(np.random.uniform(-30, 30)),
-                float(np.random.uniform(-30, 30)),
-                float(np.random.uniform(-30, 30)),
-                float(np.random.uniform(-0.3, 0.3)),
-                float(np.random.uniform(-0.3, 0.3)),
-                float(np.random.uniform(0.3, 1.0)),
-            ],
-            "timestamp": time.time(),
-            "valid": bool(np.random.choice([True, False], p=[0.8, 0.2])),
-        }
 
     # ------------------------------------------------------------------
     def _depth_to_bgr(self, depth_image):  # pragma: no cover - depends on cv2
@@ -515,37 +474,43 @@ class MultiModalDataCollector:
         
         return gray_bgr
 
-    def _prepare_eyetrack_for_json(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        serializable: Dict[str, Any] = {}
-        for key, value in data.items():
-            if np is not None and isinstance(value, np.ndarray):
-                serializable[key] = value.tolist()
-            elif isinstance(value, (np.integer,)):
-                serializable[key] = int(value)  # type: ignore[arg-type]
-            elif isinstance(value, (np.floating,)):
-                serializable[key] = float(value)  # type: ignore[arg-type]
-            elif isinstance(value, (np.bool_,)):
-                serializable[key] = bool(value)  # type: ignore[arg-type]
-            else:
-                serializable[key] = value
-        return serializable
+    def _extract_eyetrack_features(self, data: Dict[str, Any]) -> Dict[str, Any]:
 
-    def _extract_eyetrack_features(self, data: Dict[str, Any]) -> list[float]:
         try:
+            # 提取注视点 (gaze_point)
             gaze = data.get("gaze_point") or data.get("gaze") or [0.0, 0.0]
+            if not isinstance(gaze, list):
+                gaze = [0.0, 0.0]
+            
+            # 提取头部姿态 (head_pose: [x, y, z, rot_x, rot_y, rot_z])
             head = data.get("head_pose") or data.get("head") or [0.0] * 6
-            features = list(gaze) + list(head)
+            if not isinstance(head, list):
+                head = [0.0] * 6
+            
+            # 组合特征: [gaze_x, gaze_y] + [head_x, head_y, head_z, rot_x, rot_y, rot_z]
+            features = list(gaze[:2]) + list(head[:6])
+            
+            # 确保长度为8
             if len(features) < 8:
                 features.extend([0.0] * (8 - len(features)))
-            return features[:8]
-        except Exception:  # pragma: no cover - defensive
-            return [0.0] * 8
+            features = features[:8]
+            
+            # 构建返回字典
+            result = {
+                "system_time": time.time(),
+                "eyetrack_data": features
+            }
+            
+            return result
+            
+        except Exception as exc:
+            self.logger.debug("Error extracting eyetrack features: %s", exc)
+            return {
+                "system_time": time.time(),
+                "eyetrack_data": [0.0] * 8
+            }
 
     # ------------------------------------------------------------------
-    def _trim_queue(self, queue: list[Any], max_len: int) -> None:
-        excess = len(queue) - max_len
-        if excess > 0:
-            del queue[:excess]
 
     def _save_remaining_data(self) -> None:
         try:
@@ -571,29 +536,6 @@ class MultiModalDataCollector:
             pass
         finally:
             self.tobii_device = None
-
-    # Public getters ---------------------------------------------------
-    def get_current_data(self) -> Dict[str, Any]:
-        with self._data_lock:
-            return {
-                "rgb": list(self._rgb_queue),
-                "depth": list(self._depth_queue),
-                "eyetrack": list(self._eyetrack_queue),
-                "timestamps": list(self._timestamp_queue),
-                "queue_length": len(self._rgb_queue),
-                "is_full": len(self._rgb_queue) >= self.queue_length,
-            }
-
-    def get_latest_sample(self) -> Dict[str, Any]:
-        with self._data_lock:
-            if not self._rgb_queue:
-                return {}
-            return {
-                "rgb": self._rgb_queue[-1],
-                "depth": self._depth_queue[-1] if self._depth_queue else None,
-                "eyetrack": self._eyetrack_queue[-1] if self._eyetrack_queue else None,
-                "timestamp": self._timestamp_queue[-1] if self._timestamp_queue else None,
-            }
 
     def get_file_paths(self) -> Dict[str, str]:
         paths: Dict[str, str] = {}
@@ -628,7 +570,6 @@ class MultimodalService:
         self.logger = logger or logging.getLogger("service.multimodal")
         self.bus = bus
         self._collector: Optional[MultiModalDataCollector] = None
-        self._stream_publisher = MultimodalStreamPublisher(bus, logger=self.logger.getChild("stream"))
         self._lock = threading.RLock()
         self._snapshot_thread_name = "multimodal-snapshot"
         self._snapshot_stop = threading.Event()
@@ -638,16 +579,12 @@ class MultimodalService:
         self._thread_pool = get_thread_pool()
 
     # Internal helpers -------------------------------------------------
-    def _handle_stream_frame(self, frame: Any, timestamp: str) -> None:
-        """Callback from collector to stream RGB frames for UI preview."""
-        self._stream_publisher.submit_frame(frame, timestamp)
 
     # Lifecycle --------------------------------------------------------
     def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         username = payload.get("username") or "anonymous"
         save_dir = payload.get("save_dir")
         part = int(payload.get("part", 1))
-        queue_duration = float(payload.get("queue_duration", 5.0))
         snapshot_interval = float(payload.get("snapshot_interval", 1.2))
         
         with self._lock:
@@ -661,19 +598,15 @@ class MultimodalService:
                 self._collector = MultiModalDataCollector(
                     username,
                     part=part,
-                    queue_duration=queue_duration,
                     save_dir=save_dir,
                     logger=self.logger.getChild("collector"),
-                    frame_callback=self._handle_stream_frame,
                 )
-                self._stream_publisher.start()
                 self._collector.start()
                 self._snapshot_interval = max(0.5, snapshot_interval)
                 self._snapshot_requested = True
                 self._ensure_snapshot_broadcast()
             except Exception as exc:
                 self.logger.error("Failed to start multimodal collector: %s", exc)
-                self._stream_publisher.stop()
                 self._collector = None
                 raise
         return {"status": "running", "save_dir": self._collector.save_dir}
@@ -688,7 +621,6 @@ class MultimodalService:
             save_dir = self._collector.save_dir
             
             self._collector.stop()
-            self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
             self._snapshot_requested = False
             
@@ -727,7 +659,6 @@ class MultimodalService:
                 return {"status": "idle"}
             self._collector.stop()
             self._collector = None
-            self._stream_publisher.stop()
             self._stop_snapshot_broadcast()
             self._snapshot_requested = False
         return {"status": "released"}
@@ -814,8 +745,6 @@ class MultimodalService:
         return {
             **simulate_defaults,
             "active": collector.running,
-            "simulate_rgb_depth": collector.simulate_rgb_depth,
-            "simulate_eyetrack": collector.simulate_eyetrack,
         }
 
     def snapshot(self) -> Dict[str, Any]:
@@ -827,98 +756,42 @@ class MultimodalService:
             return {"paths": {}, "status": "idle"}
         return {"paths": collector.get_file_paths(), "status": "running" if collector.running else "stopped"}
 
-    # ------------------------------------------------------------------
-    # 注释: 文件模式下,疲劳度推理由 UnifiedInferenceService 处理
-    # 如需启用模拟评分,取消下面代码的注释
-    # def _get_fatigue_score(self, data: Dict[str, Any], elapsed: float) -> float:
-    #     """获取疲劳度分数 (模拟估算)
-    #     
-    #     注意: 在文件模式下,疲劳度推理由 UnifiedInferenceService 处理,
-    #     此方法只返回启发式估算值,实际推理结果通过 DETECTION_RESULT 事件发布
-    #     
-    #     Args:
-    #         data: 采集的多模态数据
-    #         elapsed: 采集时长(秒)
-    #     
-    #     Returns:
-    #         疲劳度分数 (0-100) - 仅用于快照预览,非最终推理结果
-    #     """
-    #     # 文件模式下,返回启发式估算值(用于快照预览)
-    #     # 实际的模型推理由 UnifiedInferenceService 负责
-    #     return estimate_fatigue_score(
-    #         data.get("rgb") or [],
-    #         data.get("depth") or [],
-    #         data.get("eyetrack") or [],
-    #         elapsed_time=elapsed,
-    #     )
-
-    # ------------------------------------------------------------------
     def _build_snapshot(self) -> Dict[str, Any]:
+        """Build snapshot with file paths only (no in-memory data)."""
         with self._lock:
             collector = self._collector
         if not collector:
             return {"status": "idle"}
-        data = collector.get_current_data()
-        latest = collector.get_latest_sample()
         
         # Calculate elapsed time since collection started
         elapsed = time.time() - collector._start_time if collector._start_time > 0 else 0.0
         
-        # 文件模式: 不通过WebSocket传输图像数据,只传输文件路径
-        # 获取当前保存的文件路径（用于文件模式推理）
+        # 文件模式: 只传输文件路径，不传输内存数据
         part_suffix = f"{collector.part}"
         save_dir = collector.save_dir if collector.save_dir else None
         rgb_video_path = str(Path(save_dir) / f"rgb{part_suffix}.avi") if save_dir else None
         depth_video_path = str(Path(save_dir) / f"depth{part_suffix}.avi") if save_dir else None
         eyetrack_json_path = str(Path(save_dir) / f"eyetrack{part_suffix}.json") if save_dir else None
         
-        # 获取时间戳和帧计数
-        timestamps = data.get("timestamps") or []
-        latest_timestamp = timestamps[-1] if timestamps else None
-        # 从队列数据中获取实际帧数
-        rgb_samples = len(data.get("rgb") or [])
-        depth_samples = len(data.get("depth") or [])
-        eyetrack_count = len(data.get("eyetrack") or [])
-        
-        # 内存模式优化: 直接传递内存中的numpy数组给推理服务
-        # 这样可以避免"写文件→读文件"的重复I/O
-        rgb_frames_memory = data.get("rgb") or []
-        depth_frames_memory = data.get("depth") or []
-        eyetrack_memory = data.get("eyetrack") or []
+        # 获取当前时间戳
+        current_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         return {
             "status": "running" if collector.running else "stopped",
-            "queue_length": data.get("queue_length", 0),
-            "rgb_samples": rgb_samples,
-            "depth_samples": depth_samples,
-            "eyetrack_samples": eyetrack_count,
-            "latest_timestamp": latest_timestamp,
-            # 注意: fatigue_score 已移除,前端应从 DETECTION_RESULT 事件获取真实推理结果
-            # 如需启用模拟评分,取消下面行的注释并恢复 _get_fatigue_score 方法
-            # "fatigue_score": self._get_fatigue_score(data, elapsed),
+            "rgb_frame_count": collector._rgb_frame_count,
+            "depth_frame_count": collector._depth_frame_count,
             "elapsed_time": round(elapsed, 2),
             
-            # 内存模式（优先）：直接传递numpy数组，避免文件I/O
-            "memory_mode": True,
-            "rgb_frames_memory": rgb_frames_memory,
-            "depth_frames_memory": depth_frames_memory,
-            "eyetrack_memory": eyetrack_memory,
-            
-            # 文件路径模式（备用）：用于存档和备份推理
+            # 文件路径模式：用于推理
             "file_mode": True,
             "rgb_video_path": rgb_video_path,
             "depth_video_path": depth_video_path,
             "eyetrack_json_path": eyetrack_json_path,
             
             # 推理元数据
-            "timestamp": latest_timestamp,
-            "frame_count": rgb_samples,
+            "timestamp": current_timestamp,
+            "target_fps": collector.target_fps,
         }
-
-    # 文件模式: 不再需要预览编码
-    # def _encode_preview(self, frame: Any) -> Optional[str]:
-    #     """已弃用 - 文件模式下不通过WebSocket发送图像"""
-    #     pass
 
 
 __all__ = ["MultimodalService"]

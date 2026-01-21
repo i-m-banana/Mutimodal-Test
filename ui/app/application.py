@@ -20,19 +20,18 @@ from .config import (
     multidata_stop_collection,
     stop_recognition,
 )
-from .qt import (
+from PyQt5.QtWidgets import (
     QApplication,
     QLabel,
-    QKeySequence,
     QMainWindow,
     QShortcut,
-    QTimer,
-    Qt,
     QVBoxLayout,
     QWidget,
-    qta,
 )
-from .utils.widgets import FadingStackedWidget
+from PyQt5.QtCore import QTimer, Qt
+import qtawesome as qta
+from PyQt5.QtGui import QKeySequence
+from ..widgets.basic_widgets import FadingStackedWidget
 from .utils.responsive import get_scaler, scale, scale_size
 from .pages.calibration import CalibrationPage
 from .pages.login import LoginPage
@@ -41,12 +40,8 @@ from .pages.sart import SARTPage
 from .pages.test import TestPage
 from ..widgets.brain_load_bar import BrainLoadBar
 from ..widgets.schulte_grid import SchulteGridWidget
-from ..utils_common.thread_process_manager import (
-    get_lifecycle_manager,
-    get_thread_manager,
-    shutdown_all_managers,
-)
-from ..services.backend_launcher import get_backend_launcher
+from ..utils_common.ui_thread_pool import get_ui_thread_pool
+from ..managers.session_manager import SessionManager
 
 STYLE_PATH = config.BASE_DIR / "style.qss"
 
@@ -60,18 +55,17 @@ class MainWindow(QMainWindow):
         self._debug_shortcuts: list[QShortcut] = []
         self.camera_preloaded = False
         
-        # SART 模式配置
-        self.sart_mode = "short"  # 默认短时模式
-        self.sart_duration = 300  # 默认5分钟（300秒）
+        self.session_manager = SessionManager.get_instance()
+        
+        self.sart_mode = "normal"
+        self.sart_duration = 60
 
         self._setup_main_window()
         self._create_pages()
         self._connect_signals()
         self._setup_debug_shortcuts()
         
-        # ✅ 恢复预加载：应用启动时预加载摄像头(使用临时目录)
-        # 在校准页面时会用正确的session_dir重新初始化
-        from .qt import QTimer
+        from PyQt5.QtCore import QTimer
         QTimer.singleShot(800, self._preload_camera)
 
         logger.info("应用程序主窗口初始化完成。")
@@ -81,14 +75,14 @@ class MainWindow(QMainWindow):
         设置 SART 实验模式
         
         Args:
-            mode: "short" (5分钟) 或 "long" (25分钟)
+            mode: "short" (0.5分钟) 或 "normal" (1分钟)
         """
-        if mode not in ["short", "long"]:
-            logger.warning(f"无效的 SART 模式: {mode}，使用默认短时模式")
-            mode = "short"
+        if mode not in ["short", "normal"]:
+            logger.warning(f"无效的 SART 模式: {mode}，使用默认模式")
+            mode = "normal"
         
         self.sart_mode = mode
-        self.sart_duration = 60 if mode == "short" else 1500
+        self.sart_duration = 60 if mode == "normal" else 30
         
         logger.debug(f"✅ 已设置 SART 模式为: {mode} (时长: {self.sart_duration}秒)")
         
@@ -243,88 +237,41 @@ class MainWindow(QMainWindow):
         self.current_user = username or 'anonymous'
         try:
             self.test_page.set_current_user(self.current_user)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("同步用户名到测试页失败: %s", exc)
         
-        # ⚠️ 修复：在切换到校准页面时就创建session_dir，避免EEG预连接和后续数据使用不同目录
-        # 这样确保整个测试流程（校准→基线→文本QA→血压→舒尔特）使用同一个session_dir
-        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
-            from datetime import datetime
-            import os
-            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            user_dir = self.current_user or 'anonymous'
-            
-            # 使用项目根目录的绝对路径
-            project_root = Path(__file__).parent.parent.parent
-            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
-            
-            # 保存到 test_page，供所有后续阶段使用
-            self.test_page.session_timestamp = session_timestamp
-            self.test_page.session_dir = session_dir
-            
-            logger.debug(f"🆕 创建整个测试会话的session目录: {session_dir}")
-            
-            # ✅ 更新session_dir：即使摄像头已预加载，也要用正确的session_dir重新初始化
-            # 这样可以确保后续录制的文件保存到正确的目录
-            logger.debug(f"🎥 用正确的session_dir更新摄像头服务: {session_dir}")
-            from .utils.helpers import init_camera
-            
-            def on_camera_update_finished(success: bool) -> None:
-                if success:
-                    logger.debug("✅ 摄像头session_dir更新成功")
-                    self.camera_preloaded = True
-                else:
-                    logger.warning("⚠️ 摄像头session_dir更新失败")
-                    self.camera_preloaded = False
-            
-            try:
-                # 传递正确的session_dir，更新后端AV服务的保存路径
-                init_camera(on_camera_update_finished, session_dir=session_dir)
-            except Exception as e:
-                logger.error(f"更新摄像头session_dir失败: {e}")
-                # 即使更新失败也标记为已加载，校准页面会fallback到自己初始化
+        session_dir = self.session_manager.start_session(self.current_user)
+        
+        logger.debug(f"� 用会话目录更新摄像头服务: {session_dir}")
+        from .utils.helpers import init_camera
+        
+        def on_camera_update_finished(success: bool) -> None:
+            if success:
+                logger.debug("✅ 摄像头更新成功")
+                self.camera_preloaded = True
+            else:
+                logger.warning("⚠️ 摄像头更新失败")
                 self.camera_preloaded = False
-        else:
-            logger.info(f"✅ 已有session目录: {self.test_page.session_dir}")
+        
+        try:
+            init_camera(on_camera_update_finished, session_dir=session_dir)
+        except Exception as e:
+            logger.error(f"更新摄像头失败: {e}")
+            self.camera_preloaded = False
         
         self.brain_load_tip.setVisible(False)
         self.stack.fade_to_index(1)
 
     def show_baseline_page(self) -> None:
-        """切换到基线校准页面"""
         logger.info("正在切换到基线校准页面...")
         
-        # ✅ session_dir应该已经在校准页面创建了，这里只是防御性检查
-        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
-            logger.warning("⚠️ session_dir未在校准阶段创建，现在创建（这不应该发生）")
-            from datetime import datetime
-            import os
-            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            user_dir = self.current_user or 'anonymous'
-            
-            project_root = Path(__file__).parent.parent.parent
-            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
-            
-            self.test_page.session_timestamp = session_timestamp
-            self.test_page.session_dir = session_dir
-            
-            logger.info(f"⚠️ 补救：创建会话目录: {session_dir}")
-        else:
-            logger.debug(f"✅ 使用校准阶段创建的session目录: {self.test_page.session_dir}")
-        
-        # 传递时间戳列表和会话信息（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
             save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
             self.baseline_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
-        # 传递会话信息（用于EEG采集）
-        logger.debug(f"📂 传递会话信息到基线页面:")
-        logger.debug(f"   - session_dir = {self.test_page.session_dir}")
-        logger.debug(f"   - current_user = {self.current_user}")
-        self.baseline_page.set_session_info(
-            self.test_page.session_dir,
-            self.current_user
-        )
+        session_dir = self.session_manager.get_session_dir()
+        logger.debug(f"📂 传递会话信息到基线页面: {session_dir}")
+        self.baseline_page.set_session_info(session_dir, self.current_user)
         
         # 🔥 关键修改：在进入基线页面前启动EEG采集，保持整个流程连续
         self._start_eeg_collection_for_session()
@@ -344,15 +291,14 @@ class MainWindow(QMainWindow):
         后端会返回 'already-running' 状态，这是正常的。重要的是确保
         使用的是当前的 session_dir。
         """
-        from ..utils_common.thread_process_manager import get_thread_manager
-        thread_manager = get_thread_manager()
+        thread_pool = get_ui_thread_pool()
         
         def start_eeg():
             try:
                 from ..services.backend_proxy import eeg_start
                 result = eeg_start(
                     username=self.current_user or 'anonymous',
-                    save_dir=self.test_page.session_dir,
+                    save_dir=self.session_manager.get_session_dir(),
                     part=1
                 )
                 status = result.get('status', '').lower()
@@ -360,16 +306,16 @@ class MainWindow(QMainWindow):
                 if status == 'already-running':
                     # EEG已在运行（可能在校准阶段启动）
                     old_dir = result.get('save_dir', 'unknown')
-                    if old_dir != os.path.join(self.test_page.session_dir, 'eeg'):
+                    if old_dir != os.path.join(self.session_manager.get_session_dir(), 'eeg'):
                         logger.warning(f"⚠️ EEG已在运行但目录不匹配！")
                         logger.warning(f"   当前EEG目录: {old_dir}")
-                        logger.warning(f"   期望session目录: {self.test_page.session_dir}/eeg")
+                        logger.warning(f"   期望session目录: {self.session_manager.get_session_dir()}/eeg")
                         logger.debug("💡 建议：在校准页面时应该已经设置了正确的session_dir")
                     else:
                         logger.debug(f"✅ EEG采集已在运行（校准阶段启动），继续使用: {old_dir}")
                 elif status == 'started':
                     logger.info(f"🧠 整个测试会话的EEG采集已启动: {result}")
-                    logger.info(f"📂 EEG数据保存到: {self.test_page.session_dir}/eeg/")
+                    logger.info(f"📂 EEG数据保存到: {self.session_manager.get_eeg_dir()}")
                 else:
                     logger.warning(f"⚠️ EEG启动返回未知状态: {status}")
                     
@@ -377,9 +323,8 @@ class MainWindow(QMainWindow):
                 logger.error(f"❌ 启动测试会话EEG采集失败: {e}")
                 logger.info("测试将继续运行，但不会记录EEG数据")
         
-        thread_manager.submit_data_task(
-            start_eeg,
-            task_name="测试会话EEG采集启动"
+        thread_pool.submit_task(
+            start_eeg
         )
     
     def show_baseline_prompt_in_test(self) -> None:
@@ -422,39 +367,14 @@ class MainWindow(QMainWindow):
             logger.info("✅ 已显示SART实验提示页面")
     
     def show_sart_page(self) -> None:
-        """切换到SART实验页面"""
         logger.info("正在切换到SART实验页面...")
         
-        # 同步时间戳列表（包括保存回调函数）
         if hasattr(self.test_page, 'part_timestamps'):
             save_callback = getattr(self.test_page, '_save_timestamp_immediately', None)
             self.sart_page.set_part_timestamps(self.test_page.part_timestamps, save_callback)
         
-        # 确保会话目录已创建（可能已在基线阶段创建）
-        if not hasattr(self.test_page, 'session_dir') or not self.test_page.session_dir:
-            from datetime import datetime
-            import os
-            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            user_dir = self.current_user or 'anonymous'
-            
-            # 🐛 修复：使用项目根目录的绝对路径，而不是相对路径
-            project_root = Path(__file__).parent.parent.parent
-            session_dir = os.path.join(project_root, "recordings", user_dir, session_timestamp)
-            
-            # 保存到 test_page 以便后续使用
-            self.test_page.session_timestamp = session_timestamp
-            self.test_page.session_dir = session_dir
-            
-            logger.info(f"为 SART 创建会话目录: {session_dir}")
-        
-        # 传递会话信息（用于EEG采集和结果保存）
-        # logger.info(f"📂 传递会话信息到SART页面:")
-        # logger.info(f"   - session_dir = {self.test_page.session_dir}")
-        # logger.info(f"   - current_user = {self.current_user}")
-        self.sart_page.set_session_info(
-            self.test_page.session_dir,
-            self.current_user
-        )
+        session_dir = self.session_manager.get_session_dir()
+        self.sart_page.set_session_info(session_dir, self.current_user)
         
         # ✅ 重置SART页面状态（防止上次的完成提示残留）
         self.sart_page.reset()
@@ -539,9 +459,9 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, 'test_page') and hasattr(self.test_page, 'tts_task_id'):
             try:
-                thread_manager = get_thread_manager()
+                thread_pool = get_ui_thread_pool()
                 if self.test_page.tts_task_id:
-                    thread_manager.cancel_task(self.test_page.tts_task_id)
+                    # UIThreadPool 不支持 cancel_task,直接清空队列
                     self.test_page.tts_queue.put(None)
                     logger.info("应用程序关闭时已停止TTS任务")
             except Exception as exc:  # noqa: BLE001
@@ -558,10 +478,10 @@ class MainWindow(QMainWindow):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("关闭应用时重置舒尔特widget失败: %s", exc)
         try:
-            shutdown_all_managers()
-            logger.info("所有线程进程管理器已关闭")
+            get_ui_thread_pool().shutdown(wait=True, timeout=5.0)
+            logger.info("UI线程池已关闭")
         except Exception as exc:  # noqa: BLE001
-            logger.error("关闭管理器失败: %s", exc)
+            logger.error("关闭线程池失败: %s", exc)
 
         SchulteGridWidget.cleanup_temp_files()
         super().closeEvent(event)
@@ -581,12 +501,9 @@ def create_application(argv: Sequence[str] | None = None) -> tuple[QApplication,
     args = list(argv) if argv is not None else sys.argv
     app = QApplication(args)
 
-    lifecycle_manager = get_lifecycle_manager()
-    status = lifecycle_manager.get_all_status()
-    if not status.get('is_initialized'):
-        lifecycle_manager.start_all()
-    app.aboutToQuit.connect(lambda: lifecycle_manager.shutdown_all())
-    app.setProperty("lifecycle_manager", lifecycle_manager)
+    # 初始化UI线程池（单例模式会自动注册atexit）
+    thread_pool = get_ui_thread_pool()
+    app.aboutToQuit.connect(lambda: thread_pool.shutdown(wait=True, timeout=5.0))
 
     _apply_style(app)
 
@@ -596,9 +513,9 @@ def create_application(argv: Sequence[str] | None = None) -> tuple[QApplication,
     import argparse
     parser = argparse.ArgumentParser(description='非接触人员状态评估系统')
     parser.add_argument('--sart-mode', 
-                       choices=['short', 'long'], 
-                       default='short',
-                       help='SART实验模式: short(5分钟/低负荷) 或 long(25分钟/疲劳诱发), 默认short')
+                       choices=['short', 'normal'], 
+                       default='normal',
+                       help='SART实验模式: short(0.5分钟/低负荷) 或 normal(1分钟/疲劳诱发), 默认normal')
     
     # 解析已有的参数（去掉Qt自己的参数）
     known_args, _ = parser.parse_known_args(args[1:])  # 跳过程序名

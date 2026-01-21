@@ -41,7 +41,6 @@ class WebsocketPushInterface(BaseInterface):
             "topics",
             [
                 EventTopic.DETECTION_RESULT.value,
-                EventTopic.SYSTEM_HEARTBEAT.value,
                 EventTopic.MULTIMODAL_SNAPSHOT.value,
             ],
         )
@@ -261,9 +260,9 @@ class WebsocketPushInterface(BaseInterface):
                 return
             
             # 检查模型是否可用
-            if model_type in inference_service.integrated_models:
-                self.logger.info("✅ 使用集成模型: %s", model_type)
-                model = inference_service.integrated_models[model_type]
+            if model_type in inference_service.models:
+                self.logger.info("✅ 使用模型: %s", model_type)
+                model = inference_service.models[model_type]
                 result = model.infer(data)
             else:
                 raise Exception(f"模型未加载: {model_type}")
@@ -310,7 +309,7 @@ class WebsocketPushInterface(BaseInterface):
                     "type": "model_status",
                     "running": False,
                     "models": {
-                        "integrated_models": [],
+                        "models": [],
                         "total": 0
                     }
                 }))
@@ -323,7 +322,7 @@ class WebsocketPushInterface(BaseInterface):
                 "type": "model_status",
                 "running": status["running"],
                 "models": {
-                    "integrated_models": status["integrated_models"],
+                    "models": status["models"],
                     "total": status["total"]
                 }
             }))

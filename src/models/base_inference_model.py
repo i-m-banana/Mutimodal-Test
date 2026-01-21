@@ -1,9 +1,4 @@
-"""统一的推理模型接口基类
-
-支持两种模式：
-1. integrated: 模型直接集成在后端进程中
-2. remote: 通过WebSocket代理到独立进程
-"""
+"""推理模型接口基类"""
 
 from __future__ import annotations
 

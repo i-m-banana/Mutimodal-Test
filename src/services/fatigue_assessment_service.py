@@ -341,47 +341,36 @@ class FatigueAssessmentService:
             # 提取被试基础标识（去掉末尾数字）
             subject_base = ''.join(c for c in subject_id if not c.isdigit())
             
-            # 优先使用会话模式（支持基线更新）
-            if session_dir and session_dir.exists():
-                inference_data = {
-                    "session_dir": str(session_dir),
-                    "subject_base": subject_base,
-                    "qc_is_lowload": True,  # 假设低负荷状态
-                    "update_baseline": True  # 启用基线更新
+            # 必须使用会话模式（支持基线更新）
+            if not session_dir or not session_dir.exists():
+                self.logger.error(f"会话目录无效或不存在: {session_dir}")
+                return {
+                    "status": "error",
+                    "error": "会话目录无效，EEG文件必须存入会话目录",
+                    "eeg_fatigue_score": 0.0
                 }
-                
-                start_time = time.time()
-                result = self._eeg_model.infer(inference_data)
-                # print(result,"---------------------------inferfatigueeeg---------------")
-                inference_time = (time.time() - start_time) * 1000
-                
-                self.logger.debug(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
-                self.logger.debug(f"  窗口数量: {result.get('num_windows', 0)}")
-                
-                # 显示基线更新信息
-                if result.get('baseline_updated'):
-                    self.logger.info(f"  ✅ 基线已更新: {result.get('baseline_reason', '')}")
-                elif 'baseline_reason' in result:
-                    self.logger.info(f"  ℹ️ 基线未更新: {result.get('baseline_reason', '')}")
-                
-                self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
-                
-            else:
-                # 回退到文件模式（不更新基线）
-                inference_data = {
-                    "file_mode": True,
-                    "eeg_file_path": str(files["eeg_csv"]),
-                    "sampling_rate": 500.0,
-                    "subject_id": subject_id
-                }
-                
-                start_time = time.time()
-                result = self._eeg_model.infer(inference_data)
-                inference_time = (time.time() - start_time) * 1000
-                
-                self.logger.info(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
-                self.logger.info(f"  窗口数量: {result.get('num_windows', 0)}")
-                self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
+            
+            inference_data = {
+                "session_dir": str(session_dir),
+                "subject_base": subject_base,
+                "qc_is_lowload": True,  # 假设低负荷状态
+                "update_baseline": True  # 启用基线更新
+            }
+            
+            start_time = time.time()
+            result = self._eeg_model.infer(inference_data)
+            inference_time = (time.time() - start_time) * 1000
+            
+            self.logger.debug(f"  EEG疲劳度: {result.get('eeg_fatigue_score', 0):.2f}")
+            self.logger.debug(f"  窗口数量: {result.get('num_windows', 0)}")
+            
+            # 显示基线更新信息
+            if result.get('baseline_updated'):
+                self.logger.info(f"  ✅ 基线已更新: {result.get('baseline_reason', '')}")
+            elif 'baseline_reason' in result:
+                self.logger.info(f"  ℹ️ 基线未更新: {result.get('baseline_reason', '')}")
+            
+            self.logger.info(f"  推理耗时: {inference_time:.1f}ms")
             
             return result
             

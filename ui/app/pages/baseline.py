@@ -5,14 +5,15 @@ from __future__ import annotations
 import time
 
 from .. import config
-from ..qt import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QTimer,
-    Qt, QFont, QFrame, pyqtSignal, QKeyEvent
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
 )
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QKeyEvent
 from ..utils.responsive import scale, scale_font
-from ...utils_common.thread_process_manager import get_thread_manager
+from ...utils_common.ui_thread_pool import get_ui_thread_pool
+from ...managers.session_manager import SessionManager
 
-# 导入多模态采集功能（通过config模块访问，与test.py保持一致）
 HAS_MULTIMODAL = config.HAS_MULTIMODAL
 multidata_start_collection = config.multidata_start_collection
 multidata_stop_collection = config.multidata_stop_collection
@@ -34,13 +35,12 @@ class BaselineCalibrationPage(QWidget):
         
         self.remaining_time = self.BASELINE_DURATION
         self.is_running = False
-        self.waiting_for_continue = False  # 新增:等待按键继续的标志
-        self.part_timestamps = []  # 与TestPage共享的时间戳列表
-        self.session_dir = None  # 会话目录
-        self.current_user = None  # 当前用户
+        self.waiting_for_continue = False
+        self.part_timestamps = []
+        self.current_user = None
         
-        # 获取线程管理器（用于异步调用后端）
-        self.thread_manager = get_thread_manager()
+        self.session_manager = SessionManager.get_instance()
+        self.thread_pool = get_ui_thread_pool()
     
     def _init_ui(self) -> None:
         """初始化UI - 浅色渐变背景，黑色文字，简洁样式"""
@@ -139,14 +139,13 @@ class BaselineCalibrationPage(QWidget):
             self.part_timestamps.append(call_timestamp)
         config.logger.info(f"📍 已记录基线开始时间戳: {call_timestamp}")
         
-        # ✅ 启动疲劳度检测（多模态采集）
         if HAS_MULTIMODAL:
             try:
                 config.logger.debug("🚀 启动疲劳度检测（基线校准开始）")
                 result = multidata_start_collection(
                     self.current_user,
-                    part=0,  # 基线阶段为part 0
-                    save_dir=self.session_dir,
+                    part=0,
+                    save_dir=self.session_manager.get_session_dir(),
                 )
                 status = (result or {}).get("status", "").lower()
                 if status in {"running", "already-running"}:
@@ -259,16 +258,15 @@ class BaselineCalibrationPage(QWidget):
             self._start_baseline()
     
     def set_session_info(self, session_dir: str, current_user: str) -> None:
-        """设置会话信息（用于EEG采集）
+        """设置会话信息
         
         Args:
-            session_dir: 会话目录路径（例如：recordings/admin/20251024_185949）
+            session_dir: 会话目录路径(兼容性参数,实际不使用)
             current_user: 当前用户名
         """
-        self.session_dir = session_dir
         self.current_user = current_user
-        config.logger.info(f"✅ 基线页面已设置会话信息: user={current_user}, dir={session_dir}")
-        config.logger.info(f"📂 基线EEG数据将保存到: {session_dir}/eeg/")
+        config.logger.info(f"✅ 基线页面已设置用户: {current_user}")
+        config.logger.info(f"📂 基线数据将保存到: {self.session_manager.get_baseline_dir()}")
     
     def reset(self) -> None:
         """重置页面状态（供下次使用）"""

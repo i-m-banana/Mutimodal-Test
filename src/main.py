@@ -70,10 +70,6 @@ def _make_event_logger(key_info_mode: bool):
             _logger.info("Event[%s] -> %s", event.topic.value, event.payload)
             return
 
-        if event.topic is EventTopic.SYSTEM_HEARTBEAT:
-            # 心跳频率很快，关键模式下默认跳过
-            return
-
         payload = event.payload or {}
         if event.topic is EventTopic.DETECTION_RESULT:
             key = (
@@ -125,7 +121,6 @@ def run(
     if attach_listeners:
         event_logger = _make_event_logger(key_info_mode)
         orchestrator.bus.subscribe(EventTopic.DETECTION_RESULT, event_logger)
-        orchestrator.bus.subscribe(EventTopic.SYSTEM_HEARTBEAT, event_logger)
 
     def stop() -> None:
         stop_event.set()

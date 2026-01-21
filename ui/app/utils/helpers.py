@@ -17,8 +17,7 @@ def _get_callback_helper():
     """获取或创建回调辅助对象（必须在主线程中调用）"""
     global _callback_helper
     if _callback_helper is None:
-        from ..qt import QTimer
-        from PyQt5.QtCore import QObject, pyqtSignal
+        from PyQt5.QtCore import QTimer, QObject, pyqtSignal
         
         class CallbackHelper(QObject):
             """辅助类，用于从后台线程发送信号到主线程"""
@@ -37,7 +36,7 @@ def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = N
         callback: 初始化完成后的回调函数
         session_dir: 会话目录路径,如果不提供则使用默认的 'recordings'
     """
-    from ...utils_common.thread_process_manager import get_thread_manager
+    from ...utils_common.ui_thread_pool import get_ui_thread_pool
     
     # 在主线程中获取辅助对象并连接信号
     helper = _get_callback_helper()
@@ -127,12 +126,9 @@ def init_camera(callback: Callable[[bool], None], session_dir: Optional[str] = N
             helper.callback_signal.emit(False)
     
     # 提交到后台线程执行，不阻塞UI
-    thread_manager = get_thread_manager()
-    thread_manager.submit_data_task(_init_async, task_name="初始化摄像头")
+    thread_pool = get_ui_thread_pool()
+    thread_pool.submit_task(_init_async)
 
 
 __all__ = ["init_camera"]
 
-
-
-__all__ = ["init_camera"]

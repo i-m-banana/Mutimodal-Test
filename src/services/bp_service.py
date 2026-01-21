@@ -8,20 +8,13 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-try:
-    from serial.tools import list_ports
-    import serial  # type: ignore
-except Exception:  # pragma: no cover - serial is optional at runtime
-    list_ports = None  # type: ignore
-    serial = None  # type: ignore
-
-try:
-    from ..devices.maibobo import MaiboboDevice
-    HAS_MAIBOBO_DRIVER = True
-except Exception:  # pragma: no cover - hardware SDK not installed
-    MaiboboDevice = None  # type: ignore
-    HAS_MAIBOBO_DRIVER = False
-
+from ..devices.maibobo import (
+    MaiboboDevice,
+    HAS_MAIBOBO_DRIVER,
+    DEFAULT_PORT,
+    detect_available_port,
+    parse_frame,
+)
 from ..core.thread_pool import get_thread_pool
 
 
@@ -34,14 +27,14 @@ class BloodPressureService:
         self._thread_pool = get_thread_pool()
         self._thread_name = "bp-collector"
         self._stop_event = threading.Event()
-        self._device: Optional[MaiboboDevice] = None  # type: ignore[assignment]
+        self._device: Optional[MaiboboDevice] = None
         self._latest_reading: Optional[Dict[str, Any]] = None
         self._running = False
         self._completed = False
         self._mode = "hardware"
         self._current_port: Optional[str] = None
         self._last_error: Optional[str] = None
-        self._preferred_port = "COM4"
+        self._preferred_port = DEFAULT_PORT
 
     # ------------------------------------------------------------------
     def start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -79,7 +72,7 @@ class BloodPressureService:
                 else:
                     if not self._current_port:
                         self._current_port = self._preferred_port
-                    detected_port = self._detect_available_port()
+                    detected_port = detect_available_port(self._current_port or self._preferred_port)
                     if detected_port:
                         self._current_port = detected_port
                     if not self._current_port:
@@ -154,7 +147,7 @@ class BloodPressureService:
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
-            detected_port = self._detect_available_port()
+            detected_port = detect_available_port(self._current_port or self._preferred_port)
             available_ports: List[str] = []
             if self._preferred_port:
                 available_ports.append(self._preferred_port)
@@ -220,7 +213,7 @@ class BloodPressureService:
                 if not success or frame is None:
                     time.sleep(0.3)
                     continue
-                reading = self._parse_frame(frame)
+                reading = parse_frame(frame)
                 if not reading:
                     time.sleep(0.3)
                     continue
@@ -244,30 +237,6 @@ class BloodPressureService:
                 time.sleep(1.0)
         self.logger.warning("血压测试超时，未获得有效数据")
 
-    def _parse_frame(self, frame: Any) -> Optional[Dict[str, int]]:
-        try:
-            if hasattr(frame, "systolic") and hasattr(frame, "diastolic") and hasattr(frame, "pulse"):
-                return {
-                    "systolic": int(frame.systolic),
-                    "diastolic": int(frame.diastolic),
-                    "pulse": int(frame.pulse),
-                }
-            if isinstance(frame, (list, tuple)) and len(frame) >= 11:
-                return {
-                    "systolic": int(frame[8]),
-                    "diastolic": int(frame[10]),
-                    "pulse": int(frame[2]),
-                }
-            if isinstance(frame, (list, tuple)) and len(frame) >= 3:
-                return {
-                    "systolic": int(frame[0]),
-                    "diastolic": int(frame[1]),
-                    "pulse": int(frame[2]),
-                }
-        except Exception as exc:
-            self.logger.debug("无法解析血压仪帧数据: %s", exc)
-        return None
-
     def _shutdown_device(self) -> None:
         device = self._device
         self._device = None
@@ -287,20 +256,6 @@ class BloodPressureService:
         if self._last_error:
             return "error"
         return "idle"
-
-    def _detect_available_port(self) -> Optional[str]:
-        if list_ports is None:
-            return None
-        target_port = self._current_port or self._preferred_port
-        if not target_port:
-            return None
-        if serial is None:
-            return target_port
-        try:
-            with serial.Serial(target_port, timeout=1):
-                return target_port
-        except Exception:
-            return None
 
 
 __all__ = ["BloodPressureService", "HAS_MAIBOBO_DRIVER"]

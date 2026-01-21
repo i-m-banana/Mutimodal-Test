@@ -21,7 +21,6 @@ class EventTopic(str, Enum):
     EEG_REQUEST = "eeg.request"
     FATIGUE_ASSESSMENT_REQUEST = "fatigue.assessment.request"
     FATIGUE_ASSESSMENT_RESULT = "fatigue.assessment.result"
-    SYSTEM_HEARTBEAT = "system.heartbeat"
     UI_COMMAND = "ui.command"
     UI_RESPONSE = "ui.response"
 
@@ -45,5 +44,4 @@ class Severity(str, Enum):
     ERROR = "error"
 
 
-DEFAULT_HEARTBEAT_INTERVAL = 5.0
 DEFAULT_COMPONENT_TIMEOUT = 30.0

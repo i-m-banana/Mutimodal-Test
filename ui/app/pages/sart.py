@@ -7,12 +7,14 @@ import time
 from typing import List
 
 from .. import config
-from ..qt import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QTimer,
-    Qt, QFont, QFrame, pyqtSignal, QKeyEvent
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
 )
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QKeyEvent
 from ..utils.responsive import scale, scale_font
-from ...utils_common.thread_process_manager import get_thread_manager
+from ...utils_common.ui_thread_pool import get_ui_thread_pool
+from ...managers.session_manager import SessionManager
 
 
 class SARTPage(QWidget):
@@ -26,7 +28,7 @@ class SARTPage(QWidget):
     GO_PROB = 0.88  # Go概率
     STIM_MS = 250  # 数字呈现时长(ms)
     ISI_MS = 900  # 空屏间隔(ms)
-    TOTAL_DURATION = 300  # 总时长(秒) - 默认5分钟
+    TOTAL_DURATION = 60  # 总时长(秒) - 默认1分钟
     
     def __init__(self, mode: str = "short", duration: int = None) -> None:
         """
@@ -40,14 +42,13 @@ class SARTPage(QWidget):
         self.setObjectName("sartPage")
         
         self.mode = mode
-        self.total_duration = duration if duration else (300 if mode == "short" else 1500)
-        self.waiting_for_continue = False  # 新增:等待按键继续的标志
-        self.part_timestamps = []  # 与TestPage共享的时间戳列表
-        self.session_dir = None  # 会话目录
-        self.current_user = None  # 当前用户
+        self.total_duration = duration if duration else (30 if mode == "short" else 60)
+        self.waiting_for_continue = False
+        self.part_timestamps = []
+        self.current_user = None
         
-        # 获取线程管理器（用于异步调用后端）
-        self.thread_manager = get_thread_manager()
+        self.session_manager = SessionManager.get_instance()
+        self.thread_pool = get_ui_thread_pool()
         
         self._init_ui()
         self._setup_timers()
@@ -83,7 +84,7 @@ class SARTPage(QWidget):
         
         # 说明文字（移除"按空格开始"提示，直接自动开始）- 居中
         mode_text = "低负荷采集" if self.mode == "short" else "疲劳诱发"
-        duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
+        duration_text = f"{self.total_duration / 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
         
         self.instruction_label = QLabel("")  # 不显示任何说明文字
         self.instruction_label.setAlignment(Qt.AlignCenter)
@@ -325,37 +326,15 @@ class SARTPage(QWidget):
         """确保 sart 目录存在，返回目录路径"""
         import os
         
-        # 获取会话目录
-        session_dir = getattr(self, 'session_dir', None)
-        config.logger.debug(f"📂 SART _ensure_sart_directory()调用:")
-        config.logger.debug(f"   - session_dir属性 = {session_dir}")
-        config.logger.debug(f"   - current_user属性 = {getattr(self, 'current_user', None)}")
-        config.logger.debug(f"   - hasattr(self, 'session_dir') = {hasattr(self, 'session_dir')}")
-        
-        if not session_dir:
-            # 如果没有设置会话目录，使用默认路径
-            config.logger.error("❌ SART 会话目录未设置！")
-            config.logger.error("   这意味着 set_session_info() 从未被调用，或session_dir为None")
-            config.logger.error("   SART数据将保存到默认路径，这不应该发生！")
-            session_dir = 'recordings/default'
-        
-        # 在会话目录下创建 sart 子目录
-        sart_dir = os.path.join(session_dir, 'sart')
+        sart_dir = self.session_manager.get_sart_dir()
         sart_dir_abs = os.path.abspath(sart_dir)
-        
-        # config.logger.info(f"📂 SART：创建目录 {sart_dir}")
-        # config.logger.info(f"📂 SART：绝对路径 {sart_dir_abs}")
         
         try:
             os.makedirs(sart_dir_abs, exist_ok=True)
-            # config.logger.info(f"✅ SART目录创建成功: {sart_dir_abs}")
-            
-            # 验证目录确实存在
             if os.path.exists(sart_dir_abs) and os.path.isdir(sart_dir_abs):
                 config.logger.info(f"✅ SART目录存在验证通过")
             else:
                 config.logger.error(f"❌ SART目录创建后不存在！路径: {sart_dir_abs}")
-                
         except Exception as e:
             config.logger.error(f"❌ 创建SART目录失败: {e}", exc_info=True)
         
@@ -429,7 +408,7 @@ class SARTPage(QWidget):
             duration: 自定义时长(秒)，None则使用默认值
         """
         self.mode = mode
-        self.total_duration = duration if duration else (120 if mode == "short" else 1500)
+        self.total_duration = duration if duration else (30 if mode == "short" else 60)
         
         mode_text = "低负荷采集" if mode == "short" else "疲劳诱发"
         duration_text = f"{self.total_duration // 60}分钟" if self.total_duration >= 60 else f"{self.total_duration}秒"
@@ -491,23 +470,18 @@ class SARTPage(QWidget):
         super().keyPressEvent(event)
     
     def set_session_dir(self, session_dir: str) -> None:
-        """设置会话目录（用于保存结果）"""
-        self.session_dir = session_dir
+        """兼容性方法(已废弃)"""
+        pass
     
     def set_session_info(self, session_dir: str, current_user: str) -> None:
-        """设置会话信息（用于EEG采集和结果保存）
+        """设置会话信息
         
         Args:
-            session_dir: 会话目录路径（例如：recordings/admin/20251024_185949）
+            session_dir: 兼容性参数(实际不使用)
             current_user: 当前用户名
         """
-        # config.logger.info(f"🔧 SART.set_session_info()被调用:")
-        # config.logger.info(f"   - 传入的session_dir = {session_dir}")
-        # config.logger.info(f"   - 传入的current_user = {current_user}")
-        # config.logger.info(f"   - session_dir是否为None? {session_dir is None}")
-        # config.logger.info(f"   - session_dir是否为空字符串? {session_dir == ''}")
-        
-        self.session_dir = session_dir
+        self.current_user = current_user
+        config.logger.info(f"✅ SART页面已设置用户: {current_user}")
         self.current_user = current_user
         
         # config.logger.info(f"✅ SART页面已设置会话信息:")

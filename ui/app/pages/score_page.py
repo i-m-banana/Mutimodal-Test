@@ -51,7 +51,7 @@ class ModernGaugeWidget(QWidget):
         super().__init__(parent)
         self.setMinimumSize(350, 350)
         self.setMaximumSize(500, 500)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.value = 0
         self.max_value = 100
 
@@ -119,12 +119,12 @@ class ModernGaugeWidget(QWidget):
         painter.setPen(QPen(main_color, 3))
         painter.setFont(QFont("阿里健康体2.0 中文 45 R", 56, 75))
         score_text = str(int(self.value))
-        painter.drawText(-60, -20, 120, 60, Qt.AlignCenter, score_text)
+        painter.drawText(-60, -45, 120, 80, Qt.AlignCenter, score_text)
 
         # 绘制"分"字
         painter.setPen(QPen(QColor(100, 100, 100), 2))
         painter.setFont(QFont("阿里健康体2.0 中文 45 R", 18))
-        painter.drawText(-25, 30, 50, 30, Qt.AlignCenter, "分")
+        painter.drawText(-25, 40, 50, 30, Qt.AlignCenter, "分")
 
         # 绘制刻度
         painter.setPen(QPen(QColor(180, 180, 180), 1))
